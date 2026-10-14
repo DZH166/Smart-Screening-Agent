@@ -2,7 +2,7 @@
 
 单机 Windows 图片与 AI 设计文件对应编号工具。用户确认的范围：固定 XLSX 模板 A 列编号/B 列图片；HSD + 四位新流水号；保留已有编号；只对成功匹配的空白编号行填号；疑难项人工复核；非破坏性输出副本。
 
-第一版：`v1.0.0`（2026-10-13）。Windows 便携程序见 [GitHub Releases](https://github.com/DZH166/Smart-Screening-Agent/releases/tag/v1.0.0)，解压整个文件夹后双击 `HSD图号助手.exe`，不需要安装 Python。操作步骤见 [使用说明](使用说明.txt)，版本记录见 [CHANGELOG.md](CHANGELOG.md)。
+当前版本：`v1.1.1`（2026-10-14）。Windows 便携程序见 [GitHub Releases](https://github.com/DZH166/Smart-Screening-Agent/releases/latest)，解压整个文件夹后双击 `HSD图号助手.exe`，不需要安装 Python。操作步骤见 [使用说明](使用说明.txt)，版本记录见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 运行与构建
 
