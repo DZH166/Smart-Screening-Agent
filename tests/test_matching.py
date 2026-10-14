@@ -353,3 +353,55 @@ def test_automatic_decision_records_its_evidence(tmp_path):
     assert match['status'] == 'auto'
     assert match['evidence']['method'] in {'features', 'texture'}
     assert match['evidence']['checked']
+
+
+def test_texture_scale_search_never_asserts_on_short_tiles():
+    """A tile below half the query height used to make cv2.matchTemplate assert.
+
+    The coarse scale pass can nominate its smallest step for near-uniform art, and
+    the refinement window then asked for a tile shorter than the 64 px query. That
+    raised an OpenCV assertion and aborted the entire batch instead of simply
+    reporting no evidence at that scale.
+    """
+    strip = stripes()
+    query = matching._resize_height(strip, 64)
+    for height in (2, 18, 30, 31):
+        best = {}
+        matching._texture_scan(query, strip, height, best)
+        assert 'score' not in best
+
+
+def test_uniform_low_detail_artwork_does_not_break_the_batch(tmp_path):
+    """Near-uniform artwork used to abort the whole batch inside the texture pass."""
+    flat = cv2.GaussianBlur(np.full((120, 1000, 3), 250, np.uint8), (3, 3), 0)
+    source, rows = setup_case(tmp_path, [flat], [flat])
+    result = scan_and_match(str(source), rows, str(tmp_path / 'work'))
+    match = result['matches'][0]
+    assert match['status'] in {'auto', 'review'}, match['reason']
+    assert match['candidates'], '低细节图案仍应给出候选供人工查看'
+
+
+def test_texture_scale_search_never_asserts_on_short_tiles():
+    """A tile below half the query height used to make cv2.matchTemplate assert.
+
+    The coarse scale pass can nominate its smallest step for near-uniform art, and
+    the refinement window then asked for a tile shorter than the 64 px query. That
+    raised an OpenCV assertion and aborted the entire batch instead of simply
+    reporting no evidence at that scale.
+    """
+    strip = stripes()
+    query = matching._resize_height(strip, 64)
+    for height in (2, 18, 30, 31):
+        best = {}
+        matching._texture_scan(query, strip, height, best)
+        assert 'score' not in best
+
+
+def test_uniform_low_detail_artwork_does_not_break_the_batch(tmp_path):
+    """Near-uniform artwork used to abort the whole batch inside the texture pass."""
+    flat = cv2.GaussianBlur(np.full((120, 1000, 3), 250, np.uint8), (3, 3), 0)
+    source, rows = setup_case(tmp_path, [flat], [flat])
+    result = scan_and_match(str(source), rows, str(tmp_path / 'work'))
+    match = result['matches'][0]
+    assert match['status'] in {'auto', 'review'}, match['reason']
+    assert match['candidates'], '低细节图案仍应给出候选供人工查看'

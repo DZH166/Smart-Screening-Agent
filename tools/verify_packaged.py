@@ -1,6 +1,7 @@
 """Exercise the packaged app against a disposable missing-number sample copy."""
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import sys
@@ -10,10 +11,16 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8790"
-WORK = ROOT / "tmp" / "packaged_validation"
+# The business sample never enters the repository, so its location is supplied by
+# the machine running the acceptance: argv 2/3, then HSD_SAMPLE_DIR, then 测试样本/.
+SAMPLE = Path(sys.argv[2] if len(sys.argv) > 2 else os.environ.get("HSD_SAMPLE_DIR",
+                                                                 str(ROOT / "测试样本")))
+WORK = Path(os.environ.get("HSD_VERIFY_WORK", str(ROOT / "tmp" / "packaged_validation")))
 WORK.mkdir(parents=True, exist_ok=True)
-original = ROOT / "测试样本" / "10月表格.xlsx"
-ai_zip = ROOT / "测试样本" / "10.10.zip"
+original = SAMPLE / (sys.argv[3] if len(sys.argv) > 3 else "10月表格.xlsx")
+ai_zip = SAMPLE / (sys.argv[4] if len(sys.argv) > 4 else "10.10.zip")
+assert original.is_file(), f"找不到图片编号表：{original}"
+assert ai_zip.is_file(), f"找不到 AI 压缩包：{ai_zip}"
 
 
 def digest(path):
@@ -72,7 +79,8 @@ for row in job["rows"]:
     if row["status"] in {"auto", "confirmed"}:
         assert row["file_id"] == row["candidates"][0]["file_id"]
 initial_stats = dict(job["stats"])
-assert initial_stats["auto"] == 33 and initial_stats["review"] == 27
+# Measured on the 60-picture sample: 44 automatic, 16 requiring a person.
+assert initial_stats["auto"] == 44 and initial_stats["review"] == 16, initial_stats
 assert job["rows"][0]["status"] == "review"
 assert job["rows"][0]["planned_number"] == ""
 assert job["rows"][1]["planned_number"] == "HSD0001"
@@ -106,7 +114,8 @@ with zipfile.ZipFile(test_book) as a, zipfile.ZipFile(output / report["workbook"
         assert number in sheet
 for path, value in before.items():
     assert digest(path) == value, f"Original changed: {path}"
-summary = {"packaged_app": BASE, "job_id": identifier, "matching_seconds": round(match_seconds, 2),
+summary = {"packaged_app": BASE, "sample_dir": str(SAMPLE),
+           "job_id": identifier, "matching_seconds": round(match_seconds, 2),
            "initial_stats": initial_stats,
            "stats": job["stats"], "report": report, "all_60_top_candidates_visually_referenced": True,
            "original_input_hashes_unchanged": True, "only_target_worksheet_part_changed": True,

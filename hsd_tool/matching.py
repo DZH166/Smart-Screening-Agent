@@ -413,6 +413,11 @@ def _unexplained_content(tiled: np.ndarray, query: np.ndarray, y: int) -> float:
 def _texture_scan(query: np.ndarray, body: np.ndarray, height: int, best: dict,
                   width_scale: float = 1.) -> None:
     """One scale of the tiled strip search; keeps the strongest pixel evidence."""
+    # Two vertical repeats must fully contain the query. A shorter tile would make
+    # cv2.matchTemplate assert instead of degrading to "no evidence at this scale",
+    # and the coarse pass can legitimately nominate such a height for very flat art.
+    if height * 2 < query.shape[0]:
+        return
     tile = _resize_height(body, height)
     if width_scale != 1.:
         width = max(6, int(round(tile.shape[1] * width_scale)))
@@ -451,7 +456,9 @@ def _texture_search(query: np.ndarray, body: np.ndarray, trimmed: bool) -> dict:
     # because low-detail motifs are unreliable at that resolution.
     if 'height' in coarse:
         centre = coarse['height'] * 2
-        span = range(max(30, centre - 5), min(184, centre + 6))
+        # Refinement works on the 64 px query copy, so a tile below 32 px cannot
+        # contain it even with the two-row repeat: start the window there.
+        span = range(max(32, centre - 5), min(184, centre + 6))
     else:
         span = range(44, 124, 4)
     for height in span:
@@ -557,6 +564,35 @@ def _combine_evidence(feature: dict, texture: dict) -> dict:
     return merged
 
 
+def _evidence(result: dict, histogram_distance: float, gap: float) -> dict:
+    """Every signal behind one decision, for diagnosis rather than for the UI.
+
+    Kept complete on purpose: when a row stays in review, the reason text names
+    the missing evidence, and this record shows the measured value that produced
+    it, so a borderline case can be inspected without re-running the batch.
+    """
+    def rounded(key):
+        value = result.get(key)
+        return None if value is None else round(float(value), 4)
+
+    return {'method': result.get('method', 'features'),
+            'checked': result.get('accepted_by'),
+            'colour': rounded('color_distance') if 'color_distance' in result
+                      else round(float(histogram_distance), 4),
+            'gap': round(gap, 4),
+            'thresholds': {'rms': .045, 'changed': .015, 'major_changed': .003,
+                           'worst': .55, 'colour': .25, 'residual': .08},
+            'pixel_rms': rounded('rms'),
+            'changed': rounded('changed'),
+            'major_changed': rounded('major_changed'),
+            'worst': rounded('worst'),
+            'residual': rounded('residual'),
+            'trimmed': result.get('trimmed'),
+            'inliers': result.get('inliers'),
+            'coverage': rounded('coverage'),
+            'mae': rounded('mae')}
+
+
 def _match_appearances(rows: list[dict], files: list[dict], row_images: dict,
                        file_images: dict, progress=None) -> list[dict]:
     results = []
@@ -582,7 +618,12 @@ def _match_appearances(rows: list[dict], files: list[dict], row_images: dict,
             candidate = file_images[identity]
             histograms[identity] = float(cv2.compareHist(query.histogram, candidate.histogram,
                                                         cv2.HISTCMP_BHATTACHARYYA))
-            result = _features(query, candidate)
+            try:
+                result = _features(query, candidate)
+            except Exception:
+                # One unruly pair must never abort the whole batch; it simply
+                # carries no geometric evidence and falls back to the texture pass.
+                result = {'score': 0., 'strong': False, 'method': 'features'}
             result['score'] = max(result['score'], .4 * (1 - histograms[identity]))
             result['auto_ok'] = bool(result['strong'] and result['score'] >= .91)
             result['accepted_by'] = '几何特征验证' if result['auto_ok'] else None
@@ -592,7 +633,12 @@ def _match_appearances(rows: list[dict], files: list[dict], row_images: dict,
             shortlist = sorted(histograms, key=histograms.get)[:6]
             shortlist += sorted(scores, key=lambda identity: scores[identity]['score'], reverse=True)[:2]
             for identity in dict.fromkeys(shortlist):
-                texture = _texture(query, file_images[identity])
+                try:
+                    texture = _texture(query, file_images[identity])
+                except Exception:
+                    # Texture evidence is optional; a failure here only means this
+                    # candidate keeps its geometric/histogram evidence.
+                    continue
                 if texture['score'] > scores[identity]['score'] or texture.get('strong'):
                     scores[identity] = _combine_evidence(scores[identity], texture)
         ranking = sorted(scores, key=lambda identity: (-scores[identity]['score'], identity))
@@ -604,12 +650,7 @@ def _match_appearances(rows: list[dict], files: list[dict], row_images: dict,
         runner_up = scores[ranking[1]]['score'] if len(ranking) > 1 else 0
         gap = top_score - runner_up
         top_file = next(file for file in readable if file['id'] == top)
-        base['evidence'] = {'method': top_result.get('method', 'features'),
-                            'colour': round(float(top_result.get('color_distance', histograms[top])), 4),
-                            'gap': round(gap, 4),
-                            'pixel_rms': (round(float(top_result['rms']), 4)
-                                          if 'rms' in top_result else None),
-                            'checked': top_result.get('accepted_by')}
+        base['evidence'] = _evidence(top_result, histograms[top], gap)
         if top_score < .55:
             base['reason'] = '相似度不足，未自动选择文件；候选仅供人工查看。'
         else:
