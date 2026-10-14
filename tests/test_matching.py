@@ -244,3 +244,112 @@ def test_workbook_issue_blocks_automatic_matching(tmp_path):
     result = scan_and_match(str(source), rows, str(tmp_path / 'work'))
     assert result['matches'][0]['status'] != 'auto'
     assert not result['matches'][0]['candidates']
+
+
+# ---------- 长条图案与重复纹样：可靠匹配直接自动通过 ----------
+
+def stripes(width=900, height=140, period=36):
+    """Horizontal repeat: a long strip with few unique features."""
+    image = np.full((height, width, 3), 250, np.uint8)
+    palette = [(40, 60, 150), (232, 232, 236), (198, 118, 58), (238, 218, 96)]
+    x, index = 0, 0
+    while x < width:
+        cv2.rectangle(image, (x, 0), (min(x + period, width), height), palette[index % len(palette)], -1)
+        x += period
+        index += 1
+    return image
+
+
+def dots(width=800, height=300, spacing=46, radius=12):
+    """Regularly repeated dots: repetitive and low in unique detail."""
+    image = np.full((height, width, 3), 248, np.uint8)
+    for y in range(spacing // 2, height, spacing):
+        for x in range(spacing // 2, width, spacing):
+            cv2.circle(image, (x, y), radius, (70, 110, 180), -1)
+    return image
+
+
+def test_repeated_stripe_crop_is_auto(tmp_path):
+    strip = stripes()
+    source, rows = setup_case(tmp_path, [strip], [strip[:, 210:690].copy()])
+    result = scan_and_match(str(source), rows, str(tmp_path / 'work'))
+    assert result['matches'][0]['status'] == 'auto'
+    assert result['matches'][0]['file_id'] == 'f0001'
+
+
+def test_repeated_stripe_scaled_is_auto(tmp_path):
+    strip = stripes()
+    query = cv2.resize(strip, None, fx=.7, fy=.7, interpolation=cv2.INTER_AREA)
+    source, rows = setup_case(tmp_path, [strip], [query])
+    result = scan_and_match(str(source), rows, str(tmp_path / 'work'))
+    assert result['matches'][0]['status'] == 'auto'
+
+
+def test_repeated_stripe_longer_artboard_is_auto(tmp_path):
+    strip = stripes()
+    source, rows = setup_case(tmp_path, [np.tile(strip, (1, 2, 1))], [strip])
+    result = scan_and_match(str(source), rows, str(tmp_path / 'work'))
+    assert result['matches'][0]['status'] == 'auto'
+
+
+def test_dotted_motif_with_artboard_padding_is_auto(tmp_path):
+    motif = dots()
+    padded = cv2.copyMakeBorder(motif, 50, 50, 50, 50, cv2.BORDER_CONSTANT, value=(255, 255, 255))
+    source, rows = setup_case(tmp_path, [padded], [motif])
+    result = scan_and_match(str(source), rows, str(tmp_path / 'work'))
+    assert result['matches'][0]['status'] == 'auto'
+
+
+def test_dotted_motif_crop_is_auto(tmp_path):
+    motif = dots()
+    source, rows = setup_case(tmp_path, [motif], [motif[60:240, 150:610].copy()])
+    result = scan_and_match(str(source), rows, str(tmp_path / 'work'))
+    assert result['matches'][0]['status'] == 'auto'
+
+
+def test_recoloured_repeat_is_not_auto(tmp_path):
+    strip = stripes()
+    recoloured = strip[:, :, ::-1].copy()
+    source, rows = setup_case(tmp_path, [strip], [recoloured])
+    result = scan_and_match(str(source), rows, str(tmp_path / 'work'))
+    assert result['matches'][0]['status'] != 'auto'
+    assert result['matches'][0]['file_id'] is None
+
+
+def test_altered_repeat_is_not_auto(tmp_path):
+    motif = dots()
+    altered = motif.copy()
+    cv2.rectangle(altered, (300, 120), (420, 190), (30, 30, 200), -1)
+    source, rows = setup_case(tmp_path, [motif], [altered])
+    result = scan_and_match(str(source), rows, str(tmp_path / 'work'))
+    assert result['matches'][0]['status'] != 'auto'
+
+
+def test_artboard_with_extra_different_motif_needs_review(tmp_path):
+    """A locally identical match must not auto-accept unexplained artwork."""
+    motif = dots()
+    composite = np.concatenate([motif, stripes(400, 300)], axis=1)
+    source, rows = setup_case(tmp_path, [composite], [motif])
+    result = scan_and_match(str(source), rows, str(tmp_path / 'work'))
+    assert result['matches'][0]['status'] != 'auto'
+
+
+def test_review_reason_names_the_missing_evidence(tmp_path):
+    """Reasons must say which evidence is missing, never a generic hint."""
+    motif = dots()
+    recoloured = motif[:, :, ::-1].copy()
+    source, rows = setup_case(tmp_path, [motif], [recoloured])
+    result = scan_and_match(str(source), rows, str(tmp_path / 'work'))
+    reason = result['matches'][0]['reason']
+    assert '缺少足够独特的图像细节' not in reason
+    assert '颜色' in reason or '图案' in reason or '差异' in reason
+
+
+def test_automatic_decision_records_its_evidence(tmp_path):
+    strip = stripes()
+    source, rows = setup_case(tmp_path, [strip], [strip])
+    result = scan_and_match(str(source), rows, str(tmp_path / 'work'))
+    match = result['matches'][0]
+    assert match['status'] == 'auto'
+    assert match['evidence']['method'] in {'features', 'texture'}
+    assert match['evidence']['checked']

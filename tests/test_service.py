@@ -175,3 +175,30 @@ def test_output_inside_source_is_rejected(tmp_path):
     with pytest.raises(ValueError, match="源文件夹内部"):
         manager.create({"workbook_path": old["_workbook_path"], "source_path": str(source),
                         "output_root": str(source / "results"), "start_number": 1})
+
+
+def test_stats_separate_skipped_from_pending_review(tmp_path):
+    """A skipped row is decided on, so it must leave the pending-review count."""
+    manager, job = prepared(tmp_path, ["", ""], start=1)
+    assert job["stats"]["needs_attention"] == 0
+    assert job["stats"]["auto"] == 2
+    job["rows"][0]["_status"] = "review"
+    manager._plan(job)
+    assert job["stats"]["review"] == 1
+    assert job["stats"]["needs_attention"] == 1
+    manager.resolve("sample", "r2", None)
+    assert job["stats"]["skipped"] == 1
+    assert job["stats"]["needs_attention"] == 0
+    assert job["stats"]["exportable"] == 1
+    assert job["stats"]["total"] == 2
+
+
+def test_created_job_exposes_the_output_target(tmp_path):
+    """The summary screen states where results will be written, so it is public."""
+    manager, old = prepared(tmp_path, [""])
+    target = tmp_path / "library"
+    target.mkdir()
+    identifier = manager.create({"workbook_path": old["_workbook_path"], "source_path": old["_source_path"],
+                                 "output_root": str(target), "start_number": 1})
+    snapshot = manager.snapshot(identifier)
+    assert snapshot["output_target"] == str(target)

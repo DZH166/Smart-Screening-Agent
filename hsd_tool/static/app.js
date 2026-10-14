@@ -3,15 +3,22 @@
 (() => {
   const $ = (id) => document.getElementById(id);
   const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]));
-  const state = {job:null, sourceType:'zip', filter:'all', search:'', selectedRowId:null, selectedFileId:null, manualOpen:false, manualQuery:'', resolving:false, starting:false, picking:false, pollTimer:null, pollFailures:0, showDone:true, stopped:false, lastJobError:null};
+  const state = {
+    job: null, sourceType: 'zip', filter: 'awaiting', search: '',
+    selectedRowId: null, selectedFileId: null, manualOpen: false, manualQuery: '',
+    resolving: false, starting: false, picking: false, pollTimer: null, pollFailures: 0,
+    showDone: true, stopped: false, lastJobError: null,
+    forceReview: false, candidatesOpen: false, history: [],
+  };
   const statusNames = {auto:'自动通过', confirmed:'已确认', review:'待确认', unmatched:'未找到', skipped:'已跳过'};
   const matched = (row) => ['auto','confirmed'].includes(row.status) && !!row.file_id;
+  const awaiting = (row) => ['review','unmatched'].includes(row.status);
   const isBusy = () => ['importing','matching','exporting'].includes(state.job?.status) || state.starting;
   const fileById = (id) => (state.job?.files || []).find((file) => file.id === id);
   const rowById = (id) => (state.job?.rows || []).find((row) => row.id === id);
   const ownerOf = (id, rowId) => (state.job?.rows || []).find((row) => row.id !== rowId && row.file_id === id && matched(row));
   const previewUrl = (type,id) => `/api/jobs/${encodeURIComponent(state.job.id)}/image/${type}/${encodeURIComponent(id)}`;
-  const imageTag = (type,id,className,alt) => `<img src="${previewUrl(type,id)}" class="${className}" alt="${escapeHtml(alt)}" loading="lazy">`;
+  const imageTag = (type,id,className,alt) => `<img src="${previewUrl(type,id)}" class="${className}" alt="${escapeHtml(alt)}" loading="lazy" decoding="async">`;
   const numberFor = (row) => String(row.number || row.planned_number || '');
 
   async function api(path, {method='GET',body,timeout=30000} = {}) {
@@ -82,7 +89,8 @@
     try {
       const data=await api('/api/jobs',{method:'POST',body:{workbook_path:$('workbook-path').value.trim(),source_path:$('source-path').value.trim(),output_root:$('output-path').value.trim(),start_number:start}});
       state.job={id:data.id,status:'importing',progress:{message:'正在读取编号表与 AI 文件',current:0,total:0},rows:[],files:[]};
-      state.filter='all';state.search='';state.selectedRowId=null;state.selectedFileId=null;state.showDone=true;state.pollFailures=0;state.lastJobError=null;
+      state.filter='awaiting';state.search='';state.selectedRowId=null;state.selectedFileId=null;state.showDone=true;state.pollFailures=0;state.lastJobError=null;
+      state.forceReview=false;state.candidatesOpen=false;state.history=[];
       $('row-search').value='';rememberJob(data.id);renderJob();schedulePoll(100);
     } catch(error) {notice(error.message);} finally {state.starting=false;setFormBusy(false);$('shutdown-button').disabled=isBusy();}
   }
@@ -109,9 +117,10 @@
     if (job.error && job.error !== state.lastJobError && job.status !== 'error') {notice(job.error);state.lastJobError=job.error;}
     if (!job.error) state.lastJobError=null;
     if (!rowById(state.selectedRowId) || (['importing','matching'].includes(previousStatus) && job.status==='ready')) {
-      const first=(job.rows||[]).find((row)=>!matched(row)) || job.rows?.[0];
+      const first=(job.rows||[]).find(awaiting) || (job.rows||[]).find((row)=>!matched(row)) || job.rows?.[0];
       selectRow(first?.id,null,false);
     }
+    if (previousStatus === 'exporting' && job.status === 'done') state.history = [];
   }
   function renderJob() {
     if (!state.job) {showView('import-view',1);return;}
@@ -119,6 +128,7 @@
     if (['importing','matching','exporting'].includes(job.status)) {renderProgress();return;}
     if (job.status==='error') {$('job-error').textContent=job.error||'文件处理失败，请检查文件是否有效后再试。';showView('error-view',1);return;}
     if (job.status==='done'&&state.showDone) {renderDone();return;}
+    if (job.status==='ready' && counts().awaiting===0 && !state.forceReview) {renderSummary();return;}
     renderReview();
   }
   function renderProgress() {
@@ -137,18 +147,58 @@
   }
   function counts() {
     const rows=state.job?.rows||[];
-    return {total:rows.length,auto:rows.filter((r)=>r.status==='auto').length,confirmed:rows.filter((r)=>r.status==='confirmed').length,matched:rows.filter(matched).length,pending:rows.filter((r)=>!matched(r)).length,newNumbers:rows.filter((r)=>matched(r)&&!r.number&&r.planned_number).length};
+    const by=(status)=>rows.filter((row)=>row.status===status).length;
+    const review=by('review'),unmatched=by('unmatched');
+    return {
+      total:rows.length,
+      auto:by('auto'),
+      confirmed:by('confirmed'),
+      matched:rows.filter(matched).length,
+      review,unmatched,
+      skipped:by('skipped'),
+      awaiting:review+unmatched,
+      newNumbers:rows.filter((row)=>matched(row)&&!row.number&&row.planned_number).length,
+    };
+  }
+  function renderSummary() {
+    showView('summary-view',2);
+    const c=counts(),job=state.job;
+    const skippedNote=c.skipped?`；其中 ${c.skipped} 行按你的选择跳过，保持原状`:'';
+    $('summary-eyebrow').textContent='自动匹配完成';
+    $('summary-title').textContent=c.skipped?'可靠匹配已全部通过。':'本批图片都已对应好了。';
+    $('summary-subtitle').textContent=c.skipped
+      ?'没有需要人工判断的疑问项，可以确认摘要并导出。'
+      :'所有图片都找到了可靠的对应文件，不需要逐张检查。确认摘要后即可导出。';
+    $('summary-stats').innerHTML=`<div class="done-stat"><strong>${c.total}</strong><span>本批图片</span></div><div class="done-stat"><strong>${c.auto}</strong><span>自动通过</span></div><div class="done-stat"><strong>${c.confirmed}</strong><span>人工确认</span></div><div class="done-stat"><strong>${c.newNumbers}</strong><span>新增编号</span></div>`;
+    $('summary-output').textContent=job.output_target||job.output_dir||'导入时选择的位置';
+    $('summary-detail').textContent=`导出会生成编号表格、${c.matched} 个按编号命名的 AI 文件以及处理清单${skippedNote}。原始表格和原 AI 文件保持不变。`;
+    $('summary-export-button').disabled=state.resolving;
+    $('summary-browse-button').disabled=state.resolving;
+    $('summary-new-task-button').disabled=state.resolving;
+  }
+  function renderStats() {
+    const c=counts(),done=state.job.status==='done';
+    $('stats-bar').innerHTML=`<div class="stat"><div class="stat-label">表格图片<small>本批需对应的图片</small></div><strong class="stat-value">${c.total}</strong></div><div class="stat good"><div class="stat-label">已匹配<small>自动 ${c.auto} · 人工 ${c.confirmed}</small></div><strong class="stat-value">${c.matched}</strong></div><div class="stat attention"><div class="stat-label">需要处理<small>待确认 / 未找到</small></div><strong class="stat-value">${c.awaiting}</strong></div><div class="stat quiet"><div class="stat-label">已跳过<small>保持原状，不占新号</small></div><strong class="stat-value">${c.skipped}</strong></div><div class="stat blue"><div class="stat-label">${done?'新增编号':'预计新增编号'}<small>已有编号保留原样</small></div><strong class="stat-value">${c.newNumbers}</strong></div>`;
+    $('filter-awaiting-count').textContent=c.awaiting;
+    $('filter-all-count').textContent=c.total;
+    $('filter-matched-count').textContent=c.matched;
+    $('filter-skipped-count').textContent=c.skipped;
   }
   function renderReview() {
     showView('review-view',state.job.status==='done'?3:2);
     const job=state.job,c=counts(),done=job.status==='done';
     $('batch-caption').textContent=`${job.workbook_name||'图片编号表'}${job.sheet_name?` · ${job.sheet_name}`:''}  /  ${job.source_name||'AI 文件'}`;
-    $('review-subtitle').textContent=done?'本批结果已导出。以下记录供查看。':c.pending?`已匹配 ${c.matched} 条，剩余 ${c.pending} 条待处理；也可以先导出已匹配的部分。`:'全部图片已匹配。确认起始编号后，即可导出结果。';
+    $('review-title').textContent=c.awaiting?'处理这几项，其余已自动通过。':'全部匹配已确认。';
+    $('review-subtitle').textContent=done
+      ?'本批结果已导出。以下记录供查看。'
+      :c.awaiting?`${c.total} 张图片中 ${c.auto+c.confirmed} 张已自动通过，只有下面 ${c.awaiting} 项需要你判断。`
+      :'没有需要判断的项目，可以直接导出结果。';
     $('export-button').textContent=done?'查看导出结果 ↗':`导出结果 (${c.matched}) ↗`;
     $('export-button').disabled=state.resolving||(!done&&c.matched===0);
     $('new-task-button').disabled=state.resolving;
-    $('stats-bar').innerHTML=`<div class="stat"><div class="stat-label">表格图片<small>本批需对应的图片</small></div><strong class="stat-value">${c.total}</strong></div><div class="stat good"><div class="stat-label">已匹配<small>自动 ${c.auto} · 人工 ${c.confirmed}</small></div><strong class="stat-value">${c.matched}</strong></div><div class="stat attention"><div class="stat-label">待处理<small>未确认 / 未找到 / 已跳过</small></div><strong class="stat-value">${c.pending}</strong></div><div class="stat blue"><div class="stat-label">${done?'新增编号':'预计新增编号'}<small>已有编号保留原样</small></div><strong class="stat-value">${c.newNumbers}</strong></div>`;
-    $('filter-all-count').textContent=c.total;$('filter-pending-count').textContent=c.pending;$('filter-matched-count').textContent=c.matched;
+    $('undo-button').classList.toggle('hidden',!state.history.length||done);
+    $('undo-button').disabled=state.resolving;
+    renderStats();
     const warnings=job.warnings||[];
     $('warnings').classList.toggle('hidden',!warnings.length);
     $('warnings-summary').textContent=`有 ${warnings.length} 条处理提示，点击查看`;
@@ -158,30 +208,52 @@
   function filteredRows() {
     const term=state.search.trim().toLowerCase();
     return (state.job?.rows||[]).filter((row)=>{
-      if (state.filter==='pending'&&matched(row)) return false;
+      if (state.filter==='awaiting'&&!awaiting(row)) return false;
       if (state.filter==='matched'&&!matched(row)) return false;
+      if (state.filter==='skipped'&&row.status!=='skipped') return false;
       const file=fileById(row.file_id);
       return !term||[row.number,row.planned_number,row.row_number,file?.name,file?.relative_path].some((value)=>String(value||'').toLowerCase().includes(term));
     });
   }
+  function rowHtml(row) {
+    const file=fileById(row.file_id),number=numberFor(row),existing=!!row.number;
+    const label=existing?'原编号':state.job.status==='done'?'新编号':'预计新号';
+    const reason=row.status==='review'||row.status==='unmatched'?`<div class="record-reason">${escapeHtml(row.reason||'')}</div>`:'';
+    return `<tr data-row-id="${escapeHtml(row.id)}" class="${row.id===state.selectedRowId?'active':''}" tabindex="0" aria-label="第 ${row.row_number} 行，${escapeHtml(number||'暂未编号')}，${escapeHtml(statusNames[row.status]||row.status)}" aria-selected="${row.id===state.selectedRowId}"><td><div class="row-image-cell">${imageTag('row',row.id,'row-thumb',`第 ${row.row_number} 行图片`)}<span class="row-number">第 ${row.row_number}<br>行</span></div></td><td><div class="record-number ${number?'':'missing'}">${escapeHtml(number||'暂未编号')}${number?`<span class="number-tag ${existing?'existing':'new'}">${label}</span>`:''}</div><div class="record-file" title="${escapeHtml(file?.relative_path||row.reason||'')}">${escapeHtml(file?.name||row.reason||'等待选择对应文件')}</div>${reason}</td><td><span class="status-badge status-${escapeHtml(row.status)}">${escapeHtml(statusNames[row.status]||'待处理')}</span></td><td aria-hidden="true">›</td></tr>`;
+  }
   function renderTable() {
     const rows=filteredRows();
+    const scroll=document.querySelector('.table-scroll');
+    const offset=scroll?scroll.scrollTop:0;
     document.querySelectorAll('[data-filter]').forEach((button)=>{const active=button.dataset.filter===state.filter;button.classList.toggle('active',active);button.setAttribute('aria-pressed',String(active));});
-    $('rows-body').innerHTML=rows.map((row)=>{
-      const file=fileById(row.file_id),number=numberFor(row),existing=!!row.number;
-      const label=existing?'原编号':state.job.status==='done'?'新编号':'预计新号';
-      return `<tr data-row-id="${escapeHtml(row.id)}" class="${row.id===state.selectedRowId?'active':''}" tabindex="0" aria-label="第 ${row.row_number} 行，${escapeHtml(number||'暂未编号')}，${escapeHtml(statusNames[row.status]||row.status)}" aria-selected="${row.id===state.selectedRowId}"><td><div class="row-image-cell">${imageTag('row',row.id,'row-thumb',`第 ${row.row_number} 行图片`)}<span class="row-number">第 ${row.row_number}<br>行</span></div></td><td><div class="record-number ${number?'':'missing'}">${escapeHtml(number||'暂未编号')}${number?`<span class="number-tag ${existing?'existing':'new'}">${label}</span>`:''}</div><div class="record-file" title="${escapeHtml(file?.relative_path||row.reason||'')}">${escapeHtml(file?.name||row.reason||'等待选择对应文件')}</div></td><td><span class="status-badge status-${escapeHtml(row.status)}">${escapeHtml(statusNames[row.status]||'待处理')}</span></td><td aria-hidden="true">›</td></tr>`;
-    }).join('');
+    $('rows-body').innerHTML=rows.map(rowHtml).join('');
     $('table-empty').classList.toggle('hidden',!!rows.length);
+    $('table-empty').textContent=state.filter==='awaiting'?'没有需要人工处理的记录。':'没有符合条件的记录';
     $('table-count').textContent=`显示 ${rows.length} / ${state.job.rows.length} 条`;
+    if (scroll) scroll.scrollTop=offset;
+  }
+  function refreshRow(row) {
+    const element=document.querySelector(`#rows-body tr[data-row-id="${CSS.escape(row.id)}"]`);
+    if (!element) return false;
+    element.outerHTML=rowHtml(row);
+    return true;
   }
   function selectRow(id,fileId=null,render=true) {
     state.selectedRowId=id||null;
     const row=rowById(id);
     const best=(row?.candidates||[]).find((candidate)=>!ownerOf(candidate.file_id,id));
     state.selectedFileId=fileId||row?.file_id||best?.file_id||null;
-    state.manualOpen=false;state.manualQuery='';
+    state.manualOpen=false;state.manualQuery='';state.candidatesOpen=false;
     if(render){renderTable();renderPanel();}
+  }
+  function tuneCompareLayout() {
+    const grid=$('review-panel')?.querySelector('.compare-grid');
+    if (!grid) return;
+    let stacked=false;
+    grid.querySelectorAll('img').forEach((image)=>{
+      if (image.naturalWidth&&image.naturalHeight&&image.naturalWidth/image.naturalHeight>=2.4) stacked=true;
+    });
+    grid.classList.toggle('stacked',stacked);
   }
   function renderPanel() {
     const row=rowById(state.selectedRowId);
@@ -191,19 +263,25 @@
     const score=candidate?`相似度 ${(candidate.score*100).toFixed(1)}%`:'';
     const already=matched(row)&&row.file_id===selected?.id;
     const reason=owner?`此文件已对应第 ${owner.row_number} 行，不能重复使用。`:row.reason||'请对照画面，选择对应的 AI 文件。';
-    const candidates=(row.candidates||[]).slice(0,3);
-    $('review-panel').innerHTML=`<div class="panel-heading"><div><p class="eyebrow">图片比对</p><h2>第 ${row.row_number} 行 <small>${escapeHtml(numberFor(row)||'待生成编号')}</small></h2></div><span class="status-badge status-${escapeHtml(row.status)}">${escapeHtml(statusNames[row.status]||'待处理')}</span></div><div class="panel-status ${!matched(row)||owner?'attention':''}">${escapeHtml(reason)}</div><div class="compare-grid"><div><div class="compare-label"><span>表格图片</span><b>参照图</b></div><div class="preview-frame">${imageTag('row',row.id,'',`表格第 ${row.row_number} 行图片`)}</div><div class="compare-filename">${escapeHtml(state.job.sheet_name||'工作表')} · B${row.row_number}</div></div><div><div class="compare-label"><span>AI 文件预览</span><b>${escapeHtml(score)}</b></div><div class="preview-frame">${selected?imageTag('file',selected.id,'',selected.name):'<span class="preview-placeholder">还没有选中的文件<br>可在下方查找</span>'}</div><div class="compare-filename" title="${escapeHtml(selected?.relative_path||'')}">${escapeHtml(selected?.name||'请选择对应文件')}</div></div></div>${selected?.issue?`<p class="panel-note">文件提示：${escapeHtml(selected.issue)}</p>`:''}${candidates.length?`<div class="candidate-heading"><span>候选文件</span><small>相似度仅供比对参考</small></div><div class="candidate-list">${candidates.map((item)=>{
+    const candidates=(row.candidates||[]).slice(0,5);
+    const others=candidates.filter((item)=>item.file_id!==state.selectedFileId);
+    const selected_=candidates.find((item)=>item.file_id===state.selectedFileId);
+    const otherList=state.candidatesOpen&&others.length?`<div class="candidate-list">${others.map((item)=>{
       const file=fileById(item.file_id);if(!file)return '';
-      const used=ownerOf(file.id,row.id),active=state.selectedFileId===file.id;
-      return `<button type="button" class="candidate ${active?'selected':''}" data-candidate-id="${escapeHtml(file.id)}" aria-pressed="${active}" title="${escapeHtml(file.relative_path||file.name)}" ${state.resolving?'disabled':''}>${imageTag('file',file.id,'',file.name)}${active?'<span class="candidate-check" aria-hidden="true">✓</span>':''}<span class="candidate-name">${escapeHtml(file.name)}</span><span class="candidate-score">相似度 ${(item.score*100).toFixed(1)}%</span>${used?`<span class="candidate-unavailable">第 ${used.row_number} 行已使用</span>`:''}</button>`;
-    }).join('')}</div>`:''}${!readonly?`<details class="manual-search" id="manual-search-details" ${state.manualOpen?'open':''}><summary>查找其他 AI 文件</summary><label class="search-box"><span aria-hidden="true">⌕</span><input id="file-search" type="search" placeholder="按原文件名搜索" aria-label="搜索其他 AI 文件" value="${escapeHtml(state.manualQuery)}"></label><div id="manual-results" class="manual-results"></div></details>`:''}<div class="panel-actions">${readonly?'<span class="panel-note">本批已导出，匹配结果仅供查看。</span>':`<button type="button" class="button button-secondary" id="skip-row-button" ${state.resolving||row.status==='skipped'?'disabled':''}>暂时跳过</button><button type="button" class="button button-primary" id="confirm-row-button" ${state.resolving||!selected||owner||already?'disabled':''}>${state.resolving?'正在保存…':already?'此匹配已通过':'确认对应此文件 ✓'}</button>`}</div><p class="panel-note">${readonly?'':'跳过的行保持原状。预计新号会随匹配结果调整，以导出时为准。'}</p>`;
+      const used=ownerOf(file.id,row.id);
+      return `<button type="button" class="candidate" data-candidate-id="${escapeHtml(file.id)}" aria-pressed="false" title="相似度 ${(item.score*100).toFixed(1)}% · ${escapeHtml(file.relative_path||file.name)}" ${state.resolving?'disabled':''}>${imageTag('file',file.id,'',file.name)}<span class="candidate-name">${escapeHtml(file.name)}</span>${used?`<span class="candidate-unavailable">第 ${used.row_number} 行已使用</span>`:''}</button>`;
+    }).join('')}</div>`:'';
+    const otherToggle=others.length?`<button type="button" class="candidate-toggle" id="candidate-toggle" aria-expanded="${state.candidatesOpen}">${state.candidatesOpen?'收起其他候选':`其他候选（${others.length}）`}</button>`:'';
+    $('review-panel').innerHTML=`<div class="panel-heading"><div><p class="eyebrow">图片比对</p><h2>第 ${row.row_number} 行 <small>${escapeHtml(numberFor(row)||'待生成编号')}</small></h2></div><span class="status-badge status-${escapeHtml(row.status)}">${escapeHtml(statusNames[row.status]||'待处理')}</span></div><div class="panel-status ${!matched(row)||owner?'attention':''}">${escapeHtml(reason)}</div><div class="compare-grid"><div><div class="compare-label"><span>表格图片 · 点图放大</span></div><div class="preview-frame">${imageTag('row',row.id,'',`表格第 ${row.row_number} 行图片`)}</div><div class="compare-filename">${escapeHtml(state.job.sheet_name||'工作表')} · B${row.row_number}</div></div><div><div class="compare-label"><span>AI 文件预览${selected_?' · 最可能的对应':''}</span>${score?`<details class="score-note"><summary>依据</summary><span>${escapeHtml(score)}</span></details>`:''}</div><div class="preview-frame">${selected?imageTag('file',selected.id,'',selected.name):'<span class="preview-placeholder">还没有选中的文件<br>可在下方查找</span>'}</div><div class="compare-filename" title="${escapeHtml(selected?.relative_path||'')}">${escapeHtml(selected?.name||'请选择对应文件')}</div></div></div>${selected?.issue?`<p class="panel-note">文件提示：${escapeHtml(selected.issue)}</p>`:''}${!readonly?`<details class="manual-search" id="manual-search-details" ${state.manualOpen?'open':''}><summary>查找其他 AI 文件</summary><label class="search-box"><span aria-hidden="true">⌕</span><input id="file-search" type="search" placeholder="按原文件名搜索" aria-label="搜索其他 AI 文件" value="${escapeHtml(state.manualQuery)}"></label><div id="manual-results" class="manual-results"></div></details>`:''}<div class="panel-actions">${readonly?'<span class="panel-note">本批已导出，匹配结果仅供查看。</span>':`<button type="button" class="button button-secondary" id="skip-row-button" ${state.resolving||row.status==='skipped'?'disabled':''}>暂时跳过</button><button type="button" class="button button-primary" id="confirm-row-button" ${state.resolving||!selected||owner||already?'disabled':''}>${state.resolving?'正在保存…':already?'此匹配已通过':'确认对应此文件 ✓'}</button>`}</div>${otherToggle}${otherList}<p class="panel-note">${readonly?'':'跳过的行保持原状，也不会再出现在需要处理的列表里。'}</p>`;
     $('review-panel').querySelectorAll('.preview-frame').forEach((frame)=>{
       frame.setAttribute('role','button');frame.setAttribute('tabindex','0');frame.setAttribute('aria-label','放大比对图片');frame.title='点击放大比对';
       frame.addEventListener('click',openCompare);
       frame.addEventListener('keydown',(event)=>{if(['Enter',' '].includes(event.key)){event.preventDefault();openCompare();}});
     });
-    const firstLabel=$('review-panel').querySelector('.compare-label>span');
-    if(firstLabel) firstLabel.textContent='表格图片 · 点图放大';
+    tuneCompareLayout();
+    $('review-panel').querySelectorAll('img').forEach((image)=>{
+      if (!image.complete) image.addEventListener('load',tuneCompareLayout,{once:true});
+    });
     if (!readonly) {
       renderManualFiles();
       $('manual-search-details').addEventListener('toggle',(event)=>state.manualOpen=event.currentTarget.open);
@@ -211,6 +289,8 @@
       $('confirm-row-button').addEventListener('click',()=>resolveRow(state.selectedFileId));
       $('skip-row-button').addEventListener('click',()=>resolveRow(null));
     }
+    const toggle=$('candidate-toggle');
+    if (toggle) toggle.addEventListener('click',()=>{state.candidatesOpen=!state.candidatesOpen;renderPanel();});
   }
   function renderManualFiles() {
     const container=$('manual-results');if(!container)return;
@@ -225,21 +305,58 @@
     const row=rowById(state.selectedRowId),file=fileById(state.selectedFileId);
     if(!row)return;
     $('enlarged-pair').innerHTML=`<section><h3>表格图片 · 第 ${row.row_number} 行</h3><div class="enlarged-image">${imageTag('row',row.id,'',`第 ${row.row_number} 行表格图片`)}</div><p>${escapeHtml(state.job.sheet_name||'工作表')} · B${row.row_number}</p></section><section><h3>AI 文件预览</h3><div class="enlarged-image">${file?imageTag('file',file.id,'',file.name):'<span class="preview-placeholder">尚未选择对应文件</span>'}</div><p>${escapeHtml(file?.relative_path||file?.name||'')}</p></section>`;
+    const pair=$('enlarged-pair');
+    pair.querySelectorAll('img').forEach((image)=>{
+      if (!image.complete) image.addEventListener('load',()=>{
+        const box=image.closest('.enlarged-image');
+        if (box&&image.naturalWidth&&image.naturalHeight&&image.naturalWidth/image.naturalHeight>=2.4) box.classList.add('wide');
+      },{once:true});
+      if (image.complete&&image.naturalWidth&&image.naturalHeight&&image.naturalWidth/image.naturalHeight>=2.4) image.closest('.enlarged-image')?.classList.add('wide');
+    });
     $('compare-dialog').showModal();
+  }
+  function preloadNeighbours(row) {
+    const rows=filteredRows();
+    const index=rows.findIndex((item)=>item.id===row?.id);
+    if (index<0) return;
+    [rows[index+1],rows[index-1]].forEach((neighbour)=>{
+      if (!neighbour) return;
+      const preview=new Image();preview.src=previewUrl('row',neighbour.id);
+      const fileId=neighbour.file_id||neighbour.candidates?.[0]?.file_id;
+      if (fileId) {const filePreview=new Image();filePreview.src=previewUrl('file',fileId);}
+    });
   }
   async function resolveRow(fileId) {
     if(state.resolving||state.job?.status!=='ready')return;
     const rowId=state.selectedRowId;
+    const before=rowById(rowId);
+    if (!before) return;
     state.resolving=true;clearNotice();renderPanel();$('export-button').disabled=true;$('new-task-button').disabled=true;$('shutdown-button').disabled=true;
     try {
       const job=await api(`/api/jobs/${encodeURIComponent(state.job.id)}/resolve`,{method:'POST',body:{row_id:rowId,file_id:fileId}});
       acceptJob(job);
+      state.history.push(rowId);
       const current=rowById(rowId);
       const rows=job.rows||[],index=rows.findIndex((row)=>row.id===rowId);
-      const remaining=[...rows.slice(index+1),...rows.slice(0,index)].find((row)=>['review','unmatched'].includes(row.status));
+      const remaining=[...rows.slice(index+1),...rows.slice(0,index)].find(awaiting);
       if (remaining) selectRow(remaining.id,null,false);
       else selectRow(current?.id,null,false);
-      toast(fileId?'已确认对应文件':'已跳过，该行将在导出时保持原状');
+      toast(fileId?'已确认对应文件，可随时撤销':'已跳过，该行保持原状');
+      renderReview();
+      preloadNeighbours(rowById(state.selectedRowId));
+    } catch(error){notice(error.message);} finally {state.resolving=false;renderReview();}
+  }
+  async function undoLast() {
+    const rowId=state.history[state.history.length-1];
+    if (!rowId||state.resolving||state.job?.status!=='ready') return;
+    state.resolving=true;clearNotice();$('undo-button').disabled=true;
+    try {
+      const job=await api(`/api/jobs/${encodeURIComponent(state.job.id)}/resolve`,{method:'POST',body:{row_id:rowId,revert:true}});
+      acceptJob(job);
+      state.history.pop();
+      selectRow(rowId,null,false);
+      toast('已撤销上一步操作');
+      renderReview();
     } catch(error){notice(error.message);} finally {state.resolving=false;renderReview();}
   }
   function askConfirmation({title,description,confirm='确认',cancel='取消'}) {
@@ -256,7 +373,10 @@
     if (state.job.status==='done') {state.showDone=true;renderDone();return;}
     if (state.resolving||state.job.status!=='ready')return;
     const c=counts();
-    if (!await askConfirmation({title:c.pending?'导出已匹配的部分？':'确认导出本批结果？',description:`已匹配 ${c.matched} 条，其中 ${c.newNumbers} 条将生成新编号。${c.pending?`\n还有 ${c.pending} 条待处理，这些行保持原状，并列入待处理清单。`:''}\n结果将保存到新文件夹，原始文件不变。`,confirm:'确认导出',cancel:'返回检查'}))return;
+    const question=c.awaiting
+      ?{title:`还有 ${c.awaiting} 项需要处理，仍要导出？`,description:`已匹配 ${c.matched} 条，其中 ${c.newNumbers} 条将生成新编号。\n未处理的行保持原状，并列入待处理清单。`,confirm:'导出已匹配部分',cancel:'返回处理'}
+      :{title:'确认导出本批结果？',description:`自动通过 ${c.auto} 条、人工确认 ${c.confirmed} 条，共 ${c.newNumbers} 条将生成新编号。\n结果将保存到新文件夹，原始文件不变。`,confirm:'确认导出',cancel:'返回检查'};
+    if (!await askConfirmation(question))return;
     clearNotice();
     state.job.status='exporting';state.job.progress={message:'正在生成编号表格、AI 文件和待处理清单',current:0,total:0};state.showDone=true;
     renderJob();
@@ -268,9 +388,9 @@
   function renderDone() {
     showView('done-view',3);
     const c=counts();
-    $('done-stats').innerHTML=`<div class="done-stat"><strong>${c.matched}</strong><span>AI 文件已整理</span></div><div class="done-stat"><strong>${c.newNumbers}</strong><span>新增编号</span></div><div class="done-stat"><strong>${c.pending}</strong><span>留待处理</span></div>`;
+    $('done-stats').innerHTML=`<div class="done-stat"><strong>${c.matched}</strong><span>AI 文件已整理</span></div><div class="done-stat"><strong>${c.newNumbers}</strong><span>新增编号</span></div><div class="done-stat"><strong>${c.awaiting}</strong><span>留待处理</span></div><div class="done-stat"><strong>${c.skipped}</strong><span>已跳过</span></div>`;
     $('output-directory').textContent=state.job.output_dir||'保存位置尚未返回';
-    $('done-summary').textContent=c.pending?`结果包含更新后的 Excel 表格、${c.matched} 个按编号命名的 AI 文件，以及待处理清单。剩余 ${c.pending} 行保持原状，请根据清单继续核对。`:`结果包含更新后的 Excel 表格、${c.matched} 个按编号命名的 AI 文件及处理清单。全部表格图片均已对应。`;
+    $('done-summary').textContent=c.awaiting?`结果包含更新后的 Excel 表格、${c.matched} 个按编号命名的 AI 文件，以及待处理清单。剩余 ${c.awaiting} 行保持原状，请根据清单继续核对。`:`结果包含更新后的 Excel 表格、${c.matched} 个按编号命名的 AI 文件及处理清单。全部表格图片均已对应。`;
     $('open-output-button').disabled=!state.job.output_dir;
   }
   async function openOutput() {
@@ -280,7 +400,9 @@
   async function resetTask() {
     if(state.resolving||isBusy())return;
     if(state.job?.status==='ready'&&!await askConfirmation({title:'重新导入一批文件？',description:'当前匹配结果尚未导出。重新导入后需要重新检查匹配。原始文件保持不变。',confirm:'重新导入',cancel:'继续检查'}))return;
-    clearTimeout(state.pollTimer);state.job=null;state.selectedRowId=null;state.selectedFileId=null;state.showDone=true;state.lastJobError=null;rememberJob(null);clearNotice();showView('import-view',1);window.scrollTo({top:0,behavior:'smooth'});
+    clearTimeout(state.pollTimer);state.job=null;state.selectedRowId=null;state.selectedFileId=null;state.showDone=true;state.lastJobError=null;
+    state.forceReview=false;state.candidatesOpen=false;state.history=[];state.filter='awaiting';
+    rememberJob(null);clearNotice();showView('import-view',1);window.scrollTo({top:0,behavior:'smooth'});
   }
   async function shutdown() {
     if (isBusy()||state.resolving||state.picking||state.stopped)return;
@@ -307,8 +429,11 @@
     $('rows-body').addEventListener('keydown',(event)=>{if(['Enter',' '].includes(event.key)){const row=event.target.closest('[data-row-id]');if(row&&!state.resolving){event.preventDefault();selectRow(row.dataset.rowId);}}});
     $('review-panel').addEventListener('click',(event)=>{const candidate=event.target.closest('[data-candidate-id]');if(candidate&&!state.resolving){state.selectedFileId=candidate.dataset.candidateId;renderPanel();}});
     $('export-button').addEventListener('click',exportJob);$('open-output-button').addEventListener('click',openOutput);
-    ['new-task-button','next-task-button','retry-task-button'].forEach((id)=>$(id).addEventListener('click',resetTask));
-    $('back-results-button').addEventListener('click',()=>{state.showDone=false;renderReview();});
+    $('undo-button').addEventListener('click',undoLast);
+    $('summary-export-button').addEventListener('click',exportJob);
+    $('summary-browse-button').addEventListener('click',()=>{state.forceReview=true;renderReview();});
+    ['new-task-button','next-task-button','retry-task-button','summary-new-task-button'].forEach((id)=>$(id).addEventListener('click',resetTask));
+    $('back-results-button').addEventListener('click',()=>{state.showDone=false;state.forceReview=true;renderReview();});
     $('shutdown-button').addEventListener('click',shutdown);
     document.addEventListener('error',(event)=>{if(event.target instanceof HTMLImageElement)event.target.classList.add('image-broken');},true);
     try {

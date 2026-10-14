@@ -45,7 +45,8 @@ def create_app(data_dir: str | Path, token: str | None = None):
 
     @app.after_request
     def response_headers(response):
-        response.headers["Cache-Control"] = "no-store"
+        if "Cache-Control" not in response.headers:
+            response.headers["Cache-Control"] = "no-store"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
@@ -114,7 +115,8 @@ def create_app(data_dir: str | Path, token: str | None = None):
     @app.post("/api/jobs/<identifier>/resolve")
     def resolve(identifier):
         payload = request.get_json()
-        return jsonify(manager.resolve(identifier, payload.get("row_id"), payload.get("file_id")))
+        return jsonify(manager.resolve(identifier, payload.get("row_id"), payload.get("file_id"),
+                                       revert=bool(payload.get("revert"))))
 
     @app.post("/api/jobs/<identifier>/export")
     def export(identifier):
@@ -125,7 +127,13 @@ def create_app(data_dir: str | Path, token: str | None = None):
     def image(identifier, kind, item_id):
         if kind not in {"row", "file"}:
             raise KeyError("不存在的图片类型。")
-        return send_file(manager.image_path(identifier, kind, item_id))
+        sent = send_file(manager.image_path(identifier, kind, item_id), conditional=True)
+        # A preview never changes inside one job and the URL already carries the
+        # job id, so the browser may reuse it instead of re-downloading the same
+        # picture after every list re-render. Conditional requests still
+        # revalidate, so a new job can never show a stale picture.
+        sent.headers["Cache-Control"] = "private, max-age=86400, immutable"
+        return sent
 
     @app.post("/api/jobs/<identifier>/open-output")
     def open_output(identifier):

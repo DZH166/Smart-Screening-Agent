@@ -123,7 +123,8 @@ class JobManager:
             job = {"id": identifier, "status": "importing", "progress": {"message": "正在读取表格…", "current": 0, "total": 1},
                    "error": None, "sheet_name": "", "workbook_name": workbook.name, "source_name": source.name,
                    "start_number": start, "prefix": "HSD", "rows": [], "files": [], "warnings": [],
-                   "output_dir": None, "report": None, "stats": {}, "_workbook_path": str(workbook),
+                   "output_dir": None, "output_target": str(output), "report": None, "stats": {},
+                   "_workbook_path": str(workbook),
                    "_source_path": str(source), "_output_root": str(output), "_work_dir": str(work_dir),
                    "_reserved": [], "_input_digest": None}
             self.jobs[identifier] = job
@@ -171,9 +172,15 @@ class JobManager:
                     row["_reason"] = match.get("reason", row.get("issue") or "没有找到对应文件")
                     row["_file_id"] = match.get("file_id")
                     row["candidates"] = match.get("candidates", [])
+                    row["evidence"] = match.get("evidence")
                     if row.get("issue"):
                         row["_status"] = "review"
                         row["_reason"] = row["issue"]
+                    # Keep the matcher's own verdict so an employee edit can be
+                    # undone without re-running the whole batch.
+                    row["_initial_status"] = row["_status"]
+                    row["_initial_file_id"] = row["_file_id"]
+                    row["_initial_reason"] = row["_reason"]
                 self._plan(job)
                 job["status"] = "ready"
                 job["progress"] = {"message": "匹配完成，请检查待处理项", "current": len(job["rows"]), "total": len(job["rows"])}
@@ -221,10 +228,20 @@ class JobManager:
             reserved.add(number.casefold())
             next_number += 1
         counts = collections.Counter(r["status"] for r in rows)
-        job["stats"] = {"total": len(rows), **{s: counts[s] for s in ("auto", "confirmed", "review", "unmatched", "skipped")},
-                        "exportable": counts["auto"] + counts["confirmed"]}
+        job["stats"] = {
+            "total": len(rows),
+            "auto": counts["auto"],
+            "confirmed": counts["confirmed"],
+            "review": counts["review"],
+            "unmatched": counts["unmatched"],
+            "skipped": counts["skipped"],
+            "exportable": counts["auto"] + counts["confirmed"],
+            # Rows the employee still has to look at. A skipped row has already
+            # been decided on, so it must never count as pending review again.
+            "needs_attention": counts["review"] + counts["unmatched"],
+        }
 
-    def resolve(self, identifier, row_id, file_id):
+    def resolve(self, identifier, row_id, file_id, revert=False):
         with self.lock:
             job = self._get(identifier)
             if job["status"] != "ready":
@@ -232,7 +249,12 @@ class JobManager:
             row = next((r for r in job["rows"] if r["id"] == row_id), None)
             if row is None:
                 raise ValueError("找不到这条表格记录。")
-            if file_id is None:
+            if revert:
+                # Put the row back to the verdict the matcher produced for it.
+                row["_status"] = row.get("_initial_status", "review")
+                row["_file_id"] = row.get("_initial_file_id")
+                row["_reason"] = row.get("_initial_reason") or "已恢复为自动判断结果。"
+            elif file_id is None:
                 row["_status"], row["_file_id"], row["_reason"] = "skipped", None, "员工选择跳过；该行保留原状。"
             else:
                 if row.get("issue"):

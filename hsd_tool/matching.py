@@ -360,30 +360,201 @@ def _features(query: _Appearance, candidate: _Appearance) -> dict:
     return result
 
 
-def _texture(query: _Appearance, candidate: _Appearance) -> dict:
-    """Whole strip comparison, with scale/translation and horizontal repetition.
+def _content_bounds(image: np.ndarray) -> tuple[int, int, int, int] | None:
+    """Bounding box of inked pixels, or None when no outer margin can be trimmed.
 
-    Useful for lines/dots which have too few unique keypoints. Its output remains
-    review-only: low-detail designs can have indistinguishable preview patterns.
+    Illustrator artboards may carry uniform padding that the workbook thumbnail
+    does not show. Only the outer uniform border is trimmed, so every inked
+    pixel - including real extra artwork - stays inside the comparison.
+    """
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    ink = gray < 246
+    if not ink.any():
+        return None
+    rows = np.flatnonzero(ink.any(axis=1))
+    columns = np.flatnonzero(ink.any(axis=0))
+    top, bottom = int(rows[0]), int(rows[-1]) + 1
+    left, right = int(columns[0]), int(columns[-1]) + 1
+    if bottom - top < 8 or right - left < 8:
+        return None
+    if (top, left, bottom, right) == (0, 0, image.shape[0], image.shape[1]):
+        return None
+    return left, top, right, bottom
+
+
+def _unexplained_content(tiled: np.ndarray, query: np.ndarray, y: int) -> float:
+    """Share of inked pixels the matched picture cannot account for.
+
+    The band the match landed on is scanned again for every phase at which the
+    matched picture reproduces it - a repeated motif legitimately appears at
+    several phases, and a workbook thumbnail is often a crop of the artboard.
+    Inked pixels that no accepted phase covers are content the match cannot
+    explain: extra artwork, a second design, or a genuinely different motif.
+    Blank areas count as explained, because a declared artboard padding is a
+    legitimate difference the workbook thumbnail never shows.
+    """
+    height, width = tiled.shape[:2]
+    if query.shape[0] != min(height, query.shape[0]) or query.shape[1] > width:
+        return 1.
+    rows = np.arange(y, y + query.shape[0]) % height
+    band = tiled[rows]
+    ink = band.min(axis=2) < 235
+    if ink.sum() < 50:
+        return 0.
+    result = cv2.matchTemplate(band, query, cv2.TM_SQDIFF)
+    area = float(query.shape[0] * query.shape[1] * 3)
+    limit = (.20 * 255) ** 2 * area
+    covered = np.zeros(band.shape[1], bool)
+    for offset in np.flatnonzero(result[0] <= limit):
+        covered[offset:offset + query.shape[1]] = True
+    return float((ink & ~covered[None, :]).sum() / ink.sum())
+
+
+def _texture_scan(query: np.ndarray, body: np.ndarray, height: int, best: dict,
+                  width_scale: float = 1.) -> None:
+    """One scale of the tiled strip search; keeps the strongest pixel evidence."""
+    tile = _resize_height(body, height)
+    if width_scale != 1.:
+        width = max(6, int(round(tile.shape[1] * width_scale)))
+        tile = cv2.resize(tile, (width, tile.shape[0]), interpolation=cv2.INTER_AREA)
+    if tile.shape[1] < 6:
+        return
+    count = max(2, math.ceil(query.shape[1] / tile.shape[1]) + 1)
+    tiled = np.tile(tile, (2, count, 1))
+    differences = cv2.matchTemplate(tiled, query, cv2.TM_SQDIFF)
+    _, _, location, _ = cv2.minMaxLoc(differences)
+    x, y = location
+    patch = tiled[y:y + query.shape[0], x:x + query.shape[1]]
+    if patch.shape != query.shape:
+        return
+    error = np.abs(query.astype(np.float32) - patch.astype(np.float32)) / 255
+    pixel = error.max(axis=2)
+    rms = float(np.sqrt(np.mean(error ** 2)))
+    score = 1 - rms
+    if score <= best.get('score', 0.):
+        return
+    best.update(score=score, height=height, rms=rms,
+                changed=float((pixel > .2).mean()),
+                major_changed=float((pixel > .45).mean()),
+                worst=float(np.percentile(pixel, 99.5)),
+                residual=_unexplained_content(tiled, query, y))
+
+
+def _texture_search(query: np.ndarray, body: np.ndarray, trimmed: bool) -> dict:
+    """Locate the best scale for one candidate body, then refine it."""
+    outcome = {'score': 0., 'strong': False, 'method': 'texture', 'trimmed': trimmed}
+    probe = _resize_height(query, 32)
+    coarse = {'score': 0.}
+    for height in range(18, 92, 4):
+        _texture_scan(probe, body, height, coarse)
+    # The coarse pass only locates the neighbourhood; its own score is not reused
+    # because low-detail motifs are unreliable at that resolution.
+    if 'height' in coarse:
+        centre = coarse['height'] * 2
+        span = range(max(30, centre - 5), min(184, centre + 6))
+    else:
+        span = range(44, 124, 4)
+    for height in span:
+        _texture_scan(query, body, height, outcome)
+    if 'height' in outcome:
+        # Whole-pixel heights leave a residual aspect error that shifts the motif
+        # by about a pixel. A short sub-percent width sweep removes it without
+        # masking real content differences.
+        for scale in (.991, .994, .997, 1.003, 1.006, 1.009):
+            _texture_scan(query, body, outcome['height'], outcome, scale)
+    return outcome
+
+
+def _texture(query: _Appearance, candidate: _Appearance) -> dict:
+    """Whole-strip comparison, with scale/translation and horizontal repetition.
+
+    Useful for lines, dots and repeated motifs that have too few unique
+    keypoints for geometric verification. Every pixel-level signal is returned
+    so callers can require several independent evidences (pixel error, changed
+    area, worst case, colour distribution) before this fallback auto-accepts.
+
+    The artboard itself is searched first. A workbook thumbnail may be a crop of
+    it rather than a downscaled copy, and a declared artboard padding shifts the
+    matching scale as well, so the search range is wide. Only when the artboard
+    cannot be aligned at all is the trimmed content box tried as a fallback -
+    trimming changes the motif scale, which must not be applied blindly.
     """
     q = _resize_height(query.image, 64)
-    best = {'score': 0., 'strong': False, 'method': 'texture'}
-    # Source artboard can include a little extra trim compared with the table.
-    for height in range(58, 96, 2):
-        tile = _resize_height(candidate.image, height)
-        count = max(2, math.ceil(q.shape[1] / tile.shape[1]) + 1)
-        big = np.tile(tile, (2, count, 1))
-        differences = cv2.matchTemplate(big, q, cv2.TM_SQDIFF)
-        _, _, location, _ = cv2.minMaxLoc(differences)
-        x, y = location
-        diff = np.abs(q.astype(np.float32) - big[y:y + q.shape[0], x:x + q.shape[1]]) / 255
-        # RMS penalizes large errors in small but significant colored details.
-        score = 1 - float(np.mean(diff ** 2)) ** .5
-        if score > best['score']:
-            best.update(score=score, changed=float(np.mean(np.max(diff, axis=2) > .2)))
-    # Keep textured fallback below a geometrically verified near-exact match.
+    crop = _content_bounds(candidate.image)
+    content = None
+    if crop is not None:
+        content = candidate.image[crop[1]:crop[3], crop[0]:crop[2]]
+    best = _texture_search(q, candidate.image, False)
+    if best.get('rms', 1.) > .05 and content is not None:
+        alternative = _texture_search(q, content, True)
+        if alternative.get('score', 0.) > best.get('score', 0.):
+            best = alternative
+    # Colour spread is compared on the content only: a declared artboard margin
+    # legitimately adds white that the workbook thumbnail never shows.
+    colour_body = content if content is not None else candidate.image
+    lab = cv2.cvtColor(_resize_height(colour_body, 96), cv2.COLOR_BGR2LAB)
+    histogram = cv2.calcHist([lab], [0, 1, 2], None, [12, 16, 16], [0, 256] * 3)
+    cv2.normalize(histogram, histogram, norm_type=cv2.NORM_L1)
+    best['color_distance'] = float(cv2.compareHist(query.histogram, histogram,
+                                                   cv2.HISTCMP_BHATTACHARYYA))
+    if 'rms' in best:
+        # Auto acceptance needs every signal at once: near-exact pixels, no
+        # localized difference, no bad region, a matching colour spread, and no
+        # inked artboard content left unexplained outside the matched window.
+        # Bounds sit inside the measured gap between aligned repeats (rms <~ .033,
+        # changed <~ .012, no gross difference) and genuinely altered artwork
+        # (rms >~ .15, changed >~ .07), so no single relaxed number can carry a
+        # false match on its own.
+        best['strong'] = bool(best['rms'] <= .045 and best['changed'] <= .015
+                              and best['major_changed'] <= .003 and best['worst'] <= .55
+                              and best['color_distance'] <= .25
+                              and best.get('residual', 1.) <= .08)
+    # Keep the textured fallback below a geometrically verified near-exact match.
     best['score'] *= .94
     return best
+
+
+def _auto_reason(result: dict) -> str:
+    """Short, employee-facing reason for an automatic decision."""
+    if result.get('accepted_by') == '纹理像素验证':
+        return '图案逐像素一致、颜色分布相同，且本批次没有接近的其他候选。'
+    return '图像细节、排列和颜色一致，且本批次没有接近的其他候选。'
+
+
+def _review_reason(result: dict, histogram_distance: float) -> str:
+    """Name the specific evidence that is missing instead of a generic hint."""
+    colour = float(result.get('color_distance', histogram_distance))
+    if colour > .12:
+        return '图案排列接近，但两侧颜色分布不一致，请确认是否为同款不同色。'
+    if result.get('method') == 'texture':
+        if result.get('major_changed', 0.) > .02:
+            return '图案接近，但有局部区域明显不同，请并排确认。'
+        if result.get('changed', 0.) > .06 or result.get('rms', 1.) > .06:
+            return '图案大致一致，但仍有较多区域对不上，请放大确认。'
+        return '图案重复度高，自动核对无法完全确认，请对照后选择。'
+    if not result.get('inliers'):
+        return '图中可辨认的独特细节不足，暂时无法自动核对图案。'
+    if result.get('major_changed', 0.) > .015 or result.get('mae', 1.) > .06:
+        return '两张图的局部内容存在差异，请确认是否为同一张图。'
+    if result.get('coverage', 1.) < .18:
+        return '只核对上图片的一小部分区域，其余内容无法比对。'
+    return '图像细节接近，但还不足以自动确认，请对照后选择。'
+
+
+def _combine_evidence(feature: dict, texture: dict) -> dict:
+    """Merge both methods without letting one silently overwrite the other."""
+    merged = dict(texture)
+    merged['score'] = max(float(texture.get('score', 0.)), float(feature.get('score', 0.)))
+    merged['strong'] = bool(texture.get('strong') or feature.get('strong'))
+    merged['feature_score'] = round(float(feature.get('score', 0.)), 4)
+    merged['feature_strong'] = bool(feature.get('strong'))
+    if texture.get('strong'):
+        merged['auto_ok'], merged['accepted_by'] = True, '纹理像素验证'
+    elif feature.get('auto_ok'):
+        merged['auto_ok'], merged['accepted_by'] = True, '几何特征验证'
+    else:
+        merged['auto_ok'], merged['accepted_by'] = False, None
+    return merged
 
 
 def _match_appearances(rows: list[dict], files: list[dict], row_images: dict,
@@ -411,38 +582,47 @@ def _match_appearances(rows: list[dict], files: list[dict], row_images: dict,
             candidate = file_images[identity]
             histograms[identity] = float(cv2.compareHist(query.histogram, candidate.histogram,
                                                         cv2.HISTCMP_BHATTACHARYYA))
-            scores[identity] = _features(query, candidate)
-            scores[identity]['score'] = max(scores[identity]['score'],
-                                             .4 * (1 - histograms[identity]))
+            result = _features(query, candidate)
+            result['score'] = max(result['score'], .4 * (1 - histograms[identity]))
+            result['auto_ok'] = bool(result['strong'] and result['score'] >= .91)
+            result['accepted_by'] = '几何特征验证' if result['auto_ok'] else None
+            scores[identity] = result
         best_feature = max(scores, key=lambda identity: scores[identity]['score'])
         if not scores[best_feature]['strong']:
             shortlist = sorted(histograms, key=histograms.get)[:6]
             shortlist += sorted(scores, key=lambda identity: scores[identity]['score'], reverse=True)[:2]
             for identity in dict.fromkeys(shortlist):
                 texture = _texture(query, file_images[identity])
-                if texture['score'] > scores[identity]['score']:
-                    scores[identity] = texture
+                if texture['score'] > scores[identity]['score'] or texture.get('strong'):
+                    scores[identity] = _combine_evidence(scores[identity], texture)
         ranking = sorted(scores, key=lambda identity: (-scores[identity]['score'], identity))
         base['candidates'] = [{'file_id': identity, 'score': round(scores[identity]['score'], 4)}
                               for identity in ranking[:5]]
         top = ranking[0]
-        top_score = scores[top]['score']
+        top_result = scores[top]
+        top_score = top_result['score']
         runner_up = scores[ranking[1]]['score'] if len(ranking) > 1 else 0
+        gap = top_score - runner_up
         top_file = next(file for file in readable if file['id'] == top)
+        base['evidence'] = {'method': top_result.get('method', 'features'),
+                            'colour': round(float(top_result.get('color_distance', histograms[top])), 4),
+                            'gap': round(gap, 4),
+                            'pixel_rms': (round(float(top_result['rms']), 4)
+                                          if 'rms' in top_result else None),
+                            'checked': top_result.get('accepted_by')}
         if top_score < .55:
             base['reason'] = '相似度不足，未自动选择文件；候选仅供人工查看。'
         else:
             base['status'] = 'review'
-            base['reason'] = '纹样相似，但缺少足够独特的图像细节，请并排确认。'
+            base['reason'] = _review_reason(top_result, histograms[top])
             if top_file.get('issue'):
                 base['reason'] = top_file['issue']
             elif duplicate_previews[file_images[top].digest] > 1:
                 base['reason'] = '多个 AI 文件有相同预览，无法自动确定唯一原文件。'
-            elif top_score - runner_up < .045:
+            elif gap < .045:
                 base['reason'] = '存在十分接近的候选，请确认具体颜色、图案及文件。'
-            elif scores[top]['strong'] and top_score >= .91:
-                base.update(status='auto', file_id=top,
-                            reason='图像细节、排列和颜色一致，且本批次没有接近的其他候选。')
+            elif top_result.get('auto_ok'):
+                base.update(status='auto', file_id=top, reason=_auto_reason(top_result))
         results.append(base)
     # A weak competing row is still evidence of conflicting ownership; never
     # silently allocate a shared best file to whichever row happened to run first.
