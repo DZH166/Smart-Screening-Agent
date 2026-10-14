@@ -18,7 +18,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 REPO = "DZH166/Smart-Screening-Agent"
-PROXY = os.environ.get("HSD_RELEASE_PROXY", "http://127.0.0.1:12000")
+# iKuuu VPN exposes two local ports routed to different nodes; only 12001
+# reaches GitHub from this machine. Override with HSD_RELEASE_PROXY.
+PROXY = os.environ.get("HSD_RELEASE_PROXY", "http://127.0.0.1:12001")
 TOKEN = os.environ.get("GH_TOKEN", "").strip()
 ATTEMPTS = int(os.environ.get("HSD_RELEASE_ATTEMPTS", "10"))
 
