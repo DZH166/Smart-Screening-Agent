@@ -34,7 +34,8 @@ if (source / "tests").exists():
 shutil.copytree(ROOT / "tests", source / "tests")
 tools_destination = source / "tools"
 tools_destination.mkdir(parents=True, exist_ok=True)
-for name in ("collect_licenses.py", "verify_packaged.py", "verify_packaged_demo.py"):
+for name in ("collect_licenses.py", "verify_packaged.py", "verify_packaged_demo.py",
+             "prepare_delivery.py", "prepare_release.py"):
     shutil.copy2(ROOT / "tools" / name, tools_destination / name)
 for name in ("launch.py", "requirements.txt", "requirements-dev.txt", "build.ps1",
              "pytest.ini", "README.md", "CHANGELOG.md", "CONTRACTS.md", "AGENTS.md", "使用说明.txt"):
