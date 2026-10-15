@@ -20,3 +20,13 @@ dist/
 自测输出/
 输出结果/
 *.log
+ai_settings.json
+ai_usage.json
+ai_usage.lock
+ai_validation.json
+ai_validation.secret
+ai_observations_*.json
+.ai-settings-*.tmp
+.ai-usage-*.tmp
+instance.json
+/jobs/

@@ -61,6 +61,11 @@ def main():
         check = {"ok": True, "frozen": bool(getattr(sys, "frozen", False)), "tk": tk_version,
                  "opencv": cv2.__version__, "numpy": numpy.__version__, "pymupdf": pymupdf.VersionBind,
                  "pillow": Image.__version__}
+        from . import __version__
+        from .ai_registry import ValidationRegistry
+        from .ai_policy import POLICY_VERSION
+        check.update(version=__version__, ai_policy=POLICY_VERSION,
+                     ai_implementation=ValidationRegistry._implementation())
         Path(args.result).write_text(json.dumps(check), "utf-8")
         return
     data = Path(args.data_dir) if args.data_dir else Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "HSD图片编号工具"

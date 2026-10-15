@@ -13,6 +13,7 @@ from pathlib import Path
 from flask import Flask, jsonify, request, send_file
 
 from .service import JobManager
+from . import __version__
 
 
 def create_app(data_dir: str | Path, token: str | None = None):
@@ -25,6 +26,12 @@ def create_app(data_dir: str | Path, token: str | None = None):
     app.config["HSD_MANAGER"] = manager
     app.config["HSD_INSTANCE"] = secrets.token_hex(16)
     app.config["HSD_SHUTDOWN"] = None
+    runtime = {"frozen": bool(getattr(sys, "frozen", False)), "version": __version__}
+    if runtime["frozen"]:
+        from .service import sha256
+        runtime["executable_sha256"] = sha256(sys.executable)
+        manifest = Path(sys.executable).parent / "构建校验.json"
+        runtime["build_manifest_sha256"] = sha256(manifest) if manifest.is_file() else None
     dialog_lock = threading.Lock()
 
     @app.before_request
@@ -42,10 +49,12 @@ def create_app(data_dir: str | Path, token: str | None = None):
                 return jsonify(error="请求来源不匹配。"), 403
             if not request.is_json:
                 return jsonify(error="请求必须使用 JSON 格式。"), 400
+            if not isinstance(request.get_json(silent=True), dict):
+                return jsonify(error="请求必须使用 JSON 对象。"), 400
 
     @app.after_request
     def response_headers(response):
-        if "Cache-Control" not in response.headers:
+        if request.endpoint != "image" or response.status_code not in {200, 304}:
             response.headers["Cache-Control"] = "no-store"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
@@ -73,11 +82,32 @@ def create_app(data_dir: str | Path, token: str | None = None):
 
     @app.get("/api/health")
     def health():
-        return jsonify(app="hsd-number-tool", instance=app.config["HSD_INSTANCE"])
+        return jsonify(app="hsd-number-tool", instance=app.config["HSD_INSTANCE"], runtime=runtime)
 
     @app.get("/api/config")
     def config():
         return jsonify(manager.config())
+
+    @app.get("/api/ai/settings")
+    def ai_settings():
+        return jsonify(manager.ai_config())
+
+    @app.post("/api/ai/settings")
+    def save_ai_settings():
+        with manager.lock:
+            if any(j["status"] in {"importing", "matching", "ai_review", "exporting"} for j in manager.jobs.values()):
+                raise ValueError("当前任务正在处理，请完成后再修改AI设置。")
+            manager.ai_settings.save(request.get_json())
+        return jsonify(manager.ai_config())
+
+    @app.get("/api/ai/usage")
+    def ai_usage():
+        return jsonify(manager.ai_usage.snapshot())
+
+    @app.post("/api/jobs/<identifier>/ai-review")
+    def review_ai_job(identifier):
+        manager.review_ai(identifier)
+        return jsonify(id=identifier)
 
     @app.post("/api/pick")
     def pick():
@@ -115,25 +145,31 @@ def create_app(data_dir: str | Path, token: str | None = None):
     @app.post("/api/jobs/<identifier>/resolve")
     def resolve(identifier):
         payload = request.get_json()
-        return jsonify(manager.resolve(identifier, payload.get("row_id"), payload.get("file_id"),
-                                       revert=bool(payload.get("revert"))))
+        revert = payload.get("revert", False)
+        if not isinstance(revert, bool):
+            raise ValueError("恢复操作参数无效。")
+        return jsonify(manager.resolve(identifier, payload.get("row_id"), payload.get("file_id"), revert=revert))
 
     @app.post("/api/jobs/<identifier>/export")
     def export(identifier):
-        manager.export(identifier)
+        manager.export(identifier, request.get_json().get("expected_revision"))
         return jsonify(id=identifier)
+
+    @app.post("/api/jobs/<identifier>/undo")
+    def undo(identifier):
+        return jsonify(manager.undo(identifier))
 
     @app.get("/api/jobs/<identifier>/image/<kind>/<item_id>")
     def image(identifier, kind, item_id):
         if kind not in {"row", "file"}:
             raise KeyError("不存在的图片类型。")
-        sent = send_file(manager.image_path(identifier, kind, item_id), conditional=True)
-        # A preview never changes inside one job and the URL already carries the
-        # job id, so the browser may reuse it instead of re-downloading the same
-        # picture after every list re-render. Conditional requests still
-        # revalidate, so a new job can never show a stale picture.
-        sent.headers["Cache-Control"] = "private, max-age=86400, immutable"
-        return sent
+        variant = request.args.get("size", "full")
+        if variant not in {"full", "thumb"}:
+            raise ValueError("不支持的图片尺寸。")
+        path, digest = manager.image_asset(identifier, kind, item_id, thumbnail=variant == "thumb")
+        response = send_file(path, etag=digest, conditional=True, max_age=86400)
+        response.headers["Cache-Control"] = "private, max-age=86400, immutable"
+        return response
 
     @app.post("/api/jobs/<identifier>/open-output")
     def open_output(identifier):
@@ -147,7 +183,7 @@ def create_app(data_dir: str | Path, token: str | None = None):
     @app.post("/api/shutdown")
     def shutdown():
         with manager.lock:
-            if any(j["status"] in {"importing", "matching", "exporting"} for j in manager.jobs.values()):
+            if any(j["status"] in {"importing", "matching", "ai_review", "exporting"} for j in manager.jobs.values()):
                 raise ValueError("任务正在处理，请完成后再退出工具。")
         callback = app.config.get("HSD_SHUTDOWN")
         if callback:

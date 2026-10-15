@@ -6,25 +6,32 @@ if (-not (Test-Path -LiteralPath $pythonExe)) {
 }
 Push-Location -LiteralPath $workspace
 try {
-    & $pythonExe -m PyInstaller --noconfirm --clean --onedir --windowed --name 'HSD图号助手' --add-data 'hsd_tool/static;hsd_tool/static' --hidden-import tkinter --hidden-import tkinter.filedialog --exclude-module pandas --exclude-module openpyxl --exclude-module pytest --exclude-module scipy --exclude-module matplotlib --collect-all pymupdf launch.py
+    $version = (& $pythonExe -c 'from hsd_tool import __version__; print(__version__)').Trim()
+    if ($version -notmatch '^\d+\.\d+\.\d+$') { throw '发布版本号格式不正确。' }
+    $distributionRoot = Join-Path $workspace ('dist\v' + $version)
+    $buildRoot = Join-Path $workspace ('build\v' + $version)
+    New-Item -ItemType Directory -Path $buildRoot -Force | Out-Null
+    & $pythonExe -m PyInstaller --noconfirm --clean --onedir --windowed --name 'HSD图号助手' --distpath $distributionRoot --workpath $buildRoot --specpath $buildRoot --add-data (Join-Path $workspace 'hsd_tool/static;hsd_tool/static') --hidden-import tkinter --hidden-import tkinter.filedialog --exclude-module pandas --exclude-module openpyxl --exclude-module pytest --exclude-module scipy --exclude-module matplotlib --collect-all pymupdf launch.py
     if ($LASTEXITCODE -ne 0) { throw '打包失败。' }
-    $destination = Join-Path $workspace 'dist\HSD图号助手'
+    $destination = Join-Path $distributionRoot 'HSD图号助手'
     Copy-Item -LiteralPath (Join-Path $workspace '使用说明.txt') -Destination $destination -Force
     $sourceDestination = Join-Path $destination '源代码'
     New-Item -ItemType Directory -Path $sourceDestination -Force | Out-Null
-    $packageDestination = Join-Path $sourceDestination 'hsd_tool'
-    New-Item -ItemType Directory -Path $packageDestination -Force | Out-Null
-    Get-ChildItem -LiteralPath (Join-Path $workspace 'hsd_tool') -File -Filter '*.py' | Copy-Item -Destination $packageDestination -Force
-    Copy-Item -LiteralPath (Join-Path $workspace 'hsd_tool\static') -Destination $packageDestination -Recurse -Force
-    Copy-Item -LiteralPath (Join-Path $workspace 'tests') -Destination $sourceDestination -Recurse -Force
-    $toolsDestination = Join-Path $sourceDestination 'tools'
-    New-Item -ItemType Directory -Path $toolsDestination -Force | Out-Null
-    Copy-Item -LiteralPath (Join-Path $workspace 'tools\collect_licenses.py') -Destination $toolsDestination -Force
-    foreach ($file in @('launch.py', 'requirements.txt', 'requirements-dev.txt', 'build.ps1', 'README.md', '使用说明.txt')) {
+    foreach ($directory in @('hsd_tool', 'tests', 'tools')) {
+        Get-ChildItem -LiteralPath (Join-Path $workspace $directory) -File -Recurse | Where-Object { $_.Extension -in @('.py', '.js', '.css', '.html', '.json') } | ForEach-Object {
+            $relative = $_.FullName.Substring($workspace.Length + 1)
+            $targetFile = Join-Path $sourceDestination $relative
+            New-Item -ItemType Directory -Path (Split-Path -Parent $targetFile) -Force | Out-Null
+            Copy-Item -LiteralPath $_.FullName -Destination $targetFile -Force
+        }
+    }
+    foreach ($file in @('launch.py', 'requirements.txt', 'requirements-dev.txt', 'build.ps1', 'README.md', 'AGENTS.md', 'CONTRACTS.md', 'CHANGELOG.md', '使用说明.txt')) {
         Copy-Item -LiteralPath (Join-Path $workspace $file) -Destination $sourceDestination -Force
     }
     & $pythonExe tools\collect_licenses.py $destination
     if ($LASTEXITCODE -ne 0) { throw '依赖说明生成失败。' }
+    & $pythonExe tools\build_manifest.py $destination
+    if ($LASTEXITCODE -ne 0) { throw '构建校验生成失败。' }
     Write-Output ('已生成：' + (Join-Path $destination 'HSD图号助手.exe'))
 }
 finally {

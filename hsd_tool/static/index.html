@@ -8,6 +8,7 @@
   <title>HSD 图号助手</title>
   <link rel="stylesheet" href="/static/style.css">
   <script>window.HSD_TOKEN = __HSD_TOKEN__;</script>
+  <script src="/static/ai-settings.js" defer></script>
   <script src="/static/app.js" defer></script>
 </head>
 <body>
@@ -15,7 +16,7 @@
     <header class="app-header">
       <div class="brand"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="14" height="14" rx="3" stroke="currentColor" stroke-width="1.8"/><path d="m6 13 3-3 3 3 2-2M8 7h.01M8 20h10a3 3 0 0 0 3-3V8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span><div><strong>HSD <span>图号助手</span></strong><span class="brand-caption">图片对应 · 编号整理</span></div></div>
       <nav class="steps" aria-label="操作步骤"><span class="step active" data-step="1"><i>1</i>导入文件</span><span class="step-line"></span><span class="step" data-step="2"><i>2</i>自动匹配</span><span class="step-line"></span><span class="step" data-step="3"><i>3</i>确认导出</span></nav>
-      <div class="header-tools"><span class="local-badge"><span></span>本机处理</span><button id="shutdown-button" type="button" class="shutdown-button">退出工具</button></div>
+      <div class="header-tools"><span class="local-badge"><span></span><span id="processing-mode-label">本机匹配</span></span><button id="ai-settings-button" type="button" class="ai-settings-button">AI 复核设置</button><button id="shutdown-button" type="button" class="shutdown-button">退出工具</button></div>
     </header>
     <main id="main-content">
       <div id="notice" class="notice hidden" role="alert"><span id="notice-text"></span><button id="notice-close" class="icon-button" type="button" aria-label="关闭提示">×</button></div>
@@ -31,7 +32,7 @@
             <div class="number-settings"><div class="field"><label for="number-prefix">固定前缀</label><input id="number-prefix" class="standalone-input prefix-input" value="HSD" readonly aria-readonly="true"></div><div class="field"><label for="start-number">本批起始流水号</label><input id="start-number" class="standalone-input" name="start_number" type="number" inputmode="numeric" min="1" max="9999" step="1" value="1" required></div><div class="number-preview"><span>新编号示例</span><strong id="number-example">HSD0001</strong><small>按表格顺序编号 · 自动避开已用号</small></div></div>
             <p class="number-note">每批请确认起始号。当前表格以外已使用的编号，也需要由你核对。</p>
             <div class="field"><label for="output-path">结果保存到</label><div class="path-input"><span class="input-icon" aria-hidden="true">▱</span><input id="output-path" name="output_root" autocomplete="off" spellcheck="false" placeholder="选择用于保存结果的文件夹" required><button type="button" class="button button-secondary browse" data-pick="output" data-target="output-path">选择位置</button></div><p class="field-hint">将在此位置新建结果文件夹，原表格和原 AI 文件保留。</p></div>
-            <div class="form-actions"><span><span class="small-check">✓</span>全程在本机完成</span><button id="start-button" type="submit" class="button button-primary">开始匹配 <span aria-hidden="true">→</span></button></div>
+            <div class="form-actions"><span><span class="small-check">✓</span><span id="import-processing-note">本机匹配，原文件保留</span></span><button id="start-button" type="submit" class="button button-primary">开始自动处理 <span aria-hidden="true">→</span></button></div>
           </form>
           <aside class="import-aside">
             <div class="workflow-card"><span class="aside-label">这一批，交给图号助手</span><div class="flow-illustration" aria-hidden="true"><div class="illustration-sheet"><span></span><div><i></i><b>HSD0001</b></div><div><i></i><b>HSD0002</b></div><div><i></i><b>HSD0003</b></div></div><span class="illustration-arrow">→</span><div class="illustration-file"><span>Ai</span><b>HSD0001.ai</b><i>✓</i></div></div><ol class="workflow-list"><li><span>1</span><div><strong>自动找相同图片</strong><p>将表格图片与 AI 预览逐一比对。</p></div></li><li><span>2</span><div><strong>只检查有疑问的匹配</strong><p>清晰且唯一的匹配自动通过。</p></div></li><li><span>3</span><div><strong>一次导出整理好的结果</strong><p>编号表格、改名文件、待处理清单。</p></div></li></ol></div>
@@ -42,6 +43,7 @@
       <section id="processing-view" class="view hidden" aria-live="polite"><div class="processing-card card"><div class="processing-symbol"><span class="spinner"></span></div><p class="eyebrow" id="processing-eyebrow">正在准备本批文件</p><h1 id="processing-title">正在读取图片…</h1><p id="processing-message" class="subtitle">请稍候</p><div class="progress-track"><div id="progress-fill"></div></div><div class="progress-caption"><span id="progress-detail">处理中</span><span id="progress-percent"></span></div><p class="processing-footnote">文件越多，所需时间越长。请保持工具运行。</p></div></section>
       <section id="review-view" class="view hidden">
         <div class="page-heading review-heading"><div><p class="eyebrow" id="batch-caption">本批匹配结果</p><h1 id="review-title">检查匹配，准备导出。</h1><p class="subtitle" id="review-subtitle">明确匹配已自动通过，请检查剩余的疑问项。</p></div><div class="heading-actions"><button id="undo-button" type="button" class="button button-quiet hidden">撤销上一步</button><button id="new-task-button" type="button" class="button button-secondary">重新导入</button><button id="export-button" type="button" class="button button-primary">导出结果 <span aria-hidden="true">↗</span></button></div></div>
+        <div id="job-ai-overview" class="ai-job-overview hidden"></div>
         <div id="stats-bar" class="stats-bar"></div>
         <div id="warnings" class="warnings hidden"><details><summary id="warnings-summary">处理提示</summary><ul id="warnings-list"></ul></details></div>
         <div class="review-layout">
@@ -49,14 +51,28 @@
           <aside id="review-panel" class="card review-panel" aria-label="图片比对详情"></aside>
         </div>
       </section>
-      <section id="summary-view" class="view hidden"><div class="done-card card"><div class="success-symbol" aria-hidden="true">✓</div><p class="eyebrow" id="summary-eyebrow">自动匹配完成</p><h1 id="summary-title">本批图片都已对应好了。</h1><p class="subtitle" id="summary-subtitle">没有需要人工判断的项目。确认下面的摘要后即可导出。</p><div id="summary-stats" class="done-stats"></div><div class="output-location"><span>结果将保存到</span><p id="summary-output"></p></div><div id="summary-detail" class="done-summary"></div><div class="done-actions"><button id="summary-export-button" type="button" class="button button-primary">确认摘要并导出 <span aria-hidden="true">↗</span></button><button id="summary-browse-button" type="button" class="button button-secondary">查看全部匹配结果</button></div><button id="summary-new-task-button" type="button" class="text-button">重新导入</button></div></section>
-      <section id="done-view" class="view hidden"><div class="done-card card"><div class="success-symbol" aria-hidden="true">✓</div><p class="eyebrow">本批处理完成</p><h1>文件已经整理好了。</h1><p class="subtitle">原始文件保持不变，结果已保存到新的文件夹。</p><div id="done-stats" class="done-stats"></div><div class="output-location"><span>结果文件夹</span><p id="output-directory"></p></div><div id="done-summary" class="done-summary"></div><div class="done-actions"><button id="open-output-button" type="button" class="button button-primary">打开结果文件夹 <span aria-hidden="true">↗</span></button><button id="next-task-button" type="button" class="button button-secondary">处理下一批</button></div><button id="back-results-button" type="button" class="text-button">查看本批匹配记录</button></div></section>
+      <section id="summary-view" class="view hidden"><div class="done-card card"><div class="success-symbol" aria-hidden="true">✓</div><p class="eyebrow" id="summary-eyebrow">自动匹配完成</p><h1 id="summary-title">本批图片都已对应好了。</h1><p class="subtitle" id="summary-subtitle">没有需要人工判断的项目。确认下面的摘要后即可导出。</p><div id="summary-stats" class="done-stats"></div><div id="summary-ai-overview" class="ai-job-overview hidden"></div><div class="output-location"><span>结果将保存到</span><p id="summary-output"></p></div><div id="summary-detail" class="done-summary"></div><div class="done-actions"><button id="summary-export-button" type="button" class="button button-primary">确认摘要并导出 <span aria-hidden="true">↗</span></button><button id="summary-continue-button" type="button" class="button button-secondary hidden">继续处理疑问项</button><button id="summary-browse-button" type="button" class="button button-secondary">查看全部匹配结果</button></div><button id="summary-undo-button" type="button" class="text-button hidden">撤销上一步</button><button id="summary-new-task-button" type="button" class="text-button">重新导入</button></div></section>
+      <section id="done-view" class="view hidden"><div class="done-card card"><div class="success-symbol" aria-hidden="true">✓</div><p class="eyebrow">本批处理完成</p><h1>文件已经整理好了。</h1><p class="subtitle">原始文件保持不变，结果已保存到新的文件夹。</p><div id="done-stats" class="done-stats"></div><div class="output-location"><span>结果文件夹</span><p id="output-directory"></p></div><div id="done-summary" class="done-summary"></div><div id="done-ai-overview" class="ai-job-overview hidden"></div><div class="done-actions"><button id="open-output-button" type="button" class="button button-primary">打开结果文件夹 <span aria-hidden="true">↗</span></button><button id="next-task-button" type="button" class="button button-secondary">处理下一批</button></div><button id="back-results-button" type="button" class="text-button">查看本批匹配记录</button></div></section>
       <section id="error-view" class="view hidden"><div class="done-card card"><div class="error-symbol" aria-hidden="true">!</div><p class="eyebrow">本批处理未完成</p><h1>需要检查一下文件。</h1><p id="job-error" class="subtitle"></p><p class="field-hint">原始表格与 AI 文件未被修改。</p><button id="retry-task-button" type="button" class="button button-primary">返回导入并调整</button></div></section>
     </main>
     <footer class="app-footer"><span>HSD 图号助手 <span id="app-version">1.1.1</span></span><span>本地识图 · 保留原件 · 疑问可复核</span></footer>
   </div>
   <dialog id="confirm-dialog"><form method="dialog"><div class="dialog-icon" aria-hidden="true">↗</div><h2 id="dialog-title">确认导出</h2><p id="dialog-description"></p><div class="dialog-actions"><button value="cancel" class="button button-secondary">返回检查</button><button value="confirm" id="dialog-confirm" class="button button-primary">确认导出</button></div></form></dialog>
   <div id="toast" class="toast hidden" role="status"></div>
-  <dialog id="compare-dialog" class="compare-dialog"><div class="enlarged-header"><div><h2>放大比对</h2><p>对照两侧画面，检查是否为同一张图片。</p></div><form method="dialog"><button class="button button-secondary">关闭</button></form></div><div id="enlarged-pair" class="enlarged-pair"></div></dialog>
+  <dialog id="ai-settings-dialog" class="ai-settings-dialog" aria-labelledby="ai-settings-title">
+    <form id="ai-settings-form" autocomplete="off">
+      <div class="ai-settings-heading"><div><p class="eyebrow">DEEPSEEK · 视觉二次复核</p><h2 id="ai-settings-title">AI 复核设置</h2></div><button id="ai-settings-close" type="button" class="icon-button" aria-label="关闭 AI 设置">×</button></div>
+      <p class="ai-settings-intro">本机匹配后，将适合二次判断的表格图片与候选预览发送至 DeepSeek。原始 AI 文件和整份表格不会上传。</p>
+      <label class="ai-enable-row"><span><strong>启用 DeepSeek 二次复核</strong><small>先自动复核，再由员工处理剩余疑问项。</small></span><input id="ai-enabled" type="checkbox" disabled></label>
+      <div id="ai-mode-note" class="ai-mode-note">验证未完成，AI 先给出复核建议，仍需人工确认。</div>
+      <div class="field"><div class="field-label-row"><label for="ai-api-key">API Key</label><span id="ai-key-status" class="ai-key-status">正在读取设置…</span></div><input id="ai-api-key" type="password" autocomplete="new-password" spellcheck="false" autocapitalize="off" placeholder="粘贴 DeepSeek API Key" disabled><p id="ai-key-hint" class="field-hint">密钥不会回显；保存后输入框立即清空。</p></div>
+      <label class="ai-clear-key"><input id="ai-clear-key" type="checkbox" disabled><span>清除已保存的密钥</span></label>
+      <div class="ai-settings-meta"><span>服务：DeepSeek</span><span id="ai-model-label">模型：deepseek-flash</span></div>
+      <section class="ai-usage-card" aria-label="累计调用与费用估算"><div><h3>累计调用与费用估算</h3><button id="ai-usage-refresh" type="button" class="text-button">刷新</button></div><p id="ai-usage-counts">正在读取用量…</p><strong id="ai-usage-cost">费用估算暂不可用</strong><p id="ai-usage-unknown" class="ai-usage-unknown hidden"></p><small>按已知用量与峰值单价估算，单位 USD；实际费用以 DeepSeek 账单为准。</small></section>
+      <p id="ai-settings-message" class="ai-settings-message hidden" role="status"></p>
+      <div class="ai-settings-actions"><button id="ai-settings-reload" type="button" class="button button-secondary">重新读取</button><button id="ai-settings-save" type="submit" class="button button-primary" disabled>保存设置</button></div>
+    </form>
+  </dialog>
+  <dialog id="compare-dialog" class="compare-dialog"><div class="enlarged-header"><div><h2>放大比对</h2><p>对照两张图片，检查是否为同一张图片。</p></div><form method="dialog"><button class="button button-secondary">关闭</button></form></div><div id="enlarged-pair" class="enlarged-pair"></div></dialog>
 </body>
 </html>

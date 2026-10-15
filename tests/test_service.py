@@ -193,9 +193,10 @@ def test_stats_separate_skipped_from_pending_review(tmp_path):
     assert job["stats"]["total"] == 2
 
 
-def test_created_job_exposes_the_output_target(tmp_path):
+def test_created_job_exposes_the_output_target(tmp_path, monkeypatch):
     """The summary screen states where results will be written, so it is public."""
     manager, old = prepared(tmp_path, [""])
+    monkeypatch.setattr(manager.pool, "submit", lambda *args: None)
     target = tmp_path / "library"
     target.mkdir()
     identifier = manager.create({"workbook_path": old["_workbook_path"], "source_path": old["_source_path"],
