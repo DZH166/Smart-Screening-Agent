@@ -12,7 +12,7 @@ import pytest
 from hsd_tool.ai_policy import CHECKS
 from hsd_tool.ai_usage import empty_usage
 from hsd_tool.service import sha256
-from test_ai_policy import measured_evidence, validation_data
+from test_ai_policy import measured_evidence, validation_data, competition_for, alignment_for
 from test_service import prepared, wait_export
 
 
@@ -28,6 +28,8 @@ def qualified_batch(tmp_path, monkeypatch):
     row.update(_status="review", _file_id=None, _reason="独特特征不足，需二次复核。",
                _reason_code="not_verified", evidence=measured_evidence(),
                candidates=[{"file_id": "f0001", "score": .92}, {"file_id": "f0002", "score": .65}])
+    row["evidence"]["competition"] = competition_for(row, job["files"])
+    row["evidence"]["alignment"] = alignment_for(row, job["files"])
     job.update(revision=0, timings={})
     manager._plan(job)
     labels, observations = validation_data()
@@ -180,4 +182,5 @@ def test_ai_auto_does_not_bypass_original_source_hash_check(qualified_batch):
     manager.export("sample")
     result = wait_export(manager)
     assert result["status"] == "ready" and "发生了变化" in result["error"]
-    assert not list(Path(job["_output_root"]).iterdir())
+    output = Path(job["_output_root"])
+    assert not output.exists() or not list(output.iterdir())

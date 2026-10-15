@@ -33,6 +33,7 @@ from hsd_tool.ai_images import prepare_content
 from hsd_tool.ai_policy import CHECKS, POLICY_VERSION, PROMPT_VERSION, build_validation_record, select_review_case
 from hsd_tool.ai_settings import AiSettings
 from hsd_tool.ai_usage import UsageLedger, empty_usage, merge_usage
+from hsd_tool.ai_registry import ValidationRegistry
 
 SEEDS = (25783, 918271)
 
@@ -225,6 +226,7 @@ def run(directory, settings_directory, *, prepare_only=False, client_factory=Dee
     _json(directory / "labels.json", labels)  # Freeze truth before any API call.
     observations = {"schema_version": 1, "source": "deepseek_live" if client_factory is DeepSeekClient else "mock_test", "run_id": run_id,
                     "policy_version": POLICY_VERSION, "prompt_version": PROMPT_VERSION,
+                    "implementation_sha256": ValidationRegistry._implementation(),
                     "planned_case_ids": [record["case_id"] for record in records], "cases": []}
     for record in records:
         case = record["case"]
@@ -258,16 +260,22 @@ def run(directory, settings_directory, *, prepare_only=False, client_factory=Dee
         else:
             case_started = time.perf_counter()
             try:
+                if ValidationRegistry._implementation() != observations["implementation_sha256"]:
+                    raise ReviewError("implementation_changed", "本轮实现已变化，保留记录并停止后续调用。")
                 content = prepare_content(case, record["row"], record["files"])
                 result = client.review(content)
                 observation.update({key: result[key] for key in ("model", "request_id", "decision", "usage")})
                 observation["status"] = "completed"
                 observation.pop("error", None)
+                if ValidationRegistry._implementation() != observations["implementation_sha256"]:
+                    observation.update(status="failed", validation_eligible=False,
+                        error={"code": "implementation_changed", "message": "请求期间实现变化，此记录不能用于资格验证。"})
+                    circuit_reason = {"code": "implementation_changed", "message": "本轮实现变化，后续案例未调用。"}
                 consecutive_failures = 0
             except ReviewError as error:
                 observation.update(status="failed", error={"code": error.code, "message": error.message}, usage=error.usage)
                 consecutive_failures += 1
-                if error.code in {"authentication", "insufficient_balance", "redirect_blocked", "not_configured"}:
+                if error.code in {"authentication", "insufficient_balance", "redirect_blocked", "not_configured", "implementation_changed"}:
                     circuit_reason = {"code": "circuit_open", "message": "接口配置或权限异常，本轮其余案例未调用。"}
             except Exception:
                 observation.update(status="failed", error={"code": "local_error", "message": "本机复核准备异常，已停止后续调用。"})

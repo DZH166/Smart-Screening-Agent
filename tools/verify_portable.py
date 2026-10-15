@@ -133,11 +133,13 @@ def verify(base, work, bundle, expected_counts=None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("base", nargs="?", default="http://127.0.0.1:8804")
-    parser.add_argument("--work", type=Path, default=ROOT / "tmp" / "v12_packaged_validation")
+    parser.add_argument("--work", type=Path)
     parser.add_argument("--expected-counts", type=Path)
     parser.add_argument("--bundle", type=Path, required=True)
     args = parser.parse_args()
     expected = json.loads(args.expected_counts.read_text("utf-8"))["counts"] if args.expected_counts else None
     import sys
     sys.path.insert(0, str(ROOT))
-    verify(args.base, args.work, args.bundle.resolve(), expected)
+    bundle = args.bundle.resolve()
+    work = args.work or ROOT / "tmp" / (bundle.parent.name + "_packaged_validation")
+    verify(args.base, work, bundle, expected)

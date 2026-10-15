@@ -12,6 +12,8 @@ import marshal
 from types import CodeType
 from datetime import datetime, timedelta, timezone
 
+IMPLEMENTATION_MODULES = ("ai_policy", "ai_client", "ai_images", "matching", "matching_verification")
+
 
 class ValidationRegistry:
     def __init__(self, data_dir):
@@ -34,7 +36,7 @@ class ValidationRegistry:
                                                 for value in code.co_consts))
 
         signatures = {}
-        for name in ("ai_policy", "ai_client", "ai_images"):
+        for name in IMPLEMENTATION_MODULES:
             spec = importlib.util.find_spec("hsd_tool." + name)
             code = spec.loader.get_code("hsd_tool." + name) if spec and spec.loader else None
             if code is None:
@@ -71,9 +73,10 @@ class ValidationRegistry:
     def activate(self, observations, labels):
         from .ai_policy import build_validation_record
         record = build_validation_record(observations, labels)
+        if record.get("implementation_sha256") != self._implementation():
+            raise ValueError("调用时的复核实现与当前版本不同，不能重新激活旧记录。")
         now = datetime.now(timezone.utc)
-        record.update(issued_at=now.isoformat(), expires_at=(now + timedelta(days=7)).isoformat(),
-                      implementation_sha256=self._implementation())
+        record.update(issued_at=now.isoformat(), expires_at=(now + timedelta(days=7)).isoformat())
         self.directory.mkdir(parents=True, exist_ok=True)
         if not self.secret_path.exists():
             with self.secret_path.open("xb") as stream:

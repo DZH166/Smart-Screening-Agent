@@ -21,6 +21,29 @@ def measured_evidence(method="texture"):
             "changed": .001, "major_changed": .0001, "worst": .1, "residual": .01}
 
 
+def competition_for(row, files):
+    ranked = {item["file_id"]: item["score"] for item in row["candidates"]}
+    credible = [item["file_id"] for item in row["candidates"] if item["score"] >= .55]
+    return {"version": "local-competition-1", "complete": True, "unique": len(credible) == 1,
+            "evaluated_file_ids": [file["id"] for file in files], "credible_candidate_ids": credible,
+            "scores": [{"file_id": file["id"], "score": ranked.get(file["id"], .1),
+                        "pattern_supported": file["id"] in credible} for file in files]}
+
+
+def alignment_for(row, files):
+    with Image.open(row["image_path"]) as query:
+        query_size = list(query.size)
+    with Image.open(files[0]["preview_path"]) as candidate:
+        candidate_size = list(candidate.size)
+    matrix = [[query_size[0] / candidate_size[0], 0., 0.], [0., query_size[1] / candidate_size[1], 0.]]
+    # Artificial fixture: exact full-frame scale correspondence, never a live
+    # qualification or a replacement for the matcher's measured coverage.
+    return {"kind": "affine", "direction": "candidate_to_query", "query_size": query_size,
+            "candidate_size": candidate_size, "matrix": matrix, "matrices": [matrix],
+            "geometry_verified": True, "query_coverage": 1., "candidate_coverage": 1.,
+            "candidate_ink_coverage": 1., "unverified_query": 0., "unverified_candidate": 0.}
+
+
 def make_job(tmp_path):
     files = []
     for index, color in enumerate(("red", "blue", "green"), 1):
@@ -36,6 +59,8 @@ def make_job(tmp_path):
     row = {"id": "r2", "status": "review", "image_path": str(query), "issue": None,
            "candidates": [{"file_id": "f0001", "score": .91}, {"file_id": "f0002", "score": .65}],
            "evidence": measured_evidence()}
+    row["evidence"]["competition"] = competition_for(row, files)
+    row["evidence"]["alignment"] = alignment_for(row, files)
     return row, [row], files
 
 
@@ -168,7 +193,8 @@ def test_validated_positive_only_accepts_with_matching_server_envelope(tmp_path)
 def test_local_content_and_colour_contradictions_cannot_be_overridden_by_checkboxes(tmp_path, method, measure, value, accepted):
     row, rows, files = make_job(tmp_path)
     row["evidence"] = {**measured_evidence(method), measure: value,
-                       "thresholds": {"major_changed": .003, "changed": .015}}
+                       "thresholds": {"major_changed": .003, "changed": .015},
+                       "competition": competition_for(row, files), "alignment": alignment_for(row, files)}
     case = select_review_case(row, rows, files)
     validation = {**trusted(), "categories": [case["category"]]}
     envelope = {"model": "revision-verified", "case_fingerprint": case["fingerprint"], "decision": positive()}
@@ -200,9 +226,11 @@ def test_evidence_changes_invalidate_existing_case_fingerprint(tmp_path):
 ])
 def test_missing_colour_or_content_measurement_cannot_be_filled_by_model_checkboxes(tmp_path, method, missing):
     row, rows, files = make_job(tmp_path)
-    row["evidence"] = measured_evidence(method)
+    row["evidence"] = {**measured_evidence(method), "competition": competition_for(row, files),
+                       "alignment": alignment_for(row, files)}
     if missing is None:
-        row["evidence"] = {"method": method}
+        row["evidence"] = {"method": method, "competition": competition_for(row, files),
+                           "alignment": alignment_for(row, files)}
     else:
         row["evidence"][missing] = None
     case = select_review_case(row, rows, files)
@@ -232,6 +260,7 @@ def test_confidence_cannot_replace_complete_evidence(tmp_path, mutation):
 
 
 def validation_data():
+    from hsd_tool.ai_registry import ValidationRegistry
     labels, observations = [], []
     # Independent known-truth batches have distinct image fingerprints.  This is
     # a unit-test manifest, never a stored production activation or API response.
@@ -247,7 +276,15 @@ def validation_data():
                    "geometry": {"query": {"width": 480, "height": 120},
                                 "candidates": [{"candidate_id": f"f{j:04}", "width": 240, "height": 60}
                                                for j in range(1, 3)]},
-                   "local_evidence": {**measured_evidence(), "valid": True, "thresholds": {}}}
+                   "local_evidence": {**measured_evidence(), "valid": True, "thresholds": {}},
+                   "competition_evidence": {"version": "local-competition-1", "complete": True, "unique": False,
+                       "evaluated_file_ids": ["f0001", "f0002"], "credible_candidate_ids": ["f0001", "f0002"],
+                       "scores": [{"file_id": "f0001", "score": .9, "pattern_supported": True},
+                                  {"file_id": "f0002", "score": .65, "pattern_supported": True}]}}
+        digests["comparison_inputs"] = copy.deepcopy(digests["candidates"])
+        digests["alignment_evidence"] = {"kind": "affine", "direction": "candidate_to_query",
+            "query_size": [480, 120], "candidate_size": [240, 60], "matrices": [[[2., 0., 0.], [0., 2., 0.]]],
+            "geometry_verified": True, "query_coverage": 1., "candidate_coverage": 1., "candidate_ink_coverage": 1.}
         fingerprint = _case_fingerprint("texture_review", digests)
         labels.append({"case_id": identity, "batch_id": f"independent-{index // 6}",
                        "split": "holdout", "label": "same" if same else "different",
@@ -266,6 +303,7 @@ def validation_data():
     return ({"schema_version": 1, "cases": labels},
             {"schema_version": 1, "source": "deepseek_live", "policy_version": POLICY_VERSION,
              "prompt_version": PROMPT_VERSION, "cases": observations,
+             "implementation_sha256": ValidationRegistry._implementation(),
              "planned_case_ids": [item["case_id"] for item in observations]})
 
 
@@ -274,10 +312,41 @@ def test_independent_validation_record_is_measured_and_untrusted_until_registry_
     result = build_validation_record(observations, labels)
     assert result["categories"] == ["texture_review"]
     assert result.get("trusted") is not True
+    assert result["implementation_sha256"] == observations["implementation_sha256"]
     assert result["counts"]["texture_review"]["accepted_positives"] == 2
     assert result["counts"]["texture_review"]["negative_controls"] == 10
     assert result["origins"] == ["independent_manual", "synthetic_known_truth"]
     json.dumps(result, allow_nan=False)
+
+
+@pytest.mark.parametrize("mutation", [
+    lambda obs: obs.pop("implementation_sha256"),
+    lambda obs: obs.update(implementation_sha256={}),
+    lambda obs: obs["implementation_sha256"].pop("matching"),
+    lambda obs: obs["implementation_sha256"].update(unknown_module="0" * 64),
+    lambda obs: obs["implementation_sha256"].update(ai_client="not-a-digest"),
+])
+def test_unsigned_or_malformed_call_implementation_cannot_be_backfilled(mutation):
+    labels, observations = validation_data()
+    mutation(observations)
+    before = copy.deepcopy(observations)
+    with pytest.raises(ValueError, match="实现签名|实现已变化"):
+        build_validation_record(observations, labels)
+    assert observations == before
+
+
+@pytest.mark.parametrize("module", ["ai_policy", "ai_client", "ai_images", "matching", "matching_verification"])
+def test_same_protocol_old_observations_cannot_be_reactivated_under_new_implementation(tmp_path, monkeypatch, module):
+    from hsd_tool.ai_registry import ValidationRegistry
+    labels, observations = validation_data()
+    recorded = copy.deepcopy(observations["implementation_sha256"])
+    current = {**recorded, module: "0" * 64}
+    monkeypatch.setattr(ValidationRegistry, "_implementation", staticmethod(lambda: dict(current)))
+    registry = ValidationRegistry(tmp_path)
+    with pytest.raises(ValueError, match="实现签名|实现已变化"):
+        registry.activate(observations, labels)
+    assert observations["implementation_sha256"] == recorded
+    assert not registry.path.exists() and not registry.secret_path.exists()
 
 
 @pytest.mark.parametrize("mutation", [

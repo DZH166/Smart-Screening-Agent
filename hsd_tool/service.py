@@ -193,6 +193,16 @@ class JobManager:
                     row["diagnostics"] = match.get("diagnostics", {})
                     row["evidence"] = match.get("evidence")
                     row["candidates"] = match.get("candidates", [])
+                    failures = set((row["evidence"] or {}).get("failed_checks", []))
+                    hard_reasons = {"ownership_conflict", "source_issue", "duplicate_preview",
+                                    "candidate_gap", "incomplete_candidate_validation"}
+                    if row["_status"] == "review" and not failures.intersection(hard_reasons):
+                        if "foreground_colours" in failures:
+                            row["_reason"] = "局部颜色存在差异，请确认是否为同款不同色。"
+                            row["_reason_code"] = "local_colour_difference"
+                        elif "coherent_difference" in failures:
+                            row["_reason"] = "局部内容尚未核实，请放大确认。"
+                            row["_reason_code"] = "local_content_unverified"
                     if row.get("issue"):
                         row["_status"] = "unmatched"
                         row["_file_id"] = None
@@ -391,12 +401,36 @@ class JobManager:
         job = self.jobs[identifier]
         staging = None
         staging_created = False
+
+        def verify_ai_comparison_sources():
+            # An excluded rival is still part of the uniqueness proof. Verify
+            # all originals behind that proof, even if they are not exported.
+            from .ai_policy import select_review_case, evaluate_suggestion
+            from .ai_workflow import _sources_unchanged
+            digests = {}
+
+            def current_digest(path):
+                if path not in digests:
+                    digests[path] = sha256(path)
+                return digests[path]
+
+            for row in job["rows"]:
+                if row["status"] != "auto" or row.get("_accepted_by") != "ai":
+                    continue
+                case = select_review_case({**row, "status": "review"}, job["rows"], job["files"])
+                if not case.get("eligible") or not _sources_unchanged(case, job["files"], current_digest):
+                    raise ValueError("AI复核所依据的原文件发生了变化，请重新导入再导出。")
+                verdict = evaluate_suggestion(case, row.get("_ai_envelope"), self.ai_validation.load())
+                if not verdict["accepted"]:
+                    raise ValueError("导出期间AI复核依据或验证资格发生变化，请重新导入并核对结果。")
+
         try:
             from .workbook import write_numbered_workbook
             if sha256(job["_workbook_path"]) != job["_input_digest"]:
                 raise ValueError("导入后源表格发生了变化，请重新导入，避免把编号填到错误的记录。")
             if job.get("_source_archive_digest") and sha256(job["_source_path"]) != job["_source_archive_digest"]:
                 raise ValueError("导入后源压缩包发生了变化，请重新导入再导出。")
+            verify_ai_comparison_sources()
             root = Path(job["_output_root"])
             root.mkdir(parents=True, exist_ok=True)
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -440,6 +474,7 @@ class JobManager:
                 raise ValueError("导出期间源表格发生了变化，请重新导入后再处理。")
             if job.get("_source_archive_digest") and sha256(job["_source_path"]) != job["_source_archive_digest"]:
                 raise ValueError("导出期间源压缩包发生了变化，请重新导入后再处理。")
+            verify_ai_comparison_sources()
             pending = [{"row": r["row_number"], "number": r["number"], "status": r["status"],
                         "reason_code": r.get("reason_code"), "reason": r["reason"] or "没有已确认的对应文件"}
                        for r in job["rows"] if r["status"] not in ACCEPTED]
@@ -470,7 +505,8 @@ class JobManager:
                          for row in job["rows"]]
             (staging / "处理记录.json").write_text(json.dumps({**report, "mapping": mapping, "pending_rows": pending,
                     "unused": unused, "decision_records": decisions,
-                    "ai_observations": job.get("_ai_observation_artifact")}, ensure_ascii=False, indent=2, allow_nan=False), "utf-8")
+                    "ai_observations": job.get("_ai_observation_artifact"),
+                    "ai_observation_runs": job.get("_ai_observation_runs", [])}, ensure_ascii=False, indent=2, allow_nan=False), "utf-8")
             if final.exists():
                 raise ValueError("输出文件夹已存在，请重新导入后重试。")
             staging.rename(final)

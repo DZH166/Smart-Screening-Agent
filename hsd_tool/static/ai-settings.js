@@ -143,7 +143,11 @@
     const checksHtml = review.checks && typeof review.checks === 'object' ? `<ul>${Object.entries(checks).filter(([key])=>typeof review.checks[key]==='boolean').map(([key,label])=>`<li>${label}：${review.checks[key]?'认为满足':'未确认满足'}</li>`).join('')}</ul>` : '';
     const reason = String(review.reason || '');
     const brief = Array.from(reason).slice(0,64).join('') + (Array.from(reason).length > 64 ? '…' : '');
-    const details = reason || differences || review.gate_reason || checksHtml ? `<details class="ai-check-details"><summary>查看差异与完整复核说明</summary>${reason ? `<p>${escapeHtml(reason)}</p>` : ''}${differences ? `<p>需注意：${escapeHtml(differences)}</p>` : ''}${!auto&&review.gate_reason ? `<p class="ai-gate-note">未自动通过：${escapeHtml(review.gate_reason)}</p>` : ''}${checksHtml}</details>` : '';
+    const gateReasons = Array.isArray(review.gate_failures) ? [...new Set(review.gate_failures.map((item)=>String(item?.reason||'')).filter(Boolean))] : [];
+    const gatesHtml = !auto && gateReasons.length ? `<ul class="ai-gate-note">${gateReasons.map((value)=>`<li>${escapeHtml(value)}</li>`).join('')}</ul>` : !auto&&review.gate_reason ? `<p class="ai-gate-note">未自动通过：${escapeHtml(review.gate_reason)}</p>` : '';
+    const inconsistent = review.protocol_diagnostics?.inconsistent === true || review.protocol_diagnostics?.protocol_inconsistent === true;
+    const protocolHtml = inconsistent ? '<p class="ai-gate-note">模型回答存在矛盾，本项保留人工判断。</p>' : '';
+    const details = reason || differences || gatesHtml || checksHtml || protocolHtml ? `<details class="ai-check-details"><summary>查看差异与完整复核说明</summary>${reason ? `<p>${escapeHtml(reason)}</p>` : ''}${differences ? `<p>需注意：${escapeHtml(differences)}</p>` : ''}${protocolHtml}${gatesHtml}${checksHtml}</details>` : '';
     return `<section class="ai-row-note"><strong>${escapeHtml(title)}</strong>${candidate}${brief ? `<p class="ai-row-summary">${escapeHtml(brief)}</p>` : ''}${differentSelection ? `<button type="button" class="text-button" data-candidate-id="${escapeHtml(review.candidate_id)}">查看 AI 复核的候选</button>` : ''}${hasDecision&&!auto ? '<small>仅供参考，仍需人工确认。</small>' : ''}${details}</section>`;
   }
 

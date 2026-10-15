@@ -21,6 +21,9 @@ import numpy as np
 from PIL import Image
 import pymupdf
 
+from .matching_verification import (affine_coverage, phase_coverage, periodic_extension,
+                                    pixel_metrics, coherent_difference)
+
 MAX_FILES = 500
 MAX_ENTRIES = 10000
 MAX_FILE_BYTES = 256 * 1024 * 1024
@@ -218,6 +221,7 @@ class _Appearance:
     descriptors: np.ndarray | None
     histogram: np.ndarray
     digest: str
+    palette: dict
 
 
 def _appearance(array: np.ndarray, detector) -> _Appearance:
@@ -226,12 +230,58 @@ def _appearance(array: np.ndarray, detector) -> _Appearance:
     lab = cv2.cvtColor(_resize_height(array, 96), cv2.COLOR_BGR2LAB)
     histogram = cv2.calcHist([lab], [0, 1, 2], None, [12, 16, 16], [0, 256] * 3)
     cv2.normalize(histogram, histogram, norm_type=cv2.NORM_L1)
+    bounds = _content_bounds(array)
+    body = array[bounds[1]:bounds[3], bounds[0]:bounds[2]] if bounds else array
+    kernel = np.ones((3, 3), np.uint8)
+    local_range = (cv2.dilate(body, kernel).astype(np.int16)
+                   - cv2.erode(body, kernel).astype(np.int16)).max(axis=2)
+    flat = cv2.erode((local_range <= 2).astype(np.uint8), kernel,
+                     borderType=cv2.BORDER_CONSTANT, borderValue=0).astype(bool)
+    flat_pixels = body[flat]
+    # Stable real interiors, not resampled anti-alias mixtures. Sampling limits
+    # work only after flat-region selection, so a one-row mixed stripe edge
+    # cannot become a fictitious one-percent foreground colour.
+    if len(flat_pixels) > 65536:
+        flat_pixels = flat_pixels[::math.ceil(len(flat_pixels) / 65536)]
+    colours, counts = np.unique(flat_pixels, axis=0, return_counts=True)
+    order = np.argsort(counts)[::-1]
+    weights = counts[order] / counts.sum() if counts.size else np.zeros(0)
+    dominant = weights >= .005
+    encoded = ((body[:, :, 0].astype(np.uint32) << 16)
+               | (body[:, :, 1].astype(np.uint32) << 8) | body[:, :, 2])
+    observed, observed_counts = np.unique(encoded, return_counts=True)
+    observed = observed[np.argsort(observed_counts)[-256:]]
+    observed_colours = np.column_stack(((observed >> 16) & 255,
+                                       (observed >> 8) & 255, observed & 255)).astype(np.float32)
+    palette = {'colours': colours[order][dominant].astype(np.float32),
+               'weights': weights[dominant], 'concentration': float(weights[dominant].sum()),
+               'flat_coverage': float(flat.mean()), 'observed_colours': observed_colours}
     return _Appearance(array, keypoints, descriptors, histogram,
-                       hashlib.sha256(array.tobytes()).hexdigest())
+                       hashlib.sha256(array.tobytes()).hexdigest(), palette)
+
+
+def _palette_difference(query: _Appearance, candidate: _Appearance) -> dict:
+    first, second = query.palette, candidate.palette
+    applicable = bool(first['flat_coverage'] >= .6 and second['flat_coverage'] >= .6
+                      and first['concentration'] >= .9 and second['concentration'] >= .9
+                      and 0 < len(first['colours']) <= 16 and 0 < len(second['colours']) <= 16)
+    mismatch = 0.
+    if applicable:
+        # The same real colour can occupy a thin line on one side and a wider
+        # rendered line on the other. It need not itself have a 3x3 interior on
+        # both sides, but must be an actual observed colour, not an inferred mix.
+        forward = np.max(np.abs(first['colours'][:, None] - second['observed_colours'][None]), axis=2)
+        reverse = np.max(np.abs(second['colours'][:, None] - first['observed_colours'][None]), axis=2)
+        mismatch = max(float(first['weights'][np.min(forward, axis=1) > 8].sum()),
+                       float(second['weights'][np.min(reverse, axis=1) > 8].sum()))
+    return {'palette_applicable': applicable, 'palette_mismatch': mismatch,
+            'palette_query_flat_coverage': first['flat_coverage'],
+            'palette_candidate_flat_coverage': second['flat_coverage']}
 
 
 def _features(query: _Appearance, candidate: _Appearance) -> dict:
-    result = {'score': 0., 'strong': False, 'method': 'features'}
+    result = {'score': 0., 'strong': False, 'method': 'features',
+              'failed_checks': ['insufficient_geometric_support']}
     if (query.descriptors is None or candidate.descriptors is None
             or min(len(query.descriptors), len(candidate.descriptors)) < 6):
         return result
@@ -285,6 +335,7 @@ def _features(query: _Appearance, candidate: _Appearance) -> dict:
     mae = float(diff.mean())
     changed = float(np.mean(np.max(diff, axis=1) > .2))
     major_changed = float(np.mean(np.max(diff, axis=1) > .45))
+    coherent = coherent_difference(first, second, region)
     score = max(0, 1 - 2 * mae) * min(1, inliers / 14) * min(1, coverage / .18)
     # The same isolated logo on otherwise different artwork is not sufficient.
     # Find separate geometrically verified copies of the art instead of assuming
@@ -296,6 +347,7 @@ def _features(query: _Appearance, candidate: _Appearance) -> dict:
         cv2.invertAffineTransform(transform), (ai.shape[1], ai.shape[0]), flags=cv2.INTER_NEAREST)
     source_region = cv2.erode(source_region, np.ones((3, 3), np.uint8)).astype(bool)
     source_accepted = source_region.copy()
+    transforms = [transform]
     if overlap >= .95:
         global_mae, global_changed = mae, changed
     if ((overlap < .95 or source_accepted.mean() < .95) and inliers >= 14
@@ -331,8 +383,11 @@ def _features(query: _Appearance, candidate: _Appearance) -> dict:
             if (float(values.mean()) > .045 or float(np.mean(np.max(values, axis=1) > .2)) > .08
                     or float(np.mean(np.max(values, axis=1) > .45)) > .015):
                 continue
+            if coherent_difference(first, cv2.GaussianBlur(other_warp, (3, 3), .6), other_region) > 0:
+                continue
             full_error[other_region] = np.minimum(full_error[other_region], values)
             accepted |= other_region
+            transforms.append(other)
             other_source = cv2.warpAffine(np.ones(qi.shape[:2], np.uint8),
                 cv2.invertAffineTransform(other), (ai.shape[1], ai.shape[0]), flags=cv2.INTER_NEAREST)
             source_accepted |= cv2.erode(other_source, np.ones((3, 3), np.uint8)).astype(bool)
@@ -347,16 +402,54 @@ def _features(query: _Appearance, candidate: _Appearance) -> dict:
     source_coverage = float(source_accepted.mean())
     # White Illustrator margins need not appear in the workbook thumbnail, but
     # actual unobserved art is not proven identical merely because the query is.
-    source_ink = np.min(ai, axis=2) < 235
+    source_ink = np.min(ai, axis=2) < 250
     source_ink_coverage = (float(source_accepted[source_ink].mean())
                            if source_ink.any() else source_coverage)
+    edge_proof = None
+    # Erosion is an interpolation guard, not evidence of missing artwork. Check
+    # those excluded pixels independently in both coordinate planes before they
+    # may contribute to coverage; keep the original interior tests unchanged.
+    geometry_verified = (inliers >= 14 and coverage >= .18 and plausible
+                         and mae <= .045 and changed <= .08 and major_changed <= .015)
+    if geometry_verified:
+        edge_proof = affine_coverage(qi, ai, transforms)
+        verified_coverage = max(verified_coverage, edge_proof['query_coverage'])
+        source_coverage = max(source_coverage, edge_proof['candidate_coverage'])
+        source_ink_coverage = max(source_ink_coverage, edge_proof['candidate_ink_coverage'])
+        if edge_proof['query_coverage'] >= .95:
+            global_mae, global_changed = edge_proof['global_mae'], edge_proof['global_changed']
+        coherent = max(coherent, edge_proof.get('unverified_query_coherent', 0.),
+                       edge_proof.get('unverified_candidate_coherent', 0.))
+    palette = _palette_difference(query, candidate)
     strong = (inliers >= 14 and coverage >= .18 and mae <= .045 and changed <= .08 and major_changed <= .015
               and global_mae <= .06 and global_changed <= .12 and plausible
-              and (source_coverage >= .95 or source_ink_coverage >= .98))
+              and (source_coverage >= .95 or source_ink_coverage >= .98)
+              and palette['palette_mismatch'] <= .005 and coherent == 0)
     result.update(score=score, strong=bool(strong), inliers=inliers, coverage=coverage,
                   mae=mae, changed=changed, major_changed=major_changed, global_mae=global_mae,
                   global_changed=global_changed, overlap=overlap, verified_coverage=verified_coverage,
-                  source_coverage=source_coverage, source_ink_coverage=source_ink_coverage)
+                  source_coverage=source_coverage, source_ink_coverage=source_ink_coverage,
+                  plausible=bool(plausible), edge_proof=edge_proof,
+                  coherent_difference=coherent)
+    result.update(palette)
+    limits = {'inliers': inliers >= 14, 'feature_coverage': coverage >= .18,
+              'pixel_mae': mae <= .045, 'changed_area': changed <= .08,
+              'major_change': major_changed <= .015, 'query_coverage': verified_coverage >= .95,
+              'global_mae': global_mae <= .06, 'global_changed': global_changed <= .12,
+              'plausible_geometry': bool(plausible),
+              'candidate_coverage': source_coverage >= .95 or source_ink_coverage >= .98,
+              'feature_score': score >= .91, 'foreground_colours': palette['palette_mismatch'] <= .005,
+              'coherent_difference': coherent == 0}
+    result['failed_checks'] = [key for key, okay in limits.items() if not okay]
+    result['alignment'] = {
+        'kind': 'affine', 'direction': 'candidate_to_query',
+        'matrix': transforms[0].tolist(), 'matrices': [t.tolist() for t in transforms],
+        'query_size': [qi.shape[1], qi.shape[0]], 'candidate_size': [ai.shape[1], ai.shape[0]],
+        'query_coverage': verified_coverage, 'candidate_coverage': source_coverage,
+        'candidate_ink_coverage': source_ink_coverage,
+        'unverified_query': 1 - verified_coverage, 'unverified_candidate': 1 - source_coverage,
+        'edge_verified_coverage': edge_proof['edge_verified_coverage'] if edge_proof else 0.,
+        'geometry_verified': bool(geometry_verified), 'verified': bool(strong and score >= .91)}
     return result
 
 
@@ -367,8 +460,9 @@ def _content_bounds(image: np.ndarray) -> tuple[int, int, int, int] | None:
     does not show. Only the outer uniform border is trimmed, so every inked
     pixel - including real extra artwork - stays inside the comparison.
     """
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    ink = gray < 246
+    # A bright coloured mark is still artwork. Luminance alone would classify a
+    # pale yellow addition as blank, so only near-white pixels form the border.
+    ink = image.min(axis=2) < 250
     if not ink.any():
         return None
     rows = np.flatnonzero(ink.any(axis=1))
@@ -411,7 +505,7 @@ def _unexplained_content(tiled: np.ndarray, query: np.ndarray, y: int) -> float:
 
 
 def _texture_scan(query: np.ndarray, body: np.ndarray, height: int, best: dict,
-                  width_scale: float = 1.) -> None:
+                  width_scale: float = 1., subpixel: bool = False) -> None:
     """One scale of the tiled strip search; keeps the strongest pixel evidence."""
     # Two vertical repeats must fully contain the query. A shorter tile would make
     # cv2.matchTemplate assert instead of degrading to "no evidence at this scale",
@@ -432,17 +526,51 @@ def _texture_scan(query: np.ndarray, body: np.ndarray, height: int, best: dict,
     patch = tiled[y:y + query.shape[0], x:x + query.shape[1]]
     if patch.shape != query.shape:
         return
+    location = [float(x), float(y)]
+    if subpixel:
+        best_patch = pixel_metrics(query, patch)
+        for dy in (0., -.5, -.25, .25, .5):
+            for dx in (0., -.5, -.25, .25, .5):
+                if not (0 <= x + dx <= tiled.shape[1] - query.shape[1]
+                        and 0 <= y + dy <= tiled.shape[0] - query.shape[0]):
+                    continue
+                candidate_patch = cv2.getRectSubPix(tiled, (query.shape[1], query.shape[0]),
+                    (x + dx + (query.shape[1] - 1) / 2, y + dy + (query.shape[0] - 1) / 2))
+                measured = pixel_metrics(query, candidate_patch)
+                if measured['rms'] < best_patch['rms']:
+                    best_patch = measured
+                    patch = candidate_patch
+                    location = [x + dx, y + dy]
     error = np.abs(query.astype(np.float32) - patch.astype(np.float32)) / 255
     pixel = error.max(axis=2)
     rms = float(np.sqrt(np.mean(error ** 2)))
     score = 1 - rms
     if score <= best.get('score', 0.):
         return
-    best.update(score=score, height=height, rms=rms,
+    coherent = coherent_difference(query, patch)
+    proof = phase_coverage(tiled, query, differences, tile.shape[:2])
+    # The subpixel placement is a measured comparison too. Its full query window
+    # covers the complete source only when it spans both source dimensions.
+    if (subpixel and rms <= .045 and float((pixel > .2).mean()) <= .015
+            and float((pixel > .45).mean()) <= .003 and float(np.percentile(pixel, 99.5)) <= .55
+            and coherent == 0
+            and query.shape[0] >= tile.shape[0] and query.shape[1] >= tile.shape[1]):
+        proof = dict(proof, source_coverage=1., source_ink_coverage=1., residual=0., phases=[location])
+    periodic = None
+    if proof['source_coverage'] < .95 and proof['source_ink_coverage'] < .98 and rms <= .065:
+        periodic = periodic_extension(query, tile, tuple(location))
+        if periodic and periodic['source_coverage'] >= .95:
+            proof = dict(proof, source_coverage=periodic['source_coverage'],
+                         source_ink_coverage=periodic['source_ink_coverage'], residual=periodic['residual'])
+    best.update(score=score, height=height, rms=rms, width_scale=width_scale,
                 changed=float((pixel > .2).mean()),
                 major_changed=float((pixel > .45).mean()),
                 worst=float(np.percentile(pixel, 99.5)),
-                residual=_unexplained_content(tiled, query, y))
+                residual=proof['residual'], source_coverage=proof['source_coverage'],
+                source_ink_coverage=proof['source_ink_coverage'], phases=proof['phases'],
+                location=location, tile_shape=list(tile.shape[:2]), coherent_difference=coherent)
+    if periodic:
+        best['periodic_proof'] = periodic
 
 
 def _texture_search(query: np.ndarray, body: np.ndarray, trimmed: bool) -> dict:
@@ -472,7 +600,7 @@ def _texture_search(query: np.ndarray, body: np.ndarray, trimmed: bool) -> dict:
     return outcome
 
 
-def _texture(query: _Appearance, candidate: _Appearance) -> dict:
+def _texture(query: _Appearance, candidate: _Appearance, *, precision: bool = False) -> dict:
     """Whole-strip comparison, with scale/translation and horizontal repetition.
 
     Useful for lines, dots and repeated motifs that have too few unique
@@ -504,6 +632,43 @@ def _texture(query: _Appearance, candidate: _Appearance) -> dict:
     cv2.normalize(histogram, histogram, norm_type=cv2.NORM_L1)
     best['color_distance'] = float(cv2.compareHist(query.histogram, histogram,
                                                    cv2.HISTCMP_BHATTACHARYYA))
+    palette = _palette_difference(query, candidate)
+    comparison_height = 64
+    body = content if best.get('trimmed') and content is not None else candidate.image
+    if (precision and best.get('score', 0.) >= .80 and best['color_distance'] <= .25
+            and query.image.shape[0] >= 96 and 'height' in best):
+        # Use original detail for the final proof. At 64 pixels, moving an edge
+        # by one sampling pixel can count as a large changed area in a stripe or
+        # dot pattern. A denser scale/phase measurement reduces that quantisation
+        # error without changing the acceptance limits or the source artwork.
+        comparison_height = min(256, query.image.shape[0])
+        detailed_query = _resize_height(query.image, comparison_height)
+        centre = best['height'] * comparison_height / 64
+        detailed = {'score': 0., 'method': 'texture', 'strong': False,
+                    'trimmed': best.get('trimmed', False)}
+        base_width = best.get('width_scale', 1.)
+        for height in range(max(math.ceil(comparison_height / 2), round(centre) - 2),
+                            round(centre) + 3):
+            nominal_width = _resize_height(body, height).shape[1]
+            centre_width = round(nominal_width * base_width)
+            radius = max(1, math.ceil(nominal_width * .005))
+            for width in range(centre_width - radius, centre_width + radius + 1):
+                width_scale = width / nominal_width
+                if not .991 <= width_scale <= 1.009:
+                    continue
+                _texture_scan(detailed_query, body, height, detailed, width_scale)
+        if 'height' in detailed:
+            _texture_scan(detailed_query, body, detailed['height'], detailed,
+                          detailed.get('width_scale', 1.), subpixel=True)
+        # A low-resolution score is never substituted for a failed detailed
+        # verification. Retain it for diagnostics only.
+        if 'rms' in detailed:
+            detailed['coarse_metrics'] = {key: best.get(key) for key in
+                ('rms', 'changed', 'major_changed', 'worst', 'residual', 'height')}
+            detailed['color_distance'] = best['color_distance']
+            best = detailed
+        else:
+            comparison_height = 64
     if 'rms' in best:
         # Auto acceptance needs every signal at once: near-exact pixels, no
         # localized difference, no bad region, a matching colour spread, and no
@@ -515,7 +680,58 @@ def _texture(query: _Appearance, candidate: _Appearance) -> dict:
         best['strong'] = bool(best['rms'] <= .045 and best['changed'] <= .015
                               and best['major_changed'] <= .003 and best['worst'] <= .55
                               and best['color_distance'] <= .25
-                              and best.get('residual', 1.) <= .08)
+                              and best.get('residual', 1.) <= .08
+                              and palette['palette_mismatch'] <= .005
+                              and best.get('coherent_difference', 1.) == 0
+                              and (best.get('source_coverage', 0.) >= .95
+                                   or best.get('source_ink_coverage', 0.) >= .98))
+    thresholds = {'rms': .045, 'changed': .015, 'major_changed': .003,
+                  'worst': .55, 'color_distance': .25, 'residual': .08}
+    best['failed_checks'] = [key for key, limit in thresholds.items()
+                             if best.get(key, 1.) > limit]
+    best.update(palette)
+    if palette['palette_mismatch'] > .005:
+        best['failed_checks'].append('foreground_colours')
+    if best.get('coherent_difference', 1.) > 0:
+        best['failed_checks'].append('coherent_difference')
+    if best.get('source_coverage', 0.) < .95 and best.get('source_ink_coverage', 0.) < .98:
+        best['failed_checks'].append('candidate_coverage')
+    if 'location' in best:
+        bounds = crop if best.get('trimmed') and crop else (0, 0, candidate.image.shape[1], candidate.image.shape[0])
+        left, top, right, bottom = bounds
+        th, tw = best['tile_shape']
+        sx, sy = tw / (right - left), th / (bottom - top)
+        factor = query.image.shape[0] / comparison_height
+        qh, qw = comparison_height, _resize_height(query.image, comparison_height).shape[1]
+        matrices = []
+        for x, y in (best.get('phases') or [best['location']]):
+            for row_offset in range(math.floor(y / th), math.ceil((y + qh) / th)):
+                for col_offset in range(math.floor(x / tw), math.ceil((x + qw) / tw)):
+                    matrices.append([[sx * factor, 0., (col_offset * tw - x - left * sx) * factor],
+                                     [0., sy * factor, (row_offset * th - y - top * sy) * factor]])
+                    if len(matrices) >= 32:
+                        break
+                if len(matrices) >= 32:
+                    break
+            if len(matrices) >= 32:
+                break
+        source_coverage = best.get('source_coverage', 0.)
+        local_pixels_ok = (best.get('rms', 1.) <= .045 and best.get('changed', 1.) <= .015
+                           and best.get('major_changed', 1.) <= .003
+                           and best.get('worst', 1.) <= .55)
+        best['alignment'] = {
+            'kind': 'periodic', 'direction': 'candidate_to_query',
+            'matrix': matrices[0], 'matrices': matrices,
+            'body_bounds': list(bounds),
+            'query_size': [query.image.shape[1], query.image.shape[0]],
+            'candidate_size': [candidate.image.shape[1], candidate.image.shape[0]],
+            'query_coverage': 1. if local_pixels_ok else 0.,
+            'candidate_coverage': source_coverage,
+            'candidate_ink_coverage': best.get('source_ink_coverage', 0.),
+            'unverified_query': 0. if local_pixels_ok else 1.,
+            'unverified_candidate': 1 - source_coverage, 'edge_verified_coverage': 0.,
+            'geometry_verified': bool(local_pixels_ok), 'verified': best['strong'],
+            'comparison_height': comparison_height}
     # Keep the textured fallback below a geometrically verified near-exact match.
     best['score'] *= .94
     return best
@@ -531,8 +747,13 @@ def _auto_reason(result: dict) -> str:
 def _review_reason(result: dict, histogram_distance: float) -> str:
     """Name the specific evidence that is missing instead of a generic hint."""
     colour = float(result.get('color_distance', histogram_distance))
-    if colour > .12:
+    if colour > .25:
         return '图案排列接近，但两侧颜色分布不一致，请确认是否为同款不同色。'
+    failed = result.get('failed_checks', [])
+    if 'candidate_coverage' in failed:
+        return '原稿还有未核实的图案区域，请确认是否存在额外内容。'
+    if 'query_coverage' in failed:
+        return '部分图案尚未完整对齐，请放大确认。'
     if result.get('method') == 'texture':
         if result.get('major_changed', 0.) > .02:
             return '图案接近，但有局部区域明显不同，请并排确认。'
@@ -550,11 +771,17 @@ def _review_reason(result: dict, histogram_distance: float) -> str:
 
 def _combine_evidence(feature: dict, texture: dict) -> dict:
     """Merge both methods without letting one silently overwrite the other."""
-    merged = dict(texture)
+    if feature.get('channels'):
+        feature = feature['channels']['features']
+    primary = (texture if texture.get('strong') else feature if feature.get('auto_ok')
+               else texture if texture.get('score', 0.) > feature.get('score', 0.) else feature)
+    merged = dict(primary)
     merged['score'] = max(float(texture.get('score', 0.)), float(feature.get('score', 0.)))
     merged['strong'] = bool(texture.get('strong') or feature.get('strong'))
     merged['feature_score'] = round(float(feature.get('score', 0.)), 4)
     merged['feature_strong'] = bool(feature.get('strong'))
+    merged['channels'] = {'features': dict(feature), 'texture': dict(texture)}
+    merged['selected_channel'] = primary.get('method', 'features')
     if texture.get('strong'):
         merged['auto_ok'], merged['accepted_by'] = True, '纹理像素验证'
     elif feature.get('auto_ok'):
@@ -575,13 +802,34 @@ def _evidence(result: dict, histogram_distance: float, gap: float) -> dict:
         value = result.get(key)
         return None if value is None else round(float(value), 4)
 
-    return {'method': result.get('method', 'features'),
+    channels = result.get('channels') or {result.get('method', 'features'): result}
+    def channel(value):
+        return {'score': float(value.get('score', 0.)), 'strong': bool(value.get('strong')),
+                'auto_ok': bool(value.get('auto_ok') or value.get('method') == 'texture' and value.get('strong')),
+                'metrics': {key: value[key] for key in
+                    ('inliers', 'coverage', 'mae', 'rms', 'changed', 'major_changed', 'worst',
+                     'color_distance', 'global_mae', 'global_changed', 'overlap', 'verified_coverage',
+                     'source_coverage', 'source_ink_coverage', 'residual', 'plausible', 'edge_proof',
+                     'coarse_metrics', 'periodic_proof', 'palette_applicable',
+                     'palette_mismatch', 'palette_query_flat_coverage',
+                     'palette_candidate_flat_coverage', 'coherent_difference') if key in value},
+                'failed_checks': list(value.get('failed_checks', [])),
+                'alignment': value.get('alignment')}
+    return {'evidence_version': 2, 'method': result.get('method', 'features'),
+            'selected_channel': result.get('selected_channel', result.get('method', 'features')),
+            'channels': {key: channel(value) for key, value in channels.items()},
+            'failed_checks': list(result.get('failed_checks', [])),
             'checked': result.get('accepted_by'),
             'colour': rounded('color_distance') if 'color_distance' in result
                       else round(float(histogram_distance), 4),
             'gap': round(gap, 4),
-            'thresholds': {'rms': .045, 'changed': .015, 'major_changed': .003,
-                           'worst': .55, 'colour': .25, 'residual': .08},
+            'thresholds': ({'rms': .045, 'changed': .015, 'major_changed': .003,
+                            'worst': .55, 'colour': .25, 'residual': .08,
+                            'source_coverage_min': .95, 'source_ink_coverage_min': .98}
+                           if result.get('method') == 'texture' else
+                           {'mae': .045, 'changed': .08, 'major_changed': .015,
+                            'inliers_min': 14, 'coverage_min': .18, 'query_coverage_min': .95,
+                            'source_coverage_min': .95, 'source_ink_coverage_min': .98}),
             'pixel_rms': rounded('rms'),
             'changed': rounded('changed'),
             'major_changed': rounded('major_changed'),
@@ -591,6 +839,37 @@ def _evidence(result: dict, histogram_distance: float, gap: float) -> dict:
             'inliers': result.get('inliers'),
             'coverage': rounded('coverage'),
             'mae': rounded('mae')}
+
+
+def _pattern_supported(result: dict) -> bool:
+    channels = result.get('channels') or {result.get('method', 'features'): result}
+    feature = channels.get('features', {})
+    texture = channels.get('texture', {})
+    return bool((feature.get('inliers', 0) >= 6 and feature.get('coverage', 0.) >= .05
+                 and feature.get('mae', 1.) <= .08 and feature.get('major_changed', 1.) <= .04)
+                or (texture.get('rms', 1.) <= .16 and texture.get('changed', 1.) <= .2
+                    and texture.get('major_changed', 1.) <= .08
+                    and texture.get('color_distance', 1.) <= .35))
+
+
+def _ownership_supported(result: dict) -> bool:
+    """A shared logo/local crop cannot claim a file from a complete match."""
+    if result.get('auto_ok'):
+        return True
+    channels = result.get('channels') or {result.get('method', 'features'): result}
+    feature = channels.get('features', {})
+    texture = channels.get('texture', {})
+    geometry = (feature.get('verified_coverage', 0.) >= .9
+                and feature.get('global_mae', 1.) <= .06
+                and feature.get('global_changed', 1.) <= .12
+                and feature.get('source_coverage', 0.) >= .9
+                and feature.get('palette_mismatch', 0.) <= .005)
+    repeat = (texture.get('rms', 1.) <= .065 and texture.get('changed', 1.) <= .04
+              and texture.get('major_changed', 1.) <= .015
+              and texture.get('source_coverage', 0.) >= .9
+              and texture.get('color_distance', 1.) <= .25
+              and texture.get('palette_mismatch', 0.) <= .005)
+    return bool(geometry or repeat)
 
 
 def _match_appearances(rows: list[dict], files: list[dict], row_images: dict,
@@ -612,7 +891,7 @@ def _match_appearances(rows: list[dict], files: list[dict], row_images: dict,
             results.append(base)
             continue
         query = row_images[row['id']]
-        scores, histograms = {}, {}
+        scores, histograms, failures = {}, {}, []
         for file in readable:
             identity = file['id']
             candidate = file_images[identity]
@@ -624,6 +903,7 @@ def _match_appearances(rows: list[dict], files: list[dict], row_images: dict,
                 # One unruly pair must never abort the whole batch; it simply
                 # carries no geometric evidence and falls back to the texture pass.
                 result = {'score': 0., 'strong': False, 'method': 'features'}
+                failures.append({'file_id': identity, 'check': 'geometry_evaluation_failed'})
             result['score'] = max(result['score'], .4 * (1 - histograms[identity]))
             result['auto_ok'] = bool(result['strong'] and result['score'] >= .91)
             result['accepted_by'] = '几何特征验证' if result['auto_ok'] else None
@@ -638,9 +918,25 @@ def _match_appearances(rows: list[dict], files: list[dict], row_images: dict,
                 except Exception:
                     # Texture evidence is optional; a failure here only means this
                     # candidate keeps its geometric/histogram evidence.
+                    failures.append({'file_id': identity, 'check': 'texture_evaluation_failed'})
                     continue
                 if texture['score'] > scores[identity]['score'] or texture.get('strong'):
                     scores[identity] = _combine_evidence(scores[identity], texture)
+        # Detailed verification is reserved for credible leading candidates;
+        # the full candidate set has already been measured independently.
+        coarse_ranking = sorted(scores, key=lambda identity: -scores[identity]['score'])
+        leading = coarse_ranking[:3]
+        if (not scores[coarse_ranking[0]].get('auto_ok')
+                or scores[coarse_ranking[0]].get('selected_channel') == 'texture'):
+            for identity in leading:
+                if scores[identity]['score'] < max(.75, scores[coarse_ranking[0]]['score'] - .18):
+                    continue
+                try:
+                    texture = _texture(query, file_images[identity], precision=True)
+                except Exception:
+                    failures.append({'file_id': identity, 'check': 'detailed_texture_evaluation_failed'})
+                    continue
+                scores[identity] = _combine_evidence(scores[identity], texture)
         ranking = sorted(scores, key=lambda identity: (-scores[identity]['score'], identity))
         base['candidates'] = [{'file_id': identity, 'score': round(scores[identity]['score'], 4)}
                               for identity in ranking[:5]]
@@ -651,6 +947,34 @@ def _match_appearances(rows: list[dict], files: list[dict], row_images: dict,
         gap = top_score - runner_up
         top_file = next(file for file in readable if file['id'] == top)
         base['evidence'] = _evidence(top_result, histograms[top], gap)
+        credible = [identity for identity in ranking if identity == top or
+                    (scores[identity].get('strong') or
+                     (scores[identity]['score'] >= max(.55, top_score - .12)
+                      and _pattern_supported(scores[identity])))]
+        supported = _pattern_supported(top_result)
+        base['evidence']['competition'] = {
+            'version': 'local-competition-1',
+            'evaluated_file_ids': [file['id'] for file in readable],
+            'credible_candidate_ids': credible,
+            'scores': [{'file_id': identity, 'score': round(scores[identity]['score'], 4),
+                        'pattern_supported': _pattern_supported(scores[identity])} for identity in ranking],
+            'complete': not failures, 'unique': len(credible) == 1 and supported,
+            'failures': failures}
+        base['evidence']['claim_strength'] = ('verified' if top_result.get('auto_ok')
+                                               else 'credible' if _ownership_supported(top_result) else 'weak')
+        decision_failures = []
+        if top_score < .55:
+            decision_failures.append('no_credible_candidate')
+        if top_file.get('issue'):
+            decision_failures.append('source_issue')
+        if duplicate_previews[file_images[top].digest] > 1:
+            decision_failures.append('duplicate_preview')
+        if gap < .045:
+            decision_failures.append('candidate_gap')
+        if failures:
+            decision_failures.append('incomplete_candidate_validation')
+        base['evidence']['failed_checks'] = list(dict.fromkeys(
+            base['evidence']['failed_checks'] + decision_failures))
         if top_score < .55:
             base['reason'] = '相似度不足，未自动选择文件；候选仅供人工查看。'
         else:
@@ -662,6 +986,8 @@ def _match_appearances(rows: list[dict], files: list[dict], row_images: dict,
                 base['reason'] = '多个 AI 文件有相同预览，无法自动确定唯一原文件。'
             elif gap < .045:
                 base['reason'] = '存在十分接近的候选，请确认具体颜色、图案及文件。'
+            elif failures:
+                base['reason'] = '部分候选无法完成验证，请人工确认。'
             elif top_result.get('auto_ok'):
                 base.update(status='auto', file_id=top, reason=_auto_reason(top_result))
         results.append(base)
@@ -669,13 +995,16 @@ def _match_appearances(rows: list[dict], files: list[dict], row_images: dict,
     # silently allocate a shared best file to whichever row happened to run first.
     contenders = defaultdict(list)
     for result in results:
-        if result['candidates'] and result['candidates'][0]['score'] >= .55:
+        if (result['candidates'] and result['candidates'][0]['score'] >= .55
+                and result.get('evidence', {}).get('claim_strength') != 'weak'):
             contenders[result['candidates'][0]['file_id']].append(result)
     for group in contenders.values():
         if len(group) > 1:
             for result in group:
                 result.update(status='review', file_id=None,
                               reason='多行图片指向同一个 AI 文件，请人工确认一一对应关系。')
+                result['evidence']['failed_checks'] = list(dict.fromkeys(
+                    result['evidence']['failed_checks'] + ['ownership_conflict']))
     return results
 
 

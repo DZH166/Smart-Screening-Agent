@@ -14,8 +14,8 @@ from pathlib import Path
 
 from PIL import Image, ImageOps
 
-POLICY_VERSION = "hsd-ai-review-1"
-PROMPT_VERSION = "hsd-ai-review-1"
+POLICY_VERSION = "hsd-ai-review-2"
+PROMPT_VERSION = "hsd-ai-review-2"
 CHECKS = ("content_same", "colors_same", "complete_coverage",
           "extra_content_absent", "unique_candidate")
 CATEGORIES = frozenset({"geometry_review", "texture_review"})
@@ -74,8 +74,26 @@ def _local_evidence(row):
     source = row.get("evidence") or row.get("diagnostics") or {}
     if not isinstance(source, dict):
         return {"method": "unknown", "valid": False}
+    selected = source.get("selected_channel")
+    channel_failures = []
+    if "channels" in source:
+        channels = source.get("channels")
+        channel = channels.get(selected) if isinstance(channels, dict) and isinstance(selected, str) else None
+        if not isinstance(channel, dict) or not isinstance(channel.get("metrics"), dict) or source.get("method") != selected:
+            return {"method": "unknown", "valid": False}
+        metrics = channel["metrics"]
+        channel_failures = channel.get("failed_checks", [])
+        if (not isinstance(channel_failures, list) or len(channel_failures) > 64
+                or any(not isinstance(item, str) or len(item) > 80 for item in channel_failures)):
+            return {"method": "unknown", "valid": False}
+        source = {**source, **metrics, "method": selected}
+        if "rms" in metrics:
+            source["pixel_rms"] = metrics["rms"]
+        if "color_distance" in metrics:
+            source["colour"] = metrics["color_distance"]
     result = {"method": source.get("method", "unknown"), "valid": True}
-    for name in ("colour", "pixel_rms", "changed", "major_changed", "worst", "residual", "mae"):
+    for name in ("colour", "pixel_rms", "changed", "major_changed", "worst", "residual", "mae",
+                 "coherent_difference", "global_mae", "global_changed"):
         value = source.get(name)
         if value is None:
             result[name] = None
@@ -83,11 +101,112 @@ def _local_evidence(row):
             result[name] = float(value)
         else:
             result["valid"] = False
+    result["channel_failed_checks"] = list(channel_failures)
+    if source.get("evidence_version") == 2 and result.get("coherent_difference") is None:
+        result["valid"] = False
     limits = source.get("thresholds", {})
     result["thresholds"] = {key: float(value) for key, value in limits.items()
                             if key in {"rms", "changed", "major_changed", "worst", "colour", "residual"}
                             and type(value) in (int, float) and math.isfinite(value) and value >= 0} if isinstance(limits, dict) else {}
+    if "palette_applicable" in source:
+        result["palette_applicable"] = source["palette_applicable"]
+        result["palette_mismatch"] = source.get("palette_mismatch")
+        if (type(result["palette_applicable"]) is not bool
+                or result["palette_applicable"] and (type(result["palette_mismatch"]) not in (int, float)
+                    or not math.isfinite(result["palette_mismatch"]) or result["palette_mismatch"] < 0)):
+            result["valid"] = False
     return result
+
+
+def _alignment_evidence(row):
+    """Only retain bounded, content-bound geometry; never an arbitrary crop."""
+    evidence = row.get("evidence") or {}
+    if not isinstance(evidence, dict):
+        return None
+    if isinstance(evidence.get("channels"), dict):
+        channel = evidence["channels"].get(evidence.get("selected_channel"), {})
+        alignment = channel.get("alignment") if isinstance(channel, dict) else None
+    else:
+        alignment = evidence.get("alignment")
+    if not isinstance(alignment, dict):
+        return None
+    keys = {"kind", "direction", "query_size", "candidate_size", "matrix", "matrices",
+            "query_coverage", "candidate_coverage", "candidate_ink_coverage", "unverified_query",
+            "unverified_candidate", "verified", "geometry_verified", "edge_verified_coverage", "body_bounds"}
+    filtered = {key: value for key, value in alignment.items() if key in keys}
+    try:
+        encoded = json.dumps(filtered, allow_nan=False)
+    except (TypeError, ValueError):
+        return None
+    return filtered if len(encoded) <= 16000 else None
+
+
+def _competition_evidence(row, files):
+    """Bind every local comparison, even when only genuine rivals are sent."""
+    evidence = row.get("evidence") or {}
+    source = evidence.get("competition") if isinstance(evidence, dict) else None
+    readable = {file["id"] for file in files if file.get("preview_path") and not file.get("issue")}
+    missing = {"version": "local-competition-1", "complete": False, "unique": False,
+               "evaluated_file_ids": [], "credible_candidate_ids": [], "scores": []}
+    if not isinstance(source, dict) or source.get("version") != "local-competition-1":
+        return missing
+    evaluated, credible, scores = (source.get(key) for key in ("evaluated_file_ids", "credible_candidate_ids", "scores"))
+    if (not isinstance(evaluated, list) or not all(isinstance(identity, str) for identity in evaluated)
+            or len(set(evaluated)) != len(evaluated) or set(evaluated) != readable
+            or not isinstance(credible, list) or not all(isinstance(identity, str) for identity in credible)
+            or len(set(credible)) != len(credible) or not set(credible) <= readable
+            or not isinstance(scores, list) or len(scores) != len(evaluated)):
+        return missing
+    normalized, seen = [], set()
+    for item in scores:
+        if (not isinstance(item, dict) or item.get("file_id") not in readable
+                or item["file_id"] in seen or _score(item) < 0 or type(item.get("pattern_supported")) is not bool):
+            return missing
+        seen.add(item["file_id"])
+        normalized.append({"file_id": item["file_id"], "score": _score(item), "pattern_supported": item["pattern_supported"]})
+    return {"version": "local-competition-1", "complete": source.get("complete") is True,
+            "unique": source.get("unique") is True, "hard_ambiguity": source.get("hard_ambiguity") is True,
+            "evaluated_file_ids": sorted(evaluated),
+            "credible_candidate_ids": list(credible), "scores": sorted(normalized, key=lambda item: item["file_id"])}
+
+
+def _competition_verified(case):
+    digests = case.get("image_digests") or {}
+    record = digests.get("competition_evidence")
+    if not isinstance(record, dict) or record.get("version") != "local-competition-1" or record.get("complete") is not True:
+        return False
+    identities, credible, scores = (record.get(key) for key in ("evaluated_file_ids", "credible_candidate_ids", "scores"))
+    if (not isinstance(identities, list) or not identities or len(set(identities)) != len(identities)
+            or not isinstance(credible, list) or not credible or not set(credible) <= set(identities)
+            or not isinstance(scores, list) or len(scores) != len(identities)
+            or any(not isinstance(item, dict) or _score(item) < 0 or type(item.get("pattern_supported")) is not bool for item in scores)
+            or {item.get("file_id") for item in scores} != set(identities)
+            or not set(credible) <= set(case.get("candidate_ids", []))):
+        return False
+    top = case["candidate_ids"][0]
+    inputs = digests.get("comparison_inputs")
+    if (not isinstance(inputs, list) or len(inputs) != len(identities)
+            or any(not isinstance(item, dict) or not isinstance(item.get("candidate_id"), str)
+                   or not _sha256_string(item.get("preview_sha256")) or not _sha256_string(item.get("source_sha256")) for item in inputs)
+            or {item["candidate_id"] for item in inputs} != set(identities)):
+        return False
+    # A score gap alone is not a hard ambiguity: independently validated pair
+    # reviews may supply the missing visual distinction.  All plausible rivals
+    # must nevertheless be visible; positive identity is never by elimination.
+    return (record.get("hard_ambiguity") is not True and top in credible
+            and any(item["file_id"] == top and item["pattern_supported"] for item in scores))
+
+
+def _coverage_verified(case):
+    alignment = (case.get("image_digests") or {}).get("alignment_evidence")
+    if (not isinstance(alignment, dict) or alignment.get("geometry_verified") is not True
+            or alignment.get("direction") != "candidate_to_query" or alignment.get("kind") not in {"affine", "periodic"}):
+        return False
+    values = [alignment.get(key) for key in ("query_coverage", "candidate_coverage", "candidate_ink_coverage")]
+    if any(type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 1 for value in values):
+        return False
+    query, source, ink = values
+    return query >= .95 and (source >= .95 or ink >= .98)
 
 
 def _local_evidence_consistent(evidence):
@@ -98,6 +217,17 @@ def _local_evidence_consistent(evidence):
     An absent measurement is not silently converted to a zero-error result.
     """
     if not isinstance(evidence, dict) or evidence.get("valid") is not True:
+        return False
+    if evidence.get("palette_applicable") is True and evidence.get("palette_mismatch", 1.) > .005:
+        return False
+    if evidence.get("coherent_difference") is not None and evidence["coherent_difference"] > 0:
+        return False
+    # These are measured content/colour contradictions, not a low feature score
+    # that a qualified independent visual review could help resolve.
+    hard_failures = {"pixel_mae", "changed_area", "major_change", "global_mae", "global_changed",
+                     "rms", "changed", "major_changed", "worst", "color_distance", "residual",
+                     "foreground_colours", "coherent_difference", "plausible_geometry"}
+    if hard_failures.intersection(evidence.get("channel_failed_checks") or []):
         return False
     method = evidence.get("method")
     if not isinstance(method, str) or method not in {"features", "texture"}:
@@ -128,6 +258,9 @@ def _local_evidence_consistent(evidence):
         limit = min(provided, maximum) if type(provided) in (int, float) and math.isfinite(provided) and provided >= 0 else maximum
         if value is not None and (type(value) not in (int, float) or not math.isfinite(value) or value > limit):
             return False
+    if method == "features" and (evidence.get("global_mae") is not None and evidence["global_mae"] > .06
+                                 or evidence.get("global_changed") is not None and evidence["global_changed"] > .12):
+        return False
     return True
 
 
@@ -182,13 +315,38 @@ def select_review_case(row, rows, files, image_cache=None):
     ranking = row.get("candidates") or []
     if not ranking or _score(ranking[0]) < .55:
         return _refusal("no_trusted_candidate", "没有可信候选，仍需人工处理。")
-    selected = ranking[:5]
+    lookup = {file.get("id"): file for file in files}
+    if len(lookup) != len(files) or any(not isinstance(identity, str) or not identity for identity in lookup):
+        return _refusal("invalid_candidates", "候选原文件记录不完整，仍需人工处理。")
+    competition = _competition_evidence(row, files)
+    if competition.get("hard_ambiguity") is True:
+        return _refusal("indistinguishable_candidates", "多个原文件的关键图案无法可靠区分，仍需人工处理。")
+    top_score = _score(ranking[0])
+    if competition["complete"]:
+        score_by_id = {item["file_id"]: item for item in competition["scores"]}
+        top_id = ranking[0].get("file_id")
+        if top_id not in score_by_id or abs(score_by_id[top_id]["score"] - top_score) > .0002:
+            competition["complete"] = False
+        credible = set(competition["credible_candidate_ids"])
+        # Widen, never narrow, the matcher's declared competitors.  A close
+        # appearance score is retained even if its pattern support is weak.
+        credible.update(item["file_id"] for item in competition["scores"]
+                        if item["score"] >= max(.55, top_score - .12))
+        credible.add(top_id)
+        if len(credible) > 5:
+            return _refusal("too_many_competitors", "接近的候选超过五个，需人工判断。")
+        selected = [ranking[0], *sorted((score_by_id[identity] for identity in credible if identity != top_id),
+                                       key=lambda item: -item["score"])]
+        competition["credible_candidate_ids"] = [item["file_id"] for item in selected]
+    else:
+        selected = [ranking[0], *[item for item in ranking[1:] if _score(item) >= .55]]
+        if len(selected) > 5:
+            return _refusal("too_many_competitors", "接近的候选超过五个，需人工判断。")
     identities = [candidate.get("file_id") for candidate in selected]
     if (any(not isinstance(identity, str) or not identity for identity in identities)
             or len(set(identities)) != len(identities) or any(_score(c) < 0 for c in selected)):
         return _refusal("invalid_candidates", "候选记录不完整，仍需人工处理。")
-    lookup = {file.get("id"): file for file in files}
-    if len(lookup) != len(files) or any(identity not in lookup for identity in identities):
+    if any(identity not in lookup for identity in identities):
         return _refusal("invalid_candidates", "候选原文件记录不完整，仍需人工处理。")
     try:
         query = _image_record(row["image_path"], cache)
@@ -247,6 +405,13 @@ def select_review_case(row, rows, files, image_cache=None):
             return _refusal("ownership_conflict", "多行对同一原文件存在实际竞争，需人工确认。")
     method = (row.get("evidence") or row.get("diagnostics") or {}).get("method")
     category = "texture_review" if method == "texture" else "geometry_review"
+    comparison_inputs = []
+    for identity in sorted(previews):
+        digest = lookup[identity].get("source_sha256")
+        if not _sha256_string(digest):
+            competition["complete"] = False
+        comparison_inputs.append({"candidate_id": identity, "preview_sha256": previews[identity]["sha256"],
+                                  "source_sha256": digest})
     digests = {"query": query["sha256"],
                "candidates": [{k: item[k] for k in ("candidate_id", "preview_sha256", "source_sha256")}
                               for item in images],
@@ -255,7 +420,10 @@ def select_review_case(row, rows, files, image_cache=None):
                                             "width": previews[identity]["width"],
                                             "height": previews[identity]["height"]}
                                            for identity in identities]},
-               "local_evidence": _local_evidence(row)}
+               "local_evidence": _local_evidence(row),
+               "alignment_evidence": _alignment_evidence(row),
+               "competition_evidence": competition,
+               "comparison_inputs": comparison_inputs}
     fingerprint = _case_fingerprint(category, digests)
     return {"eligible": True, "reason_code": "eligible", "reason": "可进行图片二次复核。",
             "category": category, "candidate_ids": identities, "fingerprint": fingerprint,
@@ -281,30 +449,47 @@ def evaluate_suggestion(case, decision, validation):
     registry adds ``trusted`` only after verifying the stored local signature.
     """
     def reject(code, reason):
-        return {"accepted": False, "reason_code": code, "reason": reason}
+        return {"accepted": False, "reason_code": code, "reason": reason,
+                "failed_checks": [{"code": code, "reason": reason}]}
     if not case.get("eligible"):
         return reject(case.get("reason_code", "ineligible"), case.get("reason", "需人工确认。"))
     if (not isinstance(decision, dict) or decision.get("case_fingerprint") != case.get("fingerprint")):
         return reject("stale_case", "复核内容已变化，仍需人工确认。")
-    if not isinstance(validation, dict) or validation.get("trusted") is not True:
-        return reject("validation_required", "模型结果尚未通过独立验证，仅供人工参考。")
-    if (validation.get("policy_version") != POLICY_VERSION
+    failures = []
+    def fail(code, reason):
+        failures.append({"code": code, "reason": reason})
+    qualified = isinstance(validation, dict) and validation.get("trusted") is True
+    if not qualified:
+        fail("validation_required", "模型结果尚未通过独立验证，仅供人工参考。")
+    elif (validation.get("policy_version") != POLICY_VERSION
             or validation.get("prompt_version") != PROMPT_VERSION
             or validation.get("model") != decision.get("model")
             or not isinstance(decision.get("model"), str) or not decision["model"]
             or case.get("category") not in validation.get("categories", [])
             or "independent_manual" not in validation.get("approved_origins", [])):
-        return reject("validation_mismatch", "当前模型或复核场景未通过相应验证，仅供人工参考。")
+        fail("validation_mismatch", "当前模型或复核场景未通过相应验证，仅供人工参考。")
     if not _complete_native_resolution(case.get("image_digests")):
-        return reject("resolution_not_validated", "图片仍需缩小才能展示，关键细节尚未充分验证，需人工确认。")
-    if not _positive_decision(case, decision.get("decision")):
-        return reject("model_uncertain", "模型未完整确认图案、颜色、覆盖及唯一性，仍需人工确认。")
-    if decision["decision"]["candidate_id"] != case["candidate_ids"][0]:
-        return reject("candidate_change_requires_review", "模型建议改选候选，仍需员工确认。")
+        fail("resolution_not_validated", "图片仍需缩小才能展示，关键细节尚未充分验证，需人工确认。")
+    suggestion = decision.get("decision")
+    inconsistent = (isinstance(suggestion, dict) and isinstance(suggestion.get("protocol_diagnostics"), dict)
+                    and suggestion["protocol_diagnostics"].get("inconsistent") is True)
+    positive = _positive_decision(case, suggestion) and not inconsistent
+    if inconsistent:
+        fail("model_protocol_inconsistent", "模型结论与检查项矛盾，需进一步核对。")
+    elif not positive:
+        fail("model_uncertain", "模型未完整确认图案、颜色、覆盖及唯一性，仍需人工确认。")
+    if positive and suggestion["candidate_id"] != case["candidate_ids"][0]:
+        fail("candidate_change_requires_review", "模型建议改选候选，仍需员工确认。")
+    if not _competition_verified(case):
+        fail("competition_not_verified", "本地尚未完整验证所有可信竞争候选，仍需人工确认。")
+    if not _coverage_verified(case):
+        fail("coverage_not_verified", "表格或原稿仍有重要区域未完整核验，模型建议不能直接放行。")
     if not _local_evidence_consistent((case.get("image_digests") or {}).get("local_evidence")):
-        return reject("local_evidence_conflict", "本地图案或颜色证据仍有差异，模型建议不能直接放行。")
+        fail("local_evidence_conflict", "本地图案或颜色证据仍有差异，模型建议不能直接放行。")
+    if failures:
+        return {"accepted": False, "reason_code": failures[0]["code"], "reason": failures[0]["reason"], "failed_checks": failures}
     return {"accepted": True, "reason_code": "ai_validated_identity",
-            "reason": "已验证的模型复核确认图案、颜色、完整内容及唯一候选。"}
+            "reason": "已验证的模型复核确认图案、颜色、完整内容及唯一候选。", "failed_checks": []}
 
 
 def build_validation_record(observations, labels):
@@ -324,6 +509,12 @@ def build_validation_record(observations, labels):
             or observations.get("policy_version") != POLICY_VERSION
             or observations.get("prompt_version") != PROMPT_VERSION):
         raise ValueError("验证必须使用当前协议的真实 DeepSeek 调用记录。")
+    from .ai_registry import IMPLEMENTATION_MODULES, ValidationRegistry
+    implementation = observations.get("implementation_sha256")
+    if (not isinstance(implementation, dict) or set(implementation) != set(IMPLEMENTATION_MODULES)
+            or any(not _sha256_string(value) for value in implementation.values())
+            or implementation != ValidationRegistry._implementation()):
+        raise ValueError("真实调用记录缺少当前实现签名或实现已变化，不能为旧结果补签激活资格。")
     labelled = labels.get("cases")
     observed = observations.get("cases")
     if not isinstance(labelled, list) or not labelled or not isinstance(observed, list):
@@ -406,6 +597,9 @@ def build_validation_record(observations, labels):
             raise ValueError("真实模型响应不完整，不能激活自动通过。")
         accepted = (_positive_decision({"candidate_ids": candidates}, decision)
                     and decision.get("candidate_id") == candidates[0]
+                    and not (decision.get("protocol_diagnostics") or {}).get("inconsistent", False)
+                    and _competition_verified({"candidate_ids": candidates, "image_digests": digests})
+                    and _coverage_verified({"image_digests": digests})
                     and _local_evidence_consistent(digests.get("local_evidence")))
         false_accept = accepted and (label["label"] != "same" or decision["candidate_id"] != expected)
         record = {"case_id": identity, "category": category, "batch_id": label["batch_id"],
@@ -460,6 +654,7 @@ def build_validation_record(observations, labels):
     if not approved:
         raise ValueError("独立验证尚未达标：需两个独立留出批次（含人工独立核验的真实业务批次）、完整正反例覆盖、有效正例和零错误自动通过。")
     return {"schema_version": 1, "model": next(iter(models)),
+            "implementation_sha256": dict(implementation),
             "policy_version": POLICY_VERSION, "prompt_version": PROMPT_VERSION,
             "categories": sorted(approved), "counts": counts,
             "dataset_fingerprints": {"labels": _digest(labels), "observations": _digest(observations)},

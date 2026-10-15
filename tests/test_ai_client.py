@@ -10,7 +10,7 @@ import pytest
 from hsd_tool.ai_client import CHECKS, DeepSeekClient, ENDPOINT, MAX_RESPONSE_BYTES, ReviewError, _NoRedirect
 
 KEY = "sk-client-test-credential-not-real"
-CONTENT = [{"type": "text", "text": "表格图与候选 f0001，请比较全部区域"},
+CONTENT = [{"type": "text", "text": json.dumps({"candidate_ids": ["f0001"]})},
            {"type": "image_url", "image_url": {"url": "data:image/png;base64," +
                 base64.b64encode(b"\x89PNG\r\n\x1a\nsynthetic-test-preview").decode()}}]
 DECISION = {"verdict": "same", "candidate_id": "f0001", "reason": "整幅图案与颜色一致",
@@ -18,9 +18,14 @@ DECISION = {"verdict": "same", "candidate_id": "f0001", "reason": "整幅图案�
 
 
 def response(decision=None, **updates):
+    decision = copy.deepcopy(DECISION if decision is None else decision)
+    if (isinstance(decision, dict) and set(decision) == {"verdict", "candidate_id", "reason", "checks", "differences"}
+            and isinstance(decision["checks"], dict) and "unique_candidate" in decision["checks"]):
+        decision["checks"].pop("unique_candidate")
+        decision = {"candidate_reviews": [decision]}
     payload = {"id": "chatcmpl-test", "model": "deepseek-v4.1-flash",
                "choices": [{"finish_reason": "stop", "message": {"content": json.dumps(
-                   DECISION if decision is None else decision)}}],
+                   decision)}}],
                "usage": {"prompt_tokens": 1000, "completion_tokens": 200,
                          "prompt_cache_hit_tokens": 100, "prompt_cache_miss_tokens": 900}}
     payload.update(updates)
@@ -61,7 +66,9 @@ def test_fixed_api_shape_and_conservative_complete_usage():
     assert sent["response_format"] == {"type": "json_object"}
     assert sent["max_tokens"] == 1600 and sent["stream"] is False
     assert "JSON" in sent["messages"][0]["content"]
-    assert result["decision"] == DECISION
+    assert {key: result["decision"][key] for key in DECISION} == DECISION
+    assert not result["decision"]["protocol_diagnostics"]["inconsistent"]
+    assert result["prompt_version"] == "hsd-ai-review-2"
     assert result["model"] == "deepseek-v4.1-flash"
     usage = result["usage"]
     assert usage["requests"] == usage["successes"] == 1 and usage["failures"] == 0

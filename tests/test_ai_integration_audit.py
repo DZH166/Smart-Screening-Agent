@@ -105,7 +105,8 @@ def test_signed_registry_detects_record_and_secret_changes(tmp_path, monkeypatch
     # in test_ai_policy; this stub cannot escape the pytest temporary directory.
     measured = {"model": "unit-signature-only", "policy_version": POLICY_VERSION,
                 "prompt_version": PROMPT_VERSION, "categories": ["texture_review"],
-                "counts": {"texture_review": {"approved": True}}, "approved_origins": ["independent_manual"]}
+                "counts": {"texture_review": {"approved": True}}, "approved_origins": ["independent_manual"],
+                "implementation_sha256": ValidationRegistry._implementation()}
     monkeypatch.setattr(policy, "build_validation_record", lambda observations, labels: dict(measured))
     registry = ValidationRegistry(tmp_path)
     assert registry.activate({}, {})["qualified"]
@@ -123,8 +124,7 @@ def test_signed_registry_detects_record_and_secret_changes(tmp_path, monkeypatch
 def test_implementation_hash_supports_frozen_loader_without_source_files(monkeypatch):
     import types
     import hsd_tool.ai_registry as registry_module
-    revisions = {"hsd_tool.ai_policy": "POLICY = 1", "hsd_tool.ai_client": "CLIENT = 1",
-                 "hsd_tool.ai_images": "IMAGES = 1"}
+    revisions = {"hsd_tool." + name: "REVISION = 1" for name in registry_module.IMPLEMENTATION_MODULES}
     seen = []
     class FrozenLoader:
         def get_code(self, fullname):
@@ -137,8 +137,8 @@ def test_implementation_hash_supports_frozen_loader_without_source_files(monkeyp
     monkeypatch.setattr(Path, "read_bytes", no_source_files)
     first = ValidationRegistry._implementation()
     assert first == ValidationRegistry._implementation()
-    assert set(first) == {"ai_policy", "ai_client", "ai_images"}
-    assert all(len(value) == 64 for value in first.values()) and len(seen) == 6
+    assert set(first) == set(registry_module.IMPLEMENTATION_MODULES)
+    assert all(len(value) == 64 for value in first.values()) and len(seen) == 2 * len(registry_module.IMPLEMENTATION_MODULES)
     revisions["hsd_tool.ai_images"] = "IMAGES = 2"
     changed = ValidationRegistry._implementation()
     assert changed["ai_images"] != first["ai_images"]

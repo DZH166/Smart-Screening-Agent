@@ -381,6 +381,142 @@ def test_uniform_low_detail_artwork_does_not_break_the_batch(tmp_path):
     assert match['candidates'], '低细节图案仍应给出候选供人工查看'
 
 
+@pytest.mark.parametrize('different_half', ['top', 'bottom'])
+def test_matching_horizontal_band_cannot_hide_vertical_extra_art(tmp_path, different_half):
+    """Same palette/area and a perfect local match do not prove the original."""
+    query = np.full((64, 256, 3), 255, np.uint8)
+    query[np.arange(64) % 16 < 8] = 0
+    original = np.tile(query[:, :128], (2, 1, 1))
+    vertical = np.full((64, 128, 3), 255, np.uint8)
+    vertical[:, np.arange(128) % 16 < 8] = 0
+    original[:64] = vertical if different_half == 'top' else original[:64]
+    original[64:] = vertical if different_half == 'bottom' else original[64:]
+    source, rows = setup_case(tmp_path, [original], [query])
+    result = scan_and_match(str(source), rows, str(tmp_path / 'work'))
+    match = result['matches'][0]
+    assert match['status'] != 'auto'
+    texture = match['evidence']['channels'].get('texture')
+    assert texture and 'candidate_coverage' in texture['failed_checks']
+    assert texture['metrics']['source_coverage'] < .95
+
+
+def test_independently_measured_period_can_explain_nonperiodic_canvas_edge(tmp_path):
+    """A canvas ending mid-repeat is not itself a legitimate tiling boundary."""
+    original = stripes(width=1147, height=173, period=29)
+    query = original[:, 183:847].copy()
+    source, rows = setup_case(tmp_path, [original], [query])
+    result = scan_and_match(str(source), rows, str(tmp_path / 'work'))
+    assert result['matches'][0]['status'] == 'auto'
+
+
+def test_edge_coverage_requires_independent_pixels_not_only_a_larger_mask():
+    from hsd_tool.matching_verification import affine_coverage
+    source = np.full((66, 360, 3), 180, np.uint8)
+    cv2.circle(source, (170, 32), 12, (80, 40, 120), -1)
+    query = source[1:-1].copy()
+    transform = np.array([[1., 0., 0.], [0., 1., -1.]], np.float64)
+    proven = affine_coverage(query, source, [transform])
+    assert proven['candidate_coverage'] > .95
+    assert proven['candidate_edge_verified_coverage'] > 0
+    assert proven['edge_checks'][0]['candidate']['mae'] < .045
+    changed = query.copy()
+    changed[-1] = 0
+    rejected = affine_coverage(changed, source, [transform])
+    assert rejected['candidate_coverage'] < proven['candidate_coverage']
+    assert not rejected['edge_checks'][0].get('accepted') or rejected['edge_checks'][0]['candidate']['changed'] > .08
+
+
+def test_evidence_keeps_independent_channel_and_competition_records(tmp_path):
+    image = dots(width=704, height=264, spacing=43, radius=10)
+    source, rows = setup_case(tmp_path, [image, stripes(width=704, height=264)])
+    result = scan_and_match(str(source), rows, str(tmp_path / 'work'))
+    evidence = result['matches'][0]['evidence']
+    assert evidence['evidence_version'] == 2
+    assert evidence['selected_channel'] == evidence['method']
+    selected = evidence['channels'][evidence['selected_channel']]
+    assert isinstance(selected['failed_checks'], list)
+    assert selected['alignment']['direction'] == 'candidate_to_query'
+    assert selected['alignment']['query_size'] == [704, 264]
+    competition = evidence['competition']
+    assert competition['complete'] is True
+    assert set(competition['evaluated_file_ids']) == {'f0001', 'f0002'}
+    assert {item['file_id'] for item in competition['scores']} == {'f0001', 'f0002'}
+    assert 'source_path' not in str(evidence)
+
+
+def test_small_foreground_colour_change_is_not_hidden_by_large_background(tmp_path):
+    image = np.full((180, 960, 3), 244, np.uint8)
+    for x in range(45, 930, 95):
+        cv2.putText(image, f'X{x}', (x, 55), cv2.FONT_HERSHEY_SIMPLEX, .45, (30, 30, 30), 1)
+        cv2.circle(image, (x + 10, 125), 10, (40, 45, 190), -1)
+    changed = image.copy()
+    foreground = (image == (40, 45, 190)).all(axis=2)
+    changed[foreground] = (40, 120, 190)
+    assert foreground.mean() < .03
+    source, rows = setup_case(tmp_path, [changed], [image])
+    result = scan_and_match(str(source), rows, str(tmp_path / 'work'))
+    assert result['matches'][0]['status'] != 'auto'
+    channels = result['matches'][0]['evidence']['channels']
+    assert any('foreground_colours' in item['failed_checks'] for item in channels.values())
+
+
+def test_near_white_colour_is_not_trimmed_as_blank_padding():
+    image = np.full((100, 150, 3), 255, np.uint8)
+    image[10:30, 20:80] = (60, 60, 60)
+    image[90:95, 30:100] = (240, 255, 255)
+    assert matching._content_bounds(image) == (20, 10, 100, 95)
+
+
+def test_partial_shared_artwork_does_not_take_ownership_from_complete_match(tmp_path):
+    image = artwork(42)
+    incomplete = np.concatenate([image, artwork(73)], axis=1)
+    source, rows = setup_case(tmp_path, [image], [image, incomplete])
+    result = scan_and_match(str(source), rows, str(tmp_path / 'work'))
+    assert result['matches'][0]['status'] == 'auto'
+    assert result['matches'][0]['file_id'] == 'f0001'
+    assert result['matches'][1]['status'] != 'auto'
+    assert result['matches'][1]['file_id'] is None
+    assert result['matches'][1]['evidence']['claim_strength'] == 'weak'
+
+
+@pytest.mark.parametrize('contrast', [12, 95])
+def test_small_solid_local_replacement_is_not_averaged_away(tmp_path, contrast):
+    image = artwork(61)
+    # Keep the replacement below one percent of the complete image, in a plain
+    # region of the design. A low average error is expected, not sufficient.
+    image[230:270, 700:775] = 200
+    changed = image.copy()
+    changed[240:263, 718:756] = 200 - contrast
+    source, rows = setup_case(tmp_path, [changed], [image])
+    result = scan_and_match(str(source), rows, str(tmp_path / 'work'))
+    assert result['matches'][0]['status'] != 'auto'
+    channels = result['matches'][0]['evidence']['channels']
+    assert any('coherent_difference' in item['failed_checks'] for item in channels.values())
+
+
+@pytest.mark.parametrize('period', [31, 43])
+def test_resampled_stripe_edges_are_not_fictitious_foreground_colours(tmp_path, period):
+    image = np.full((257, 941, 3), 255, np.uint8)
+    image[np.arange(257) % period < period // 2] = (79, 26, 16)
+    query = cv2.resize(image, (781, 213), interpolation=cv2.INTER_AREA)
+    source, rows = setup_case(tmp_path, [image], [query])
+    result = scan_and_match(str(source), rows, str(tmp_path / 'work'))
+    match = result['matches'][0]
+    assert match['status'] == 'auto', match['evidence']
+    assert not any('foreground_colours' in item['failed_checks']
+                   for item in match['evidence']['channels'].values())
+
+
+def test_recoloured_fine_lines_are_not_auto_even_without_flat_foreground(tmp_path):
+    image = np.full((180, 540, 3), 255, np.uint8)
+    image[3::13] = (85, 35, 20)
+    changed = image.copy()
+    changed[3::13] = (20, 35, 125)
+    source, rows = setup_case(tmp_path, [changed], [image])
+    result = scan_and_match(str(source), rows, str(tmp_path / 'work'))
+    assert result['matches'][0]['status'] != 'auto'
+
+
 def test_texture_scale_search_never_asserts_on_short_tiles():
     """A tile below half the query height used to make cv2.matchTemplate assert.
 
