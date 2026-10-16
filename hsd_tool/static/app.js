@@ -400,7 +400,7 @@
     if (!before) return;
     state.resolving=true;clearNotice();renderPanel();$('export-button').disabled=true;$('new-task-button').disabled=true;$('shutdown-button').disabled=true;
     try {
-      const job=await api(`/api/jobs/${encodeURIComponent(state.job.id)}/resolve`,{method:'POST',body:{row_id:rowId,file_id:fileId}});
+      const job=await api(`/api/jobs/${encodeURIComponent(state.job.id)}/resolve`,{method:'POST',body:{row_id:rowId,file_id:fileId,expected_revision:state.job.revision}});
       acceptJob(job);
       state.history.push(rowId);
       const current=rowById(rowId);
@@ -411,7 +411,7 @@
       state.forceReview=false;state.showSummary=counts().review===0;
       toast(fileId?'已确认对应文件，可随时撤销':'已跳过，该行保持原状');
       preloadNeighbours(rowById(state.selectedRowId));
-    } catch(error){notice(error.message);} finally {state.resolving=false;renderJob();}
+    } catch(error){await refreshConflict(error);notice(error.message);} finally {state.resolving=false;renderJob();}
   }
   async function undoLast() {
     const canUndo=state.job?.can_undo??!!state.history.length;
@@ -420,12 +420,17 @@
     state.resolving=true;clearNotice();$('undo-button').disabled=true;
     try {
       const useServer=state.job.can_undo!==undefined;
-      const job=await api(`/api/jobs/${encodeURIComponent(state.job.id)}/${useServer?'undo':'resolve'}`,{method:'POST',body:useServer?{}:{row_id:rowId,revert:true}});
+      const job=await api(`/api/jobs/${encodeURIComponent(state.job.id)}/${useServer?'undo':'resolve'}`,{method:'POST',body:useServer?{expected_revision:state.job.revision}:{row_id:rowId,revert:true,expected_revision:state.job.revision}});
       acceptJob(job);state.history.pop();state.showSummary=false;state.forceReview=true;
       const restored=job.last_undone_row_id||rowId;
       selectRow(restored,null,false);state.filter=awaiting(rowById(restored)||{})?'awaiting':'all';
       toast('已撤销上一步操作');
-    }catch(error){notice(error.message);}finally{state.resolving=false;renderJob();}
+    }catch(error){await refreshConflict(error);notice(error.message);}finally{state.resolving=false;renderJob();}
+  }
+  async function refreshConflict(error) {
+    if (error.status===409 && state.job) {
+      try {acceptJob(await api(`/api/jobs/${encodeURIComponent(state.job.id)}`));state.history=[];renderJob();} catch (_) {}
+    }
   }
   function askConfirmation({title,description,confirm='确认',cancel='取消'}) {
     return new Promise((resolve)=>{
@@ -505,12 +510,27 @@
     document.addEventListener('error',(event)=>{if(event.target instanceof HTMLImageElement)event.target.classList.add('image-broken');},true);
     try {
       const config=await api('/api/config');
+      if (config.access?.lan) {
+        const note=$('lan-note');
+        note.textContent=`局域网共享测试：文件和结果均在主机上。素材目录：${config.access.input_root}；结果目录：${config.access.output_root}。当前批次由测试人员共同操作。`;
+        if (!config.access.remote && config.access.code) note.textContent+=` 分享地址：${location.origin}；访问码：${config.access.code}（仅主机显示）。`;
+        note.classList.remove('hidden');
+        if (config.access.remote) {
+          document.querySelectorAll('.browse').forEach((button)=>button.classList.add('hidden'));
+          ['shutdown-button','open-output-button','ai-settings-button'].forEach((id)=>$(id).classList.add('hidden'));
+          $('workbook-path').placeholder='填写主机素材目录中的 .xlsx 完整路径';
+          $('source-path').placeholder='填写主机素材目录中的 ZIP 或文件夹路径';
+        }
+      }
       $('workbook-path').value=config.last_workbook||'';$('source-path').value=config.last_source||'';$('output-path').value=config.last_output||'';
       $('start-number').value=config.last_start||1;$('app-version').textContent=config.version||'1.0.0';
       if (config.last_source) setSourceType(/\.zip$/i.test(config.last_source)?'zip':'folder');
       updateNumberExample();
     } catch(error){notice(error.message);}
-    const jobId=storedJob();
+    let jobId=storedJob();
+    if (!jobId && window.HSD_ACCESS?.lan) {
+      try {jobId=(await api('/api/config')).active_job_id || null;} catch (_) {}
+    }
     if(jobId) {
       try {const job=await api(`/api/jobs/${encodeURIComponent(jobId)}`);acceptJob(job);renderJob();if(isBusy())schedulePoll();}
       catch(error){rememberJob(null);if(error.status!==404)notice(error.message);}

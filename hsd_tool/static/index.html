@@ -7,7 +7,7 @@
   <meta name="theme-color" content="#f5f7fa">
   <title>HSD 图号助手</title>
   <link rel="stylesheet" href="/static/style.css">
-  <script>window.HSD_TOKEN = __HSD_TOKEN__;</script>
+  <script>window.HSD_TOKEN = __HSD_TOKEN__; window.HSD_ACCESS = __HSD_ACCESS__;</script>
   <script src="/static/ai-settings.js" defer></script>
   <script src="/static/app.js" defer></script>
 </head>
@@ -19,6 +19,7 @@
       <div class="header-tools"><span class="local-badge"><span></span><span id="processing-mode-label">本机匹配</span></span><button id="ai-settings-button" type="button" class="ai-settings-button">AI 复核设置</button><button id="shutdown-button" type="button" class="shutdown-button">退出工具</button></div>
     </header>
     <main id="main-content">
+      <div id="lan-note" class="notice hidden" role="status"></div>
       <div id="notice" class="notice hidden" role="alert"><span id="notice-text"></span><button id="notice-close" class="icon-button" type="button" aria-label="关闭提示">×</button></div>
       <section id="import-view" class="view">
         <div class="page-heading"><div><p class="eyebrow">每天的图片整理，从这里开始</p><h1>让每张图，对上它的编号。</h1><p class="subtitle">导入表格和 AI 文件，自动寻找相同图片，完成编号与文件命名。</p></div></div>

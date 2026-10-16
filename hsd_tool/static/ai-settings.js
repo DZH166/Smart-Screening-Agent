@@ -152,6 +152,11 @@
   }
 
   window.HSDAI = Object.freeze({open, refresh, usageText, rowHtml, getSettings:()=>settings});
+  if (window.HSD_ACCESS?.remote) {
+    $('ai-settings-button').classList.add('hidden');
+    refresh(false);
+    return;
+  }
   $('ai-settings-button').addEventListener('click', open);
   $('ai-settings-close').addEventListener('click', () => $('ai-settings-dialog').close());
   $('ai-settings-dialog').addEventListener('close', () => { $('ai-api-key').value = ''; $('ai-clear-key').checked = false; });

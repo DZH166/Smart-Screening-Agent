@@ -1,6 +1,6 @@
 # Internal implementation contract
 
-Python package `hsd_tool`, Chinese end-user interface, v1.3.0. Local Flask server + browser interface, bundled Windows executable. Source inputs remain unchanged. The user has explicitly authorized optional DeepSeek review of eligible preview images through the local backend; the original XLSX, ZIP and AI files are never uploaded. The browser never calls the provider directly. AI production qualification remains disabled by default.
+Python package `hsd_tool`, Chinese end-user interface, v1.3.1. Local Flask server + browser interface, bundled Windows executable. Default binding is loopback; explicit LAN mode provides restricted shared testing on one host. Source inputs remain unchanged. The user has explicitly authorized optional DeepSeek review of eligible preview images through the local backend; the original XLSX, ZIP and AI files are never uploaded. The browser never calls the provider directly. AI production qualification remains disabled by default.
 
 ## Workbook module (workbook.py)
 
@@ -24,18 +24,24 @@ v1.3.0 adds independently checked interpolation-edge pixels, detailed scale/phas
 
 ## Service + UI API (owned by root)
 
-Flask listens on loopback only. Browser gets X-HSD-Token from `window.HSD_TOKEN` populated in index.html template placeholder `__HSD_TOKEN__` using a JSON literal. All POST JSON uses this header. Standard failures are `{error: Chinese string}`, HTTP 400/409 etc. JSON is not cached. Never return keys, raw provider request bodies or private process settings.
+Flask defaults to loopback. Explicit `--lan <private-IPv4>/<prefix> --lan-input-root <dir> --lan-output-root <dir> [--port <port>]` binds only the specified RFC1918 interface and admits only the supplied CIDR. The input root must already exist; the output root is created if needed and must be outside it. LAN mode validates every task's input/output paths for host and remote requests, rejecting escapes through symlinks/junctions and UNC/network-share paths. It is shared access to the host's current task, not multi-user isolation, browser file upload, remote desktop file access or a public service.
 
-- `GET /api/config` -> `{prefix:'HSD', digits:4, last_start:1, last_workbook:'', last_source:'', last_output:'', version:'1.3.0'}`.
-- `POST /api/pick` `{kind:'workbook'|'zip'|'folder'|'output'}` -> `{path: str}` (native local dialog)
+Remote clients first use `POST /api/lan/login {code}` with a matching Origin. The per-start random code is persisted only in the local data directory's `instance.json` as `lan_access_code`; it must not appear in logs, Git, releases or remote snapshots. Host-only config may display it for the operator. Sessions expire after 8 hours without sliding renewal. Login attempts are limited per client address; excess attempts return 429. `POST /api/lan/logout {}` ends the remote session and requires the usual CSRF header. Local-host pages can enter directly. All LAN users share the host's existing manager, saved DeepSeek key/settings and usage ledger; clients never configure or obtain that key.
+
+Browser gets X-HSD-Token from `window.HSD_TOKEN` populated in index.html template placeholder `__HSD_TOKEN__` using a JSON literal. All POST JSON uses this header except the access-code login. Remote session authentication and request token/origin validation both apply. Standard failures are `{error: Chinese string}`, HTTP 400/403/409 etc. JSON is not cached. Never return keys, raw provider request bodies or private process settings.
+
+- `GET /api/config` -> `{prefix:'HSD', digits:4, last_start:1, last_workbook:'', last_source:'', last_output:'', version:'1.3.1'}`. LAN mode adds `{access:{lan:true,remote:bool,input_root:str,output_root:str}, active_job_id:str|null}`; only host-side `access` also contains `code`. Roots describe host-side paths; `active_job_id` allows another authorized page to join the current batch. Out-of-root historical input defaults are omitted in LAN mode.
+- `POST /api/pick` `{kind:'workbook'|'zip'|'folder'|'output'}` -> `{path: str}` (native host dialog; forbidden for remote clients)
 - `POST /api/jobs` `{workbook_path,source_path,output_root,start_number:int}` -> `{id}`; processing background job.
 - `GET /api/jobs/<id>` -> full job as below, poll 1s while importing/matching/ai_review/exporting. Long work runs in the background; the UI remains responsive and shows progress. Editing, exporting and shutdown are unavailable while a task is busy.
-- `POST /api/jobs/<id>/resolve` `{row_id, file_id: str|null, revert?: bool}`; null means skip, `revert: true` restores the matcher's own verdict for that row, otherwise confirm mapping; returns job. Refuse duplicate file ownership.
-- `POST /api/jobs/<id>/undo` `{}` -> job with `last_undone_row_id`; restore the last employee change, recompute numbering, increment revision. `can_undo` indicates availability.
+- `POST /api/jobs/<id>/resolve` `{row_id, file_id: str|null, revert?: bool, expected_revision?:int}`; null means skip, `revert: true` restores the matcher's own verdict for that row, otherwise confirm mapping; returns job. Refuse duplicate file ownership.
+- `POST /api/jobs/<id>/undo` `{expected_revision?:int}` -> job with `last_undone_row_id`; restore the last employee change, recompute numbering, increment revision. `can_undo` indicates availability.
 - `POST /api/jobs/<id>/export` `{expected_revision?: int}` -> `{id}`; background export. UI sends the revision of the reviewed summary. A mismatch rejects stale confirmation; reload the job and show the new summary. No need to view every auto result before export.
 - `GET /api/jobs/<id>/image/row/<row_id>` and `/image/file/<file_id>` -> preview image; `?size=thumb` requests a proportional thumbnail. Stable job-specific URLs, ETag and private immutable caching; never append random timestamps.
-- `POST /api/jobs/<id>/open-output` `{}` -> `{ok:true}` (only completed job output).
-- `POST /api/shutdown` `{}` -> `{ok:true}`; exits the local process when no task is busy. Closing the browser alone is not shutdown.
+- `POST /api/jobs/<id>/open-output` `{}` -> `{ok:true}` (only completed job output; forbidden for remote clients).
+- `POST /api/shutdown` `{}` -> `{ok:true}`; exits the local process when no task is busy; forbidden for remote clients. Closing the browser alone is not shutdown.
+
+In LAN mode `resolve`, `undo` and `export` require `expected_revision` for both host and remote pages. A stale revision returns 409; the UI refreshes the shared job rather than silently overwriting another page's change. This is collision detection, not independent workspaces or a multi-employee task system. Export results remain under the configured host-side output root; there is no remote download endpoint.
 
 Job schema:
 
@@ -60,8 +66,8 @@ All unresolved rows retain their source numbers in output. Only matched rows wit
 
 ## DeepSeek settings, usage and workflow
 
-- `GET /api/ai/settings` -> sanitized `{enabled,configured,model:'deepseek-flash',mode:'evaluation'|'validated',key_source:'saved'|'environment'|'none',key_persistence,price_date,prices,price_basis,storage_warning,validation:{qualified,mode,model,categories,counts,message}}`.
-- `POST /api/ai/settings` `{enabled?:bool,api_key?:string,clear_key?:bool}` -> sanitized settings. Blank/omitted key preserves the saved value. A new key and `clear_key:true` together are invalid. Windows persists the key with DPAPI CurrentUser; no plaintext fallback. Environment variable `DEEPSEEK_API_KEY` is used only when no saved key exists. Clearing a saved key does not clear that variable. No browser-readable existing key, mode toggle or validation override.
+- `GET /api/ai/settings` -> host sanitized `{enabled,configured,model:'deepseek-flash',mode:'evaluation'|'validated',key_source:'saved'|'environment'|'none',key_persistence,price_date,prices,price_basis,storage_warning,validation:{qualified,mode,model,categories,counts,message}}`. Remote responses are limited to `{enabled,configured,model,mode}`.
+- `POST /api/ai/settings` `{enabled?:bool,api_key?:string,clear_key?:bool}` -> sanitized settings; host only, forbidden for remote clients. Blank/omitted key preserves the saved value. A new key and `clear_key:true` together are invalid. Windows persists the key with DPAPI CurrentUser; no plaintext fallback. Environment variable `DEEPSEEK_API_KEY` is used only when no saved key exists. Clearing a saved key does not clear that variable. No browser-readable existing key, mode toggle or validation override.
 - `GET /api/ai/usage` -> cumulative usage below.
 - `POST /api/jobs/<id>/ai-review` `{}` -> `{id}`, sets background `ai_review` status. UI shows this only when `job.ai_review.can_retry` is true. Server checks ready/configured/enabled, batch limits and actual case eligibility. It never overrides employee decisions.
 

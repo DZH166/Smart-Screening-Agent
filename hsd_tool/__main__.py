@@ -41,12 +41,26 @@ def main():
     parser.add_argument("--result")
     parser.add_argument("--data-dir")
     parser.add_argument("--port", type=int, default=0)
+    parser.add_argument("--lan", help="显式开启局域网测试，例：192.168.0.160/24")
+    parser.add_argument("--lan-input-root", type=Path, help="允许远程测试使用的主机素材目录")
+    parser.add_argument("--lan-output-root", type=Path, help="允许远程测试导出的主机结果目录")
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--self-check", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.pick:
         native_picker(args.pick, args.result)
         return
+    lan = None
+    if args.lan:
+        if not args.lan_input_root or not args.lan_output_root:
+            parser.error("局域网测试需要指定 --lan-input-root 和 --lan-output-root。")
+        from .lan import LanAccess
+        try:
+            lan = LanAccess(args.lan, args.lan_input_root, args.lan_output_root)
+        except ValueError as exc:
+            parser.error(str(exc))
+    elif args.lan_input_root or args.lan_output_root:
+        parser.error("指定局域网目录时还需要 --lan。")
     if args.self_check:
         import tkinter as tk
         import cv2
@@ -84,6 +98,8 @@ def main():
             for _ in range(20):
                 try:
                     instance = json.loads(instance_path.read_text("utf-8"))
+                    if bool(lan) != bool(instance.get("lan")):
+                        parser.error("工具已在另一种访问模式运行，请先在主机保存结果并正常退出。")
                     with urllib.request.urlopen(instance["url"] + "/api/health", timeout=1) as response:
                         health = json.load(response)
                     if health.get("instance") == instance["instance"]:
@@ -96,11 +112,15 @@ def main():
     try:
         from werkzeug.serving import make_server
         from .server import create_app
-        app = create_app(data)
-        server = make_server("127.0.0.1", args.port, app, threaded=True)
+        app = create_app(data, lan=lan)
+        server = make_server(lan.host if lan else "127.0.0.1", args.port, app, threaded=True)
+        app.config["HSD_PORT"] = server.server_port
         app.config["HSD_SHUTDOWN"] = server.shutdown
-        url = f"http://127.0.0.1:{server.server_port}"
-        instance_path.write_text(json.dumps({"url": url, "instance": app.config["HSD_INSTANCE"], "pid": os.getpid()}), "utf-8")
+        url = f"http://{lan.host if lan else '127.0.0.1'}:{server.server_port}"
+        instance = {"url": url, "instance": app.config["HSD_INSTANCE"], "pid": os.getpid(), "lan": bool(lan)}
+        if lan:
+            instance.update(lan_access_code=lan.code, lan_network=str(lan.network))
+        instance_path.write_text(json.dumps(instance), "utf-8")
         if sys.stdout:
             print(url, flush=True)
         logging.info("Started %s", url)

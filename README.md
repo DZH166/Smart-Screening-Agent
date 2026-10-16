@@ -1,8 +1,8 @@
 # 智筛 Agent · HSD 图号助手
 
-单机 Windows 图片与 AI 设计文件对应编号工具。用户确认的范围：固定 XLSX 模板 A 列编号/B 列图片；HSD + 四位新流水号；保留已有编号；只对成功匹配的空白编号行填号；疑难项人工复核；非破坏性输出副本。
+Windows 图片与 AI 设计文件对应编号工具，默认在本机使用，也可显式开启同一局域网内的共享测试。用户确认的范围：固定 XLSX 模板 A 列编号/B 列图片；HSD + 四位新流水号；保留已有编号；只对成功匹配的空白编号行填号；疑难项人工复核；非破坏性输出副本。
 
-当前版本：`v1.3.0`（2026-10-15）。Windows 便携程序见 [GitHub Releases](https://github.com/DZH166/Smart-Screening-Agent/releases/latest)，解压整个文件夹后双击 `HSD图号助手.exe`，不需要安装 Python。操作步骤见 [使用说明](使用说明.txt)，版本记录见 [CHANGELOG.md](CHANGELOG.md)。
+当前版本：`v1.3.1`（2026-10-16）。Windows 便携程序见 [GitHub Releases](https://github.com/DZH166/Smart-Screening-Agent/releases/latest)，解压整个文件夹后双击 `HSD图号助手.exe`，不需要安装 Python。操作步骤见 [使用说明](使用说明.txt)，版本记录见 [CHANGELOG.md](CHANGELOG.md)。
 
 流程为“本机匹配 → 可选 DeepSeek 二次复核 → 剩余人工审核 → 摘要 → 导出”。可靠匹配由服务端直接通过，无需员工逐张查看；没有疑问项时直接进入摘要。AI 复核默认关闭，启用后仍处于评估模式：**AI 只给建议，疑难项仍由员工确认**。发布包不预置 AI 业务自动通过资格。本版的本地匹配改进、AI 协议测试和新批次业务验证分别记录。
 
@@ -18,20 +18,48 @@ py -3.12 -m venv .venv
 .\build.ps1
 ```
 
-v1.3.0 便携构建输出位于 `dist/v1.3.0/`，解压发布包后双击其中的 exe。程序只监听 `127.0.0.1`，随机本地端口，界面资源均离线加载。本机匹配无需联网；启用 DeepSeek 复核时需要联网并产生 API 费用。无需安装 Illustrator 来读取已有 PDF 兼容预览；不能渲染的 AI 会明确列为异常。
+v1.3.1 便携构建输出位于 `dist/v1.3.1/`，解压发布包后双击其中的 exe。默认只监听 `127.0.0.1`，随机本地端口，界面资源均离线加载。局域网测试需要下文的显式启动参数。本机匹配无需联网；启用 DeepSeek 复核时需要联网并产生 API 费用。无需安装 Illustrator 来读取已有 PDF 兼容预览；不能渲染的 AI 会明确列为异常。
 
 便携包验收需要本机已有 `测试样本/10月表格.xlsx` 和 `测试样本/10.10.zip`，不会把它们加入发布包。先启动刚构建的 exe，使用独立数据目录并保持 AI 复核关闭；在另一 PowerShell 窗口运行验收：
 
 ```powershell
-& '.\dist\v1.3.0\HSD图号助手\HSD图号助手.exe' --no-browser --port 8804 --data-dir '.\tmp\v13_portable_data'
+& '.\dist\v1.3.1\HSD图号助手\HSD图号助手.exe' --no-browser --port 8804 --data-dir '.\tmp\v131_portable_data'
 ```
 
 ```powershell
-.\.venv\Scripts\python.exe tools\verify_portable.py http://127.0.0.1:8804 --bundle 'dist\v1.3.0\HSD图号助手' --work tmp\v13_packaged_validation
-.\.venv\Scripts\python.exe tools\prepare_delivery.py --result 'tmp\v13_packaged_validation\验收结果.json' --notes 'tmp\v13_packaged_validation\验收说明.txt'
+.\.venv\Scripts\python.exe tools\verify_portable.py http://127.0.0.1:8804 --bundle 'dist\v1.3.1\HSD图号助手' --work tmp\v131_packaged_validation
+.\.venv\Scripts\python.exe tools\prepare_delivery.py --result 'tmp\v131_packaged_validation\验收结果.json' --notes 'tmp\v131_packaged_validation\验收说明.txt'
 ```
 
-`verify_portable.py` 核对实际运行的冻结程序及构建指纹，用缺号副本验证编号、表格局部更新、原稿不变和导出 AI 的原始字节。`prepare_delivery.py` 需验收成功后运行；先根据真实验收结果编写 `--notes` 指定的说明文件。它会再次校验构建一致性，生成 `交付/v1.3.0/` 下的 ZIP 和 SHA256。验收后若改动构建输入，应重新构建并验收。这组命令验证本机匹配与打包导出，不自动取得 AI 业务放行资格。
+`verify_portable.py` 核对实际运行的冻结程序及构建指纹，用缺号副本验证编号、表格局部更新、原稿不变和导出 AI 的原始字节。`prepare_delivery.py` 需验收成功后运行；先根据真实验收结果编写 `--notes` 指定的说明文件。它会再次校验构建一致性，生成 `交付/v1.3.1/` 下的 ZIP 和 SHA256。验收后若改动构建输入，应重新构建并验收。这组命令验证本机匹配与打包导出，不自动取得 AI 业务放行资格。
+
+## 局域网共享测试
+
+默认启动方式不变。需要其他电脑测试时，在运行工具的主机上准备专用素材目录和结果目录，然后显式启动。以下 IP、子网和路径是示例，必须替换为主机实际 IPv4 与同网段范围：
+
+```powershell
+& '.\dist\v1.3.1\HSD图号助手\HSD图号助手.exe' --lan 192.168.0.160/24 --lan-input-root 'D:/主机测试素材' --lan-output-root 'D:/主机测试结果' --port 8805
+```
+
+`--lan` 仅接受主机的 RFC1918 私有 IPv4，并按指定 CIDR 限制客户端来源；不会监听所有网卡。两个根目录应预先建立并分开使用。在局域网模式下，主机和远端导入的 XLSX、ZIP 或 AI 文件夹都必须位于素材根内，导出只能位于结果根内。符号链接、目录联接等不能用于越过这些范围。程序拒绝公网地址与不在指定子网内的请求；不要将该端口映射到互联网。
+
+其他电脑打开 `http://192.168.0.160:8805/`，输入主机页面顶部显示的访问码。访问码也保存在本机数据目录的 `instance.json` 的 `lan_access_code` 字段，不会写入 Git 或运行日志；每次启动重新生成，登录会话最长 8 小时。主机页面直接进入，可管理 AI 设置和退出服务。远端不能修改 AI 设置、打开主机原生选择窗口、打开结果文件夹或退出程序。所有电脑都使用主机已保存的 DeepSeek Key 和同一份 AI 设置、用量账本，远端不需要填写 Key，也不会收到 Key。更改局域网地址、子网或测试目录时，先在主机正常退出，再重新启动；重复启动会复用原实例。
+
+这是共享测试入口：所有人操作同一个后台和当前批次，不提供员工账号或多人任务隔离；请安排一人操作，其他人观察，避免同时确认、改选或导出。页面中的文件路径属于主机。远端不上传自己电脑上的原稿，也不能浏览客户端磁盘；先由主机把测试资料放入指定素材根，再填写主机路径。结果保存于主机结果根，本版不提供远端下载，测试后从主机取回。
+
+Windows 防火墙应只开放指定接口、端口和子网。管理员 PowerShell 命令模板如下；IP、网段、程序绝对路径须与实际启动一致。即使网卡被标记为 Public，规则仍按相同来源子网限制，不需要关闭防火墙：
+
+```powershell
+New-NetFirewallRule -DisplayName 'HSD 局域网测试 8805' -Direction Inbound -Action Allow -Protocol TCP -LocalAddress '192.168.0.160' -LocalPort 8805 -RemoteAddress '192.168.0.0/24' -Profile Any -Program 'D:\智筛Agent\dist\v1.3.1\HSD图号助手\HSD图号助手.exe'
+```
+
+测试结束可在主机页面退出程序，并移除专用规则：
+
+```powershell
+Remove-NetFirewallRule -DisplayName 'HSD 局域网测试 8805'
+```
+
+以上是配置示例，不表示规则已执行或其他电脑已经连通；连通性应在另一台实际电脑上验证。局域网模式不改变匹配判定、AI 资格或编号规则，也不新增云端存储；启用 DeepSeek 时仍按原预览外发范围处理。
 
 ## DeepSeek 设置与数据范围
 
@@ -55,7 +83,7 @@ v1.3.0 便携构建输出位于 `dist/v1.3.0/`，解压发布包后双击其中�
 - `ai_policy.py` / `ai_images.py` / `ai_client.py`：复核资格、预览与完整分段、后台 DeepSeek 请求及结构化响应校验。
 - `ai_settings.py` / `ai_usage.py` / `ai_registry.py` / `ai_workflow.py`：加密设置、用量记录、限定场景验证资格与后台任务。
 - `service.py`：任务状态、编号规划、人工确认、文件校验、事务式导出。
-- `server.py`：本机 HTTP 接口与原生文件选择窗口。
+- `server.py`：本机/受限局域网 HTTP 接口与主机原生文件选择窗口。
 - `static/`：中文导入、复核、导出界面。
 
 编号与文件名冲突采用保守处理，不覆盖原件。新编号只规避当前表格中的已用号；跨批次起始号由员工确认。缺图和跳过行不会分配新号。输出保留完整工作簿，其余 XLSX 内部部件原字节复制。
@@ -104,6 +132,8 @@ AI 的“相同”意见不等于通过。v2 协议要求每个候选独立回�
 审核达标报告后，给同一验证命令显式添加 `--activate --data-dir "$env:LOCALAPPDATA\HSD图片编号工具"`，才会在指定工具数据目录签名保存资格。仅 `synthetic_known_truth` 合成标签或 `reference_map` 历史映射不能激活；不得改写来源标签绕过要求。资格仅覆盖通过的模型和类别，**7 天后到期**；提示词/协议或相关复核实现变化后失效，实际模型不匹配时不放行。失效后回到评估建议与人工确认。具体数据契约见 [CONTRACTS.md](CONTRACTS.md)。
 
 ## 开发验证
+
+v1.3.1 局域网升级：全套416项测试通过，随后新增1项访问码隔离测试，并复测88项局域网测试通过，共覆盖417个不同用例。局域网测试包括认证、会话过期、Host/Origin/CSRF、目录与链接边界、管理权限和共享任务版本冲突。两份前端脚本语法检查及AI渲染断言通过。Windows便携程序已通过指定局域网接口启动和合成图片“导入→自动匹配→摘要→编号导出”的实际流程检查，原始合成输入与导出AI哈希核对通过。当前主机保存的AI设置保持启用且已配置，本次验证未调用DeepSeek。尚未在另一台物理电脑上验证连通，也未新增业务准确率或自动通过量结论。
 
 v1.3.0 在正式 v1.2.0 基线上完成通用证据优化，冻结实现后再运行同一份原始60张输入：
 
