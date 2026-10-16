@@ -8,25 +8,31 @@ become 285,499 product records or a large in-memory worksheet object tree.
 from __future__ import annotations
 
 from collections import defaultdict
+import copy
 from decimal import Decimal, InvalidOperation
-from io import BytesIO
+import errno
 import os
 from pathlib import Path
 import posixpath
 import re
+import shutil
 import tempfile
 import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape
-from zipfile import BadZipFile, ZipFile
+from zipfile import BadZipFile, ZipFile, ZIP64_LIMIT
 
 from PIL import Image
+from .archive_io import member_blocks
 
 MAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
-MAX_PART_BYTES = 256 * 1024 * 1024
-MAX_ARCHIVE_BYTES = 2 * 1024 * 1024 * 1024
-MAX_IMAGE_BYTES = 64 * 1024 * 1024
+# Compatibility names: bytes are limited by available resources, not fixed caps.
+MAX_PART_BYTES = None
+MAX_ARCHIVE_BYTES = None
+MAX_IMAGE_BYTES = None
 MAX_IMAGE_PIXELS = 40_000_000
+IO_CHUNK_BYTES = 1024 * 1024
+SPOOL_MEMORY_BYTES = 8 * 1024 * 1024
 DISPIMG = re.compile(r'(?:_xlfn\.)?DISPIMG\s*\(\s*"([^"\r\n]+)"', re.I)
 CELL_REF = re.compile(r"^([A-Z]+)([1-9][0-9]*)$")
 XML_NAME = rb"(?:[A-Za-z_][\w.-]*:)?"
@@ -58,22 +64,42 @@ def _rich_text(element: ET.Element | None) -> str:
 
 def _validate_archive(archive: ZipFile) -> None:
     entries = archive.infolist()
-    if len(entries) > 20_000 or sum(item.file_size for item in entries) > MAX_ARCHIVE_BYTES:
-        raise ValueError("表格内容过大，无法安全读取。")
+    if len(entries) > 20_000:
+        raise ValueError("表格内部文件过多，无法安全读取。")
     if len({item.filename for item in entries}) != len(entries):
         raise ValueError("表格包含重复的内部文件，无法确定数据来源。")
     for item in entries:
-        if item.file_size > MAX_PART_BYTES:
-            raise ValueError("表格内部文件过大，请先清理无用内容。")
+        if item.file_size < 0 or item.compress_size < 0:
+            raise ValueError("表格内部文件长度无效。")
         if item.flag_bits & 1:
             raise ValueError("暂不支持加密表格，请先另存为未加密的 XLSX。")
 
 
 def _xml(archive: ZipFile, part: str) -> ET.Element:
-    data = archive.read(part)
-    if b"<!DOCTYPE" in data.upper() or b"<!ENTITY" in data.upper():
-        raise ValueError("表格包含不支持的 XML 声明。")
-    return ET.fromstring(data)
+    parser, tail, read = ET.XMLParser(), b"", 0
+    info = archive.getinfo(part)
+    for block in member_blocks(archive, info):
+        read += len(block)
+        upper = (tail + block).upper()
+        if b"<!DOCTYPE" in upper or b"<!ENTITY" in upper:
+            raise ValueError("表格包含不支持的 XML 声明。")
+        tail = upper[-16:]
+        parser.feed(block)
+    if read != info.file_size:
+        raise ValueError("表格内部文件未完整读取。")
+    return parser.close()
+
+
+def _copy_member(archive: ZipFile, info, destination) -> None:
+    """Consume through EOF for CRC and actual-length validation, in fixed blocks."""
+    copied = 0
+    for block in member_blocks(archive, info):
+        copied += len(block)
+        if copied > info.file_size:
+            raise ValueError("表格内部文件实际长度不符。")
+        destination.write(block)
+    if copied != info.file_size:
+        raise ValueError("表格内部文件未完整读取。")
 
 
 def _target(part: str, target: str) -> str:
@@ -279,19 +305,24 @@ def _floating_images(archive: ZipFile, sheet_part: str) -> dict[int, list[str | 
 def _extract_image(archive: ZipFile, part: str | None, destination: Path) -> tuple[str | None, str | None]:
     if not part or part not in archive.namelist():
         return None, "表格图片引用失效或图片不存在。"
-    if archive.getinfo(part).file_size > MAX_IMAGE_BYTES:
-        return None, "表格图片过大，需人工处理。"
     try:
-        data = archive.read(part)
-        with Image.open(BytesIO(data)) as preview:
-            if preview.width * preview.height > MAX_IMAGE_PIXELS:
-                return None, "表格图片像素过大，需人工处理。"
-            preview.load()
-            # Normalize the preview only; the original XLSX bytes stay intact.
-            rgba = preview.convert("RGBA")
-            background = Image.new("RGBA", rgba.size, "white")
-            background.alpha_composite(rgba)
-            background.convert("RGB").save(destination, "PNG")
+        info = archive.getinfo(part)
+        if info.file_size > SPOOL_MEMORY_BYTES and info.file_size > shutil.disk_usage(destination.parent).free:
+            return None, "主机磁盘空间不足，无法暂存表格图片，请清理后重试。"
+        # Seekable spooling avoids repeated ZIP decompression during image
+        # decoding and prevents encoded-image memory growing with file bytes.
+        with tempfile.SpooledTemporaryFile(max_size=SPOOL_MEMORY_BYTES, dir=destination.parent) as staged:
+            _copy_member(archive, info, staged)
+            staged.seek(0)
+            with Image.open(staged) as preview:
+                if preview.width * preview.height > MAX_IMAGE_PIXELS:
+                    return None, "表格图片像素过大，需人工处理。"
+                preview.load()
+                # Normalize the preview only; the original XLSX bytes stay intact.
+                rgba = preview.convert("RGBA")
+                background = Image.new("RGBA", rgba.size, "white")
+                background.alpha_composite(rgba)
+                background.convert("RGB").save(destination, "PNG")
         return str(destination.resolve()), None
     except (OSError, ValueError, Image.DecompressionBombError, BadZipFile):
         return None, "表格图片无法解码，需人工处理。"
@@ -450,7 +481,12 @@ def write_numbered_workbook(source: str, destination: str, sheet_name: str, assi
             with ZipFile(temporary, "w") as output:
                 output.comment = archive.comment
                 for info in archive.infolist():
-                    output.writestr(info, patched if info.filename == sheet["part"] else archive.read(info.filename))
+                    member = copy.copy(info)
+                    if info.filename == sheet["part"]:
+                        output.writestr(member, patched)
+                    else:
+                        with output.open(member, "w", force_zip64=info.file_size >= ZIP64_LIMIT) as stream:
+                            _copy_member(archive, info, stream)
         # Opening exclusively prevents a race from overwriting another export.
         with open(destination_path, "xb") as output, open(temporary, "rb") as prepared:
             try:
@@ -460,6 +496,10 @@ def write_numbered_workbook(source: str, destination: str, sheet_name: str, assi
                 output.close()
                 destination_path.unlink(missing_ok=True)
                 raise
+    except OSError as exc:
+        if exc.errno in {errno.ENOSPC, getattr(errno, 'EDQUOT', errno.ENOSPC)}:
+            raise ValueError("主机磁盘空间不足，无法导出表格，请清理后重试。") from exc
+        raise
     except (BadZipFile, KeyError, ET.ParseError) as exc:
         raise ValueError("无法导出表格，原文件未被更改。") from exc
     finally:

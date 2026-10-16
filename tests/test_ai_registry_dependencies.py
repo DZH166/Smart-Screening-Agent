@@ -1,10 +1,12 @@
 """Qualification binds every production matcher and review implementation."""
 import types
+import pytest
 
 from hsd_tool.ai_registry import IMPLEMENTATION_MODULES, ValidationRegistry
 
 
-def test_changed_matching_helper_invalidates_previously_signed_qualification(tmp_path, monkeypatch):
+@pytest.mark.parametrize("module", ["matching_verification", "archive_io"])
+def test_changed_matching_helper_invalidates_previously_signed_qualification(tmp_path, monkeypatch, module):
     import hsd_tool.ai_policy as policy
     import hsd_tool.ai_registry as registry
     from hsd_tool.ai_policy import POLICY_VERSION, PROMPT_VERSION
@@ -25,6 +27,6 @@ def test_changed_matching_helper_invalidates_previously_signed_qualification(tmp
     })
     store = ValidationRegistry(tmp_path)
     assert store.activate({}, {})["qualified"]
-    revisions["hsd_tool.matching_verification"] = "REVISION = 2"
+    revisions["hsd_tool." + module] = "REVISION = 2"
     assert store.load() == {}
     assert not store.snapshot()["qualified"]

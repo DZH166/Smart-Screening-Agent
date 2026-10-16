@@ -12,7 +12,7 @@ import marshal
 from types import CodeType
 from datetime import datetime, timedelta, timezone
 
-IMPLEMENTATION_MODULES = ("ai_policy", "ai_client", "ai_images", "matching", "matching_verification")
+IMPLEMENTATION_MODULES = ("ai_policy", "ai_client", "ai_images", "matching", "matching_verification", "archive_io")
 
 
 class ValidationRegistry:

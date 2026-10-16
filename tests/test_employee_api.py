@@ -1,5 +1,6 @@
 """Employee upload/download isolation, using generated containers and no AI API."""
 from io import BytesIO
+import hashlib
 from pathlib import Path
 import zipfile
 
@@ -81,10 +82,10 @@ def captured_jobs(employee_app, monkeypatch):
     manager = employee_app.config["HSD_MANAGER"]
     calls = []
 
-    def create(payload, *, owner_id=None, downloadable=False, display_names=None):
+    def create(payload, *, owner_id=None, downloadable=False, display_names=None, input_digests=None):
         identifier = f"employee{len(calls) + 1}"
         captured = {"payload": dict(payload), "owner_id": owner_id,
-                    "downloadable": downloadable, "display_names": display_names}
+                    "downloadable": downloadable, "display_names": display_names, "input_digests": input_digests}
         calls.append(captured)
         work = manager.data_dir / "jobs" / identifier
         work.mkdir(parents=True)
@@ -146,6 +147,10 @@ def test_upload_stores_fixed_private_filenames_and_tags_browser_owner(employee_a
     assert call["owner_id"] and call["downloadable"] is True
     assert call["display_names"]["workbook_name"] == "员工.xlsx"
     assert call["display_names"]["source_name"] == "原稿.zip"
+    assert set(call["display_names"]) == {"workbook_name", "source_name"}
+    assert call["input_digests"] == {"workbook": hashlib.sha256(workbook.read_bytes()).hexdigest(),
+                                     "source": hashlib.sha256(source.read_bytes()).hexdigest()}
+    assert "_input_digests" not in request(client, "/api/jobs/employee1").get_data(as_text=True)
     assert not (upload_root.parent.parent / "outside").exists()
 
 
@@ -403,34 +408,35 @@ def test_download_cannot_follow_a_link_to_another_directory(employee_app, captur
     assert private.read_bytes() not in response.data
 
 
-@pytest.mark.parametrize("constant,fields", [
-    ("MAX_WORKBOOK_BYTES", {}),
-    ("MAX_SOURCE_BYTES", {"source": zip_bytes({"large.ai": b"too large for a one-byte allowance"})}),
-])
-def test_individual_upload_limits_return_json_and_clean_files(employee_app, captured_jobs, monkeypatch, constant, fields):
-    import hsd_tool.server as server
-    import hsd_tool.uploads as uploads
-
-    monkeypatch.setattr(uploads, constant, 1)
-    monkeypatch.setattr(server, constant, 1)
+def test_upload_configuration_explicitly_has_no_file_or_total_byte_limit(employee_app, captured_jobs):
     client = employee_app.test_client()
     login(client)
-    response = upload(client, **fields)
+    assert request(client, "/api/config").json["access"]["upload_limits"] == {
+        "workbook_bytes": None, "source_bytes": None, "total_bytes": None}
+    assert upload(client).status_code == 200
+
+
+def test_json_requests_still_have_a_small_body_limit(employee_app, captured_jobs):
+    client = employee_app.test_client()
+    login(client)
+    response = request(client, "/api/lan/logout", method="POST", payload={"oversized": "x" * (65 * 1024)})
     assert response.status_code == 413
     assert response.is_json and response.json.get("error")
     assert captured_jobs == []
     assert not list((employee_app.config["HSD_MANAGER"].data_dir / "uploads").glob("*"))
 
 
-def test_total_upload_limit_returns_json_before_creating_a_job(employee_app, captured_jobs, monkeypatch):
-    import hsd_tool.server as server
-
+@pytest.mark.parametrize("field", ["input_digests", "_input_digests"])
+def test_upload_digest_cannot_be_supplied_through_json_or_form(employee_app, captured_jobs, field):
     client = employee_app.test_client()
     login(client)
-    monkeypatch.setattr(server, "MAX_UPLOAD_BYTES", 100)
-    response = upload(client)
-    assert response.status_code == 413
-    assert response.is_json and response.json.get("error")
+    response = request(client, "/api/jobs", method="POST", address=HOST, payload={field: {"workbook": "0" * 64, "source": "1" * 64}})
+    assert response.status_code == 400
+    data = {"start_number": "1", field: '{"workbook":"forged"}',
+            "workbook": (BytesIO(workbook_bytes()), "test.xlsx"),
+            "source": (BytesIO(zip_bytes({"pattern.ai": b"synthetic-ai"})), "test.zip")}
+    response = request(client, "/api/jobs/upload", method="POST", data=data, content_type="multipart/form-data")
+    assert response.status_code == 400
     assert captured_jobs == []
     assert not list((employee_app.config["HSD_MANAGER"].data_dir / "uploads").glob("*"))
 

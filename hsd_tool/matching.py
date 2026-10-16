@@ -7,11 +7,14 @@ left for a person; this module never fills a missing assignment by elimination.
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from contextlib import contextmanager
 from dataclasses import dataclass
+import errno
 import hashlib
 import math
 import os
 from pathlib import Path, PurePosixPath
+import shutil
 import stat
 import tempfile
 import zipfile
@@ -23,14 +26,68 @@ import pymupdf
 
 from .matching_verification import (affine_coverage, phase_coverage, periodic_extension,
                                     pixel_metrics, coherent_difference)
+from .archive_io import member_blocks
 
 MAX_FILES = 500
 MAX_ENTRIES = 10000
-MAX_FILE_BYTES = 256 * 1024 * 1024
-MAX_TOTAL_BYTES = 4 * 1024 * 1024 * 1024
-MAX_RATIO = 1000
+# Kept for import compatibility; file bytes and compression ratios are not
+# product limits. Real storage availability, structure and decoded pixels are.
+MAX_FILE_BYTES = None
+MAX_TOTAL_BYTES = None
+MAX_RATIO = None
 MAX_IMAGE_PIXELS = 40_000_000
 PREVIEW_SIZE = 1400
+IO_CHUNK_BYTES = 1024 * 1024
+
+
+def _require_space(directory: Path, needed: int) -> None:
+    if needed > shutil.disk_usage(directory).free:
+        raise ValueError('磁盘空间不足，请清理主机磁盘空间后重新处理。')
+
+
+def _file_signature(info) -> tuple:
+    # Python 3.12 Windows stat/fstat differ in the legacy ctime field; the
+    # explicit birth time is consistent, while full hashes detect byte edits.
+    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns,
+            getattr(info, 'st_birthtime_ns', info.st_ctime_ns))
+
+
+@contextmanager
+def _source_reader(path: Path):
+    if os.name != 'nt':
+        with path.open('rb') as stream:
+            yield stream, False
+        return
+    # Prevent concurrent Windows writers/replacements while MuPDF separately
+    # opens the same path. No file bytes, credentials or process state is copied.
+    import ctypes
+    from ctypes import wintypes
+    import msvcrt
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    create = kernel.CreateFileW
+    create.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                       ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    create.restype = wintypes.HANDLE
+    handle = create(str(path), 0x80000000, 0x1, None, 3, 0x08000000, None)
+    if handle == wintypes.HANDLE(-1).value:
+        raise OSError(ctypes.get_last_error(), '原稿正在被占用或无法读取，请关闭编辑后重新导入。')
+    try:
+        descriptor = msvcrt.open_osfhandle(int(handle), os.O_RDONLY | os.O_BINARY)
+    except BaseException:
+        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel.CloseHandle(handle)
+        raise
+    with os.fdopen(descriptor, 'rb') as stream:
+        yield stream, True
+
+
+def _source_digest(stream) -> tuple[str, bytes]:
+    stream.seek(0)
+    prefix = stream.read(1024)
+    digest = hashlib.sha256(prefix)
+    while block := stream.read(IO_CHUNK_BYTES):
+        digest.update(block)
+    return digest.hexdigest(), prefix
 
 
 def _is_link(path: Path) -> bool:
@@ -72,7 +129,7 @@ def _collect(source: Path, directory: Path, warnings: list[str]) -> list[dict]:
         raise ValueError('请选择真实文件夹或压缩包，不支持符号链接与目录联接。')
     if source.is_dir():
         entries = []
-        count, total = 0, 0
+        count = 0
         for base, dirs, names in os.walk(source, followlinks=False):
             # Junctions are reparse points on Windows, not necessarily symlinks.
             for name in list(dirs):
@@ -90,10 +147,6 @@ def _collect(source: Path, directory: Path, warnings: list[str]) -> list[dict]:
                 if _is_link(p):
                     warnings.append(f'已跳过链接文件：{p.relative_to(source)}')
                     continue
-                size = p.stat().st_size
-                total += size
-                if size > MAX_FILE_BYTES or total > MAX_TOTAL_BYTES:
-                    raise ValueError('AI 文件超过本地处理容量：单文件 256 MB，每批总计 4 GB。')
                 entries.append((p.relative_to(source).as_posix(), p))
         if len(entries) > MAX_FILES:
             raise ValueError(f'每批最多支持 {MAX_FILES} 个 AI 文件，请分批处理。')
@@ -117,28 +170,41 @@ def _collect(source: Path, directory: Path, warnings: list[str]) -> list[dict]:
                     continue
                 if info.flag_bits & 1:
                     raise ValueError('暂不支持加密 ZIP，请先解压后选择 AI 文件夹。')
+                if info.file_size < 0 or info.compress_size < 0:
+                    raise ValueError('压缩包文件长度无效，请重新打包。')
                 total += info.file_size
-                if info.file_size > MAX_FILE_BYTES or total > MAX_TOTAL_BYTES:
-                    raise ValueError('AI 文件超过本地处理容量：单文件 256 MB，每批总计 4 GB。')
-                if info.file_size > max(1, info.compress_size) * MAX_RATIO:
-                    raise ValueError('压缩包展开比例异常，已停止读取。请先在本地解压并检查。')
                 entries.append((name, info))
             if len(entries) > MAX_FILES:
                 raise ValueError(f'每批最多支持 {MAX_FILES} 个 AI 文件，请分批处理。')
             entries.sort(key=lambda pair: (pair[0].casefold(), pair[0]))
+            _require_space(directory, total)
             files = []
+            space_check = 0
             for i, (name, info) in enumerate(entries, 1):
                 destination = directory / f'f{i:04d}.ai'
                 record = _file_record(i, name, destination)
                 digest = hashlib.sha256()
                 written = 0
-                with archive.open(info) as stream, destination.open('xb') as output:
-                    while block := stream.read(1024 * 1024):
-                        written += len(block)
-                        if written > min(MAX_FILE_BYTES, info.file_size):
-                            raise ValueError('压缩包实际展开容量不符，已停止读取。')
-                        digest.update(block)
-                        output.write(block)
+                try:
+                    with destination.open('xb') as output:
+                        for block in member_blocks(archive, info):
+                            written += len(block)
+                            if written > info.file_size:
+                                raise ValueError('压缩包实际展开长度不符，已停止读取。')
+                            if space_check <= 0:
+                                _require_space(directory, min(64 * IO_CHUNK_BYTES, total))
+                                space_check = 64 * IO_CHUNK_BYTES
+                            digest.update(block)
+                            output.write(block)
+                            space_check -= len(block)
+                            total -= len(block)
+                        if written != info.file_size:
+                            raise ValueError('压缩包实际展开长度不符，文件未完整读取。')
+                except BaseException as exc:
+                    destination.unlink(missing_ok=True)
+                    if isinstance(exc, OSError) and exc.errno in {errno.ENOSPC, getattr(errno, 'EDQUOT', errno.ENOSPC)}:
+                        raise ValueError('磁盘空间不足，请清理主机磁盘空间后重新处理。') from exc
+                    raise
                 record['source_sha256'] = digest.hexdigest()
                 files.append(record)
             if any('\ufffd' in name for name, _ in entries):
@@ -150,44 +216,56 @@ def _collect(source: Path, directory: Path, warnings: list[str]) -> list[dict]:
 
 def _render(record: dict, previews: Path) -> None:
     path = Path(record['source_path'])
-    # Render the exact bytes hashed, so export can detect subsequent input edits.
-    with path.open('rb') as stream:
-        data = stream.read(MAX_FILE_BYTES + 1)
-    if len(data) > MAX_FILE_BYTES:
-        raise ValueError('AI 文件超过 256 MB，请单独处理。')
-    digest = hashlib.sha256(data).hexdigest()
-    if record.get('source_sha256') and record['source_sha256'] != digest:
-        raise ValueError('读取过程中源文件发生变化，请重新导入。')
-    record['source_sha256'] = digest
-    if b'%PDF-' not in data[:1024]:
-        raise ValueError('此 AI 未包含 PDF 兼容预览；请在 Illustrator 中启用“创建 PDF 兼容文件”后另存。')
-    with pymupdf.open(stream=data, filetype='pdf') as doc:
-        if doc.needs_pass:
-            raise ValueError('文件预览已加密，无法读取。')
-        if not doc.page_count:
-            raise ValueError('AI 文件没有可读取的画板。')
-        record['page_count'] = doc.page_count
-        page = doc[0]
-        # Illustrator's media box usually includes printing bleed. Its declared
-        # trim box is the actual artwork boundary represented in the workbook.
-        # Respect that explicit document metadata; never guess a crop from art.
-        trim = page.trimbox
-        if not trim.is_empty and not trim.is_infinite and trim != page.cropbox:
-            try:
-                page.set_cropbox(trim)
-                record['uses_trimbox'] = True
-            except ValueError:
-                record['uses_trimbox'] = False
-        rect = page.rect
-        if not all(math.isfinite(n) and n > 0 for n in (rect.width, rect.height)):
-            raise ValueError('AI 画板尺寸异常，无法生成预览。')
-        scale = PREVIEW_SIZE / max(rect.width, rect.height)
-        destination = previews / f"{record['id']}.png"
-        page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), colorspace=pymupdf.csRGB,
-                        alpha=False).save(destination)
+    destination = previews / f"{record['id']}.png"
+    try:
+        # MuPDF reads a path on demand; hashing uses fixed-size buffers. Hold a
+        # read-only Windows lease and check both identity and all bytes again
+        # before publishing the preview, retaining source-change protection.
+        with _source_reader(path) as (stream, write_locked):
+            signature = _file_signature(os.fstat(stream.fileno()))
+            digest, prefix = _source_digest(stream)
+            if (_file_signature(os.fstat(stream.fileno())) != signature
+                    or _file_signature(path.stat()) != signature
+                    or record.get('source_sha256') not in {None, digest}):
+                raise ValueError('读取过程中源文件发生变化，请重新导入。')
+            record['source_sha256'] = digest
+            if b'%PDF-' not in prefix:
+                raise ValueError('此 AI 未包含 PDF 兼容预览；请在 Illustrator 中启用“创建 PDF 兼容文件”后另存。')
+            with pymupdf.open(filename=str(path), filetype='pdf') as doc:
+                if doc.needs_pass:
+                    raise ValueError('文件预览已加密，无法读取。')
+                if not doc.page_count:
+                    raise ValueError('AI 文件没有可读取的画板。')
+                record['page_count'] = doc.page_count
+                page = doc[0]
+                # Keep the same explicit trimbox and rendering parameters.
+                trim = page.trimbox
+                if not trim.is_empty and not trim.is_infinite and trim != page.cropbox:
+                    try:
+                        page.set_cropbox(trim)
+                        record['uses_trimbox'] = True
+                    except ValueError:
+                        record['uses_trimbox'] = False
+                rect = page.rect
+                if not all(math.isfinite(n) and n > 0 for n in (rect.width, rect.height)):
+                    raise ValueError('AI 画板尺寸异常，无法生成预览。')
+                scale = PREVIEW_SIZE / max(rect.width, rect.height)
+                page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), colorspace=pymupdf.csRGB,
+                                alpha=False).save(destination)
+                if doc.page_count > 1:
+                    record['issue'] = f'含 {doc.page_count} 个画板，目前仅预览第 1 个，须人工确认整个 AI 文件。'
+            # Windows denies existing/new writers and replacements throughout
+            # the lease, so a second full read adds no protection. Other OSes
+            # rehash after rendering because their ordinary read is not a lease.
+            checked = digest if write_locked else _source_digest(stream)[0]
+            if (checked != digest or _file_signature(os.fstat(stream.fileno())) != signature
+                    or _file_signature(path.stat()) != signature):
+                raise ValueError('生成预览期间源文件发生变化，请重新导入。')
         record['preview_path'] = str(destination.resolve())
-        if doc.page_count > 1:
-            record['issue'] = f'含 {doc.page_count} 个画板，目前仅预览第 1 个，须人工确认整个 AI 文件。'
+    except BaseException:
+        destination.unlink(missing_ok=True)
+        record['preview_path'] = None
+        raise
 
 
 def _read_image(path: str) -> np.ndarray:

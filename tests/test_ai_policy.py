@@ -335,7 +335,7 @@ def test_unsigned_or_malformed_call_implementation_cannot_be_backfilled(mutation
     assert observations == before
 
 
-@pytest.mark.parametrize("module", ["ai_policy", "ai_client", "ai_images", "matching", "matching_verification"])
+@pytest.mark.parametrize("module", ["ai_policy", "ai_client", "ai_images", "matching", "matching_verification", "archive_io"])
 def test_same_protocol_old_observations_cannot_be_reactivated_under_new_implementation(tmp_path, monkeypatch, module):
     from hsd_tool.ai_registry import ValidationRegistry
     labels, observations = validation_data()

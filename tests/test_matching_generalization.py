@@ -118,13 +118,14 @@ def test_relative_imports_are_isolated_between_code_roots(tmp_path):
 
 
 @pytest.mark.parametrize("mutation", ["change", "add", "remove"])
-def test_helper_mutation_during_validation_invalidates_result(tmp_path, monkeypatch, mutation):
+@pytest.mark.parametrize("helper_name", ["matching_verification.py", "archive_io.py"])
+def test_helper_mutation_during_validation_invalidates_result(tmp_path, monkeypatch, mutation, helper_name):
     root = frozen_case(tmp_path)
     package = tmp_path / "hsd_tool"
     package.mkdir()
     implementation = package / "matching.py"
     implementation.write_text("# fixed matching", encoding="utf-8")
-    helper = package / "matching_verification.py"
+    helper = package / helper_name
     if mutation != "add":
         helper.write_text("TOKEN = 1\n", encoding="utf-8")
 

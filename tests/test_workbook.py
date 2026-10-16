@@ -9,6 +9,7 @@ from PIL import Image
 import pytest
 
 from hsd_tool.workbook import inspect_workbook, write_numbered_workbook
+import hsd_tool.workbook as workbook
 
 MAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -95,6 +96,78 @@ def test_unreadable_image_returns_issue(tmp_path):
     row = inspect_workbook(str(source), str(tmp_path / "work"))["rows"][0]
     assert row["image_path"] is None
     assert "解码" in row["issue"]
+
+
+def test_old_byte_constants_do_not_limit_valid_workbook_or_image(tmp_path, monkeypatch):
+    source = make_book(tmp_path)
+    # Compatibility names are no longer byte-policy knobs. Exercise every
+    # reading/export path using a valid workbook exceeding these old knobs.
+    monkeypatch.setattr(workbook, 'MAX_PART_BYTES', 1)
+    monkeypatch.setattr(workbook, 'MAX_ARCHIVE_BYTES', 1)
+    monkeypatch.setattr(workbook, 'MAX_IMAGE_BYTES', 1)
+    result = inspect_workbook(str(source), str(tmp_path / 'work'))
+    assert len(result['rows']) == 1 and result['rows'][0]['issue'] is None
+    write_numbered_workbook(str(source), str(tmp_path / 'out.xlsx'), result['sheet_name'], {2: 'HSD0007'})
+    readback = inspect_workbook(str(tmp_path / 'out.xlsx'), str(tmp_path / 'again'))
+    assert readback['rows'][0]['number'] == 'HSD0007'
+
+
+def test_image_is_fully_crc_verified_before_decoder_can_ignore_trailing_bytes(tmp_path):
+    image = png_bytes() + b'CRC_MUST_BE_VERIFIED'
+    source = make_book(tmp_path, image_data=image)
+    # Make a stored package so only the end of its image can be corrupted.
+    stored = tmp_path / 'stored.xlsx'
+    with ZipFile(source) as original, ZipFile(stored, 'w') as output:
+        for info in original.infolist():
+            output.writestr(info.filename, original.read(info))
+    data = stored.read_bytes()
+    assert b'CRC_MUST_BE_VERIFIED' in data
+    stored.write_bytes(data.replace(b'CRC_MUST_BE_VERIFIED', b'CRC_MUST_BE_VERIFIE?'))
+    result = inspect_workbook(str(stored), str(tmp_path / 'work'))
+    assert result['rows'][0]['image_path'] is None
+    assert '解码' in result['rows'][0]['issue']
+
+
+def test_non_target_parts_are_streamed_and_preserved(tmp_path, monkeypatch):
+    source = make_book(tmp_path, second_sheet=True)
+    payload = b'other part bytes' * (1024 * 32)
+    with ZipFile(source, 'a', ZIP_DEFLATED) as archive:
+        archive.writestr('custom/large.bin', payload)
+    original_read = ZipFile.read
+    def bounded_read(self, name, *args, **kwargs):
+        part = getattr(name, 'filename', name)
+        assert part != 'custom/large.bin', 'Non-target parts must not be read as one bytes object'
+        return original_read(self, name, *args, **kwargs)
+    monkeypatch.setattr(ZipFile, 'read', bounded_read)
+    output = tmp_path / 'out.xlsx'
+    write_numbered_workbook(str(source), str(output), '恒尚达', {2: 'HSD0008'})
+    with ZipFile(output) as archive:
+        with archive.open('custom/large.bin') as stream:
+            assert stream.read() == payload
+    readback = inspect_workbook(str(output), str(tmp_path / 'again'))
+    assert readback['rows'][0]['number'] == 'HSD0008'
+
+
+def test_archive_entry_count_still_blocks_excessive_structure(tmp_path):
+    class ManyEntries:
+        def infolist(self):
+            return [None] * 20_001
+    with pytest.raises(ValueError, match='内部文件过多'):
+        workbook._validate_archive(ManyEntries())
+
+
+def test_xml_declaration_split_between_stream_blocks_is_rejected(tmp_path, monkeypatch):
+    from hsd_tool import archive_io
+    source = tmp_path / 'declaration.xlsx'
+    with ZipFile(source, 'w') as archive:
+        archive.writestr('bad.xml', b'<!--padding--><!DOCTYPE x [<!ENTITY a "bad">]><x/>')
+    # member_blocks' default is bound once; a tiny explicit wrapper exercises
+    # declaration detection across chunks without changing production limits.
+    original_blocks = archive_io.member_blocks
+    monkeypatch.setattr(workbook, 'member_blocks', lambda a, i: original_blocks(a, i, 5))
+    with ZipFile(source) as archive:
+        with pytest.raises(ValueError, match='XML 声明'):
+            workbook._xml(archive, 'bad.xml')
 
 
 def test_only_visible_floating_images_anchored_in_column_b_are_included(tmp_path):

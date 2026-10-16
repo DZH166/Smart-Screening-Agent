@@ -114,7 +114,18 @@ class JobManager:
         temporary.write_text(json.dumps(values, ensure_ascii=False, indent=2), "utf-8")
         os.replace(temporary, self.settings_path)
 
-    def create(self, payload: dict, *, owner_id=None, downloadable=False, display_names=None):
+    def create(self, payload: dict, *, owner_id=None, downloadable=False, display_names=None,
+               input_digests=None):
+        # Only the authenticated multipart receiver supplies these hashes. They
+        # are never read from the JSON payload or exposed in public snapshots.
+        upload_digests = {}
+        if input_digests is not None:
+            if (not downloadable or owner_id is None or not isinstance(input_digests, dict)
+                    or set(input_digests) != {"workbook", "source"}
+                    or any(not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value)
+                           for value in input_digests.values())):
+                raise ValueError("上传文件校验信息无效，请重新上传。")
+            upload_digests = dict(input_digests)
         workbook = Path(str(payload.get("workbook_path", "")).strip().strip('"')).resolve()
         source = Path(str(payload.get("source_path", "")).strip().strip('"')).resolve()
         output_text = str(payload.get("output_root", "")).strip().strip('"')
@@ -147,7 +158,7 @@ class JobManager:
                    "start_number": start, "prefix": "HSD", "rows": [], "files": [], "warnings": [],
                    "output_dir": None, "output_target": str(output), "report": None, "stats": {}, "_workbook_path": str(workbook),
                    "_source_path": str(source), "_output_root": str(output), "_work_dir": str(work_dir),
-                   "_reserved": [], "_input_digest": None, "revision": 0,
+                   "_reserved": [], "_input_digest": None, "_upload_digests": upload_digests, "revision": 0,
                    "timings": {}, "_history": [], "_image_assets": {}, "_started_perf": time.perf_counter(),
                    "_owner_id": owner_id, "_downloadable": bool(downloadable)}
             self.jobs[identifier] = job
@@ -190,7 +201,7 @@ class JobManager:
             from .workbook import inspect_workbook
             from .matching import scan_and_match
             workbook_path = job["_workbook_path"]
-            job["_input_digest"] = sha256(workbook_path)
+            job["_input_digest"] = job.get("_upload_digests", {}).get("workbook") or sha256(workbook_path)
             snapshot_path = Path(job["_work_dir"]) / "source.xlsx"
             shutil.copyfile(workbook_path, snapshot_path)
             if sha256(snapshot_path) != job["_input_digest"]:
@@ -208,7 +219,7 @@ class JobManager:
             matching_started = time.perf_counter()
             source_path = Path(job["_source_path"])
             if source_path.is_file():
-                job["_source_archive_digest"] = sha256(source_path)
+                job["_source_archive_digest"] = job.get("_upload_digests", {}).get("source") or sha256(source_path)
             result = scan_and_match(job["_source_path"], sheet["rows"], str(Path(job["_work_dir"]) / "matching"),
                                     progress=lambda m, c=0, t=1: self._progress(identifier, m, c, t))
             if job.get("_source_archive_digest") and sha256(source_path) != job["_source_archive_digest"]:
@@ -492,6 +503,7 @@ class JobManager:
             rows = [r for r in job["rows"] if r["status"] in ACCEPTED]
             assignments = {}
             mapping = []
+            verified_outputs = {}
             for index, row in enumerate(rows, 1):
                 self._progress(identifier, f"正在导出 {index}/{len(rows)} 个文件…", index, len(rows) + 1)
                 source = Path(files[row["file_id"]]["source_path"])
@@ -511,6 +523,7 @@ class JobManager:
                     raise ValueError("导出文件校验失败，请检查磁盘空间后重试。")
                 if expected_digest and copied_digest != expected_digest:
                     raise ValueError(f"文件 {source.name} 在匹配后发生了变化，请重新导入再导出。")
+                verified_outputs[destination.relative_to(staging).as_posix()] = copied_digest
                 if not row["number"]:
                     assignments[row["row_number"]] = number
                 mapping.append({"row": row["row_number"], "old_number": row["number"], "number": number,
@@ -561,7 +574,7 @@ class JobManager:
             if job.get("_downloadable"):
                 job["_completed_export"] = {"path": str(final), "report": report, "timings": timings,
                     "revision": job.get("revision", 0), "plan": self._export_plan(job),
-                    "manifest": self._output_manifest(job, final)}
+                    "manifest": self._output_manifest(job, final, verified_outputs)}
             self._finish_export(job, final, report, timings)
         except Exception as exc:
             # Only remove the exact staging directory created by this invocation.
@@ -601,9 +614,18 @@ class JobManager:
                 result.append(entry)
         return sorted(result)
 
-    def _output_manifest(self, job, directory):
-        return {path.relative_to(directory).as_posix(): sha256(path)
-                for path in self._output_members(job, directory)}
+    def _output_manifest(self, job, directory, verified_outputs=None):
+        # AI copies were independently reread immediately after copying. Reuse
+        # that verified digest; packaging still hashes every byte against it,
+        # so edits between copy and packaging cannot become the new baseline.
+        verified_outputs = verified_outputs or {}
+        result = {}
+        for path in self._output_members(job, directory):
+            relative = path.relative_to(directory).as_posix()
+            result[relative] = verified_outputs.get(relative) or sha256(path)
+        if not set(verified_outputs).issubset(result):
+            raise ValueError("导出结果文件发生变化，不能生成下载包。")
+        return result
 
     def _task_work_root(self, job):
         identifier = job["id"]

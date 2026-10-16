@@ -11,17 +11,63 @@ import threading
 from datetime import timedelta
 from pathlib import Path
 
-from flask import Flask, jsonify, request, send_file, session
+from flask import Flask, Request, current_app, jsonify, request, send_file, session
 from werkzeug.exceptions import BadRequest, Conflict, RequestEntityTooLarge
 
 from .service import JobManager
-from .uploads import EmployeeUploads, MAX_UPLOAD_BYTES, MAX_WORKBOOK_BYTES, MAX_SOURCE_BYTES
+from .uploads import EmployeeUploads, DiskBudget, UploadWriteError, MAX_UPLOAD_BYTES, MAX_WORKBOOK_BYTES, MAX_SOURCE_BYTES, disk_full
 from . import __version__
+
+
+class EmployeeUploadRequest(Request):
+    """Stream authenticated file parts directly into their isolated upload batch."""
+    @property
+    def max_content_length(self):
+        # Flask's None setter normally falls back to the app's JSON limit.
+        if getattr(self, "_hsd_upload_unlimited", False):
+            return None
+        return Request.max_content_length.fget(self)
+
+    @max_content_length.setter
+    def max_content_length(self, value):
+        Request.max_content_length.fset(self, value)
+
+    def _get_file_stream(self, total_content_length, content_type, filename=None, content_length=None):
+        if not getattr(self, "_hsd_upload_unlimited", False):
+            return super()._get_file_stream(total_content_length, content_type, filename, content_length)
+        uploads = current_app.config["HSD_UPLOADS"]
+        if not getattr(self, "_hsd_upload_directory", None):
+            self._hsd_upload_directory = uploads.begin()
+            self._hsd_upload_budget = DiskBudget(self._hsd_upload_directory)
+            self._hsd_upload_streams = []
+        stream = uploads.open_stream(self._hsd_upload_directory, self._hsd_upload_budget)
+        self._hsd_upload_streams.append(stream)
+        return stream
+
+    def release_upload(self):
+        if getattr(self, "_hsd_upload_released", False):
+            return
+        failure = None
+        for stream in getattr(self, "_hsd_upload_streams", ()):
+            try:
+                stream.close()
+            except OSError as exc:
+                failure = failure or exc
+        directory = getattr(self, "_hsd_upload_directory", None)
+        if directory is not None and not getattr(self, "_hsd_upload_committed", False):
+            try:
+                current_app.config["HSD_UPLOADS"].discard(directory)
+            except (OSError, ValueError) as exc:
+                failure = failure or exc
+        if failure is not None:
+            raise failure
+        self._hsd_upload_released = True
 
 
 def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, settings_dir=None):
     static = Path(__file__).resolve().parent / "static"
     app = Flask(__name__, static_folder=str(static), static_url_path="/static")
+    app.request_class = EmployeeUploadRequest
     app.config.update(MAX_CONTENT_LENGTH=64 * 1024, JSON_AS_ASCII=False)
     if lan:
         app.config.update(SECRET_KEY=secrets.token_bytes(32), SESSION_COOKIE_HTTPONLY=True,
@@ -125,9 +171,19 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
             if not secrets.compare_digest(provided.encode(), token.encode()):
                 return jsonify(error="会话已失效，请重新打开工具页面。"), 403
         if is_upload:
-            request.max_content_length = MAX_UPLOAD_BYTES
+            request._hsd_upload_unlimited = True
+            request.max_content_length = None
             request.max_form_memory_size = 512 * 1024
             request.max_form_parts = 8
+
+    @app.teardown_request
+    def release_upload_streams(exc):
+        try:
+            request.release_upload()
+        except (OSError, ValueError):
+            # Do not mask an interrupted/malformed request or follow a replaced
+            # link during cleanup. No path, file contents or credentials logged.
+            app.logger.warning("上传临时文件未能清理，请管理员检查磁盘空间与权限。")
 
     @app.after_request
     def response_headers(response):
@@ -144,13 +200,18 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
     def invalid(exc):
         return jsonify(error=str(exc)), 400
 
+    @app.errorhandler(UploadWriteError)
+    def upload_write_error(exc):
+        return jsonify(error=str(exc)), 400
+
     @app.errorhandler(Conflict)
     def conflict(exc):
         return jsonify(error=exc.description), 409
 
     @app.errorhandler(RequestEntityTooLarge)
     def too_large(exc):
-        return jsonify(error="上传超出容量：表格最大100MB，AI压缩包最大1900MB，每批合计不超过2GB。"), 413
+        message = "上传表单字段过多或过长，请只选择表格、ZIP和本批起始号。" if request.endpoint == "upload_job" else "请求内容过大，请缩短输入后重试。"
+        return jsonify(error=message), 413
 
     @app.errorhandler(BadRequest)
     def bad_request(exc):
@@ -162,6 +223,8 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
 
     @app.errorhandler(OSError)
     def file_error(exc):
+        if disk_full(exc):
+            return jsonify(error="主机磁盘空间不足，请联系管理员清理后再上传。"), 400
         if lan:
             return jsonify(error="任务文件无法读取或写入，请重新上传；若仍失败，请联系主机管理员检查磁盘空间与权限。"), 400
         return jsonify(error=f"无法访问文件或文件夹：{exc}"), 400
@@ -273,6 +336,8 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
     @app.post("/api/jobs")
     def create_job():
         payload = request.get_json()
+        if {"input_digests", "_input_digests"}.intersection(payload):
+            raise ValueError("文件校验信息只能由主机接收上传时生成。")
         if lan:
             if not lan.is_host(request.remote_addr):
                 return jsonify(error="请直接上传本机的表格和 AI 压缩包。"), 403
@@ -294,18 +359,21 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
                 raise Conflict("主机正在退出，请稍后重新打开员工入口。")
             app.config["HSD_ACTIVE_UPLOADS"] += 1
         try:
-            directory, payload, names = uploads.receive(request.files, request.form)
+            directory, payload, names = uploads.receive(request.files, request.form, directory=getattr(request, "_hsd_upload_directory", None))
+            input_digests = names.pop("_input_digests")
             with manager.lock:
-                identifier = manager.create(payload, owner_id=employee_id(), downloadable=True, display_names=names)
+                identifier = manager.create(payload, owner_id=employee_id(), downloadable=True, display_names=names, input_digests=input_digests)
                 job = manager._get(identifier)
                 job.update(_upload_managed=True, _upload_dir=str(directory))
                 committed = True
+                request._hsd_upload_committed = True
             return jsonify(id=identifier)
         finally:
             with manager.lock:
                 app.config["HSD_ACTIVE_UPLOADS"] -= 1
             if directory is not None and not committed:
                 uploads.discard(directory)
+            request.release_upload()
 
     @app.get("/api/jobs/<identifier>")
     def read_job(identifier):

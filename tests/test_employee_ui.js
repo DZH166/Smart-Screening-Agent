@@ -8,12 +8,16 @@ const nodes = new Map();
 function element(id) {
   if (!nodes.has(id)) {
     const classes = new Set();
-    nodes.set(id, {id, value:'', files:[], disabled:false, textContent:'', innerHTML:'',
+    const node={id, value:'', files:[], disabled:false, innerHTML:'', writes:{text:0,width:0}, attributes:{},
       previousElementSibling:{textContent:''}, dataset:{}, style:{setProperty(){}},
       classList:{add(...values){values.forEach((value)=>classes.add(value));},remove(...values){values.forEach((value)=>classes.delete(value));},contains(value){return classes.has(value);},toggle(value,force){if(force===undefined)force=!classes.has(value);if(force)classes.add(value);else classes.delete(value);}},
       querySelectorAll(){return [];},querySelector(selector){return element(`${id}:${selector}`);},
-      addEventListener(){},replaceChildren(){},focus(){},
-    });
+      addEventListener(){},replaceChildren(){},setAttribute(name,value){this.attributes[name]=String(value);},focus(){sandbox.document.activeElement=this;},
+    };
+    let text='',width='';
+    Object.defineProperty(node,'textContent',{get(){return text;},set(value){this.writes.text++;text=String(value);}});
+    Object.defineProperty(node.style,'width',{get(){return width;},set(value){node.writes.width++;width=value;}});
+    nodes.set(id,node);
   }
   return nodes.get(id);
 }
@@ -34,11 +38,14 @@ const sandbox={document:{getElementById:element,querySelectorAll(){return [];},b
 };
 const source=fs.readFileSync(path.join(__dirname,'../hsd_tool/static/app.js'),'utf8');
 assert.ok(source.includes('init().catch('));
-vm.runInNewContext(source.replace(/  init\(\)\.catch\([^\n]+\);/, '  window.testUI={state,validateUploadFiles,configureAccess,setFormBusy,uploadFiles,isBusy,renderProgress,renderSummary,renderDone,openOutput};'),sandbox);
+vm.runInNewContext(source.replace(/  init\(\)\.catch\([^\n]+\);/, '  window.testUI={state,validateUploadFiles,configureAccess,setFormBusy,uploadFiles,isBusy,renderProgress,renderSummary,renderDone,openOutput,formatBytes,updateUploadSelection,startJob};'),sandbox);
 const ui=sandbox.window.testUI;
 const MiB=1024*1024;
 const workbook={name:'员工表格.XLSX',size:2*MiB};
 const zip={name:'原稿.ZIP',size:20*MiB};
+// File metadata only: these checks allocate no multi-gigabyte input.
+const largeWorkbook={name:'large.xlsx',size:5*1024*MiB};
+const largeZip={name:'large.zip',size:2*1024*1024*MiB};
 
 async function main(){
   assert.equal(ui.validateUploadFiles(workbook,zip),'');
@@ -47,11 +54,22 @@ async function main(){
   assert.match(ui.validateUploadFiles(workbook,null),/ZIP/);
   assert.match(ui.validateUploadFiles(workbook,{name:'a.rar',size:1}),/zip/);
   assert.match(ui.validateUploadFiles(workbook,{name:'a.zip',size:0}),/为空/);
-  assert.match(ui.validateUploadFiles({name:'a.xlsx',size:101*MiB},zip),/100 MiB/);
-  assert.match(ui.validateUploadFiles(workbook,{name:'a.zip',size:1901*MiB}),/1900 MiB/);
+  assert.equal(ui.validateUploadFiles(largeWorkbook,largeZip),'','no hardcoded default byte ceiling');
   ui.configureAccess({lan:true,remote:true,upload_limits:{workbook_bytes:100*MiB,source_bytes:1900*MiB,total_bytes:10*MiB}});
+  assert.match(ui.validateUploadFiles({name:'a.xlsx',size:101*MiB},zip),/100\.0 MiB/,'only a finite limit actually supplied by the server is honoured');
+  assert.match(ui.validateUploadFiles(workbook,{name:'a.zip',size:1901*MiB}),/1\.86 GiB/);
   assert.match(ui.validateUploadFiles(workbook,zip),/合计/);
-  ui.configureAccess({lan:true,remote:true,upload_limits:{total_bytes:2*1024*MiB}});
+  ui.configureAccess({lan:true,remote:true,upload_limits:{workbook_bytes:null,source_bytes:null,total_bytes:null}});
+  assert.equal(ui.validateUploadFiles(largeWorkbook,largeZip),'','null clears earlier finite limits instead of converting to zero or restoring old caps');
+  ui.configureAccess({lan:true,remote:true,upload_limits:{workbook_bytes:1,source_bytes:1,total_bytes:2}});
+  ui.configureAccess({lan:true,remote:true});
+  assert.equal(ui.validateUploadFiles(largeWorkbook,largeZip),'','missing limits do not preserve a previous legacy ceiling');
+  element('source-upload').files=[largeZip];ui.updateUploadSelection('source-upload');
+  assert.match(element('source-upload-name').textContent,/2\.00 TiB/);
+  assert.equal(element('source-upload-error').textContent,'');
+  assert.equal(ui.formatBytes(0),'0 B');assert.equal(ui.formatBytes(1),'1 B');assert.equal(ui.formatBytes(1023),'1023 B');
+  assert.equal(ui.formatBytes(1024),'1.0 KiB');assert.equal(ui.formatBytes(2*MiB),'2.0 MiB');
+  assert.equal(ui.formatBytes(1024*MiB),'1.00 GiB');assert.equal(ui.formatBytes(-1),'大小未知');
   ui.setFormBusy(false);
   assert.ok(element('local-workbook-field').classList.contains('hidden'));
   assert.ok(element('local-source-field').classList.contains('hidden'));
@@ -69,6 +87,7 @@ async function main(){
   const pending=ui.uploadFiles(workbook,zip,12);
   const xhr=xhrs.at(-1);
   assert.equal(xhr.method,'POST');assert.equal(xhr.url,'/api/jobs/upload');
+  assert.equal(xhr.timeout,0,'large uploads have no fixed browser time ceiling');
   assert.equal(xhr.headers['X-HSD-Token'],'session-token');
   assert.ok(!Object.keys(xhr.headers).some((key)=>key.toLowerCase()==='content-type'));
   assert.equal(xhr.data.parts.length,3);
@@ -77,13 +96,28 @@ async function main(){
   assert.equal(xhr.data.parts[2][0],'start_number');assert.equal(xhr.data.parts[2][1],'12');
   xhr.progress({lengthComputable:true,loaded:25,total:100});
   assert.equal(element('upload-progress-percent').textContent,'25%');
+  assert.match(element('upload-progress-detail').textContent,/25 B \/ 100 B/);
+  const textWrites=()=>['upload-progress-percent','upload-progress-label','upload-progress-detail'].reduce((sum,id)=>sum+element(id).writes.text,0);
+  const previousTextWrites=textWrites(),previousWidthWrites=element('upload-progress-fill').writes.width;
+  for(let index=0;index<100;index++)xhr.progress({lengthComputable:true,loaded:25,total:100});
+  assert.equal(textWrites(),previousTextWrites,'duplicate visible progress must not reset text nodes');
+  assert.equal(element('upload-progress-fill').writes.width,previousWidthWrites,'duplicate progress must not reassign width');
   xhr.progress({lengthComputable:true,loaded:100,total:100});
   assert.ok(element('upload-progress-label').textContent.includes('正在检查'));
   xhr.load(200,{id:'employee-job'});
   assert.equal((await pending).id,'employee-job');
   const failure=ui.uploadFiles(workbook,zip,1);
-  xhrs.at(-1).load(413,{error:'文件过大'});
-  await assert.rejects(failure,/文件过大/);
+  xhrs.at(-1).load(413,{error:'主机无法保存文件，请检查磁盘后重试'});
+  await assert.rejects(failure,/检查磁盘/,'server errors remain authoritative');
+  for(const [event,message] of [['error',/连接中断/],['abort',/已中止/],['timeout',/超时/]]){
+    const rejected=ui.uploadFiles(workbook,zip,1);xhrs.at(-1).listeners[event]();
+    await assert.rejects(rejected,message);
+  }
+  element('workbook-upload').files=[largeWorkbook];element('source-upload').files=[largeZip];element('start-number').value='0';
+  const requestsBeforeInvalid=xhrs.length;
+  await ui.startJob({preventDefault(){}});
+  assert.equal(xhrs.length,requestsBeforeInvalid);assert.match(element('start-number-error').textContent,/1 到 9999/);
+  assert.equal(sandbox.document.activeElement,element('start-number'),'start-number validation and error focus remain required');
 
   ui.state.job={id:'my-job',status:'queued',queue_position:2,progress:{current:8,total:20}};
   assert.ok(ui.isBusy());ui.renderProgress();

@@ -76,9 +76,9 @@ def verify_dataset(directory: str | Path) -> tuple[dict, dict]:
 
 
 def implementation_files(code_root: str | Path) -> dict[str, str | None]:
-    """Bind both the entry point and its verification dependency, including absence."""
+    """Bind the matcher and its verification/IO dependencies, including absence."""
     root = Path(code_root).resolve()
-    paths = ["hsd_tool/matching.py", "hsd_tool/matching_verification.py"]
+    paths = ["hsd_tool/matching.py", "hsd_tool/matching_verification.py", "hsd_tool/archive_io.py"]
     if not (root / paths[0]).is_file():
         raise ValueError("Cannot find hsd_tool/matching.py.")
     return {relative: digest(root / relative) if (root / relative).is_file() else None
@@ -105,9 +105,10 @@ def load_matching(code_root: str | Path):
     package.__spec__ = importlib.util.spec_from_loader(package_name, loader=None, is_package=True)
     sys.modules[package_name] = package
     try:
-        helper = source.with_name("matching_verification.py")
-        if helper.is_file():
-            _load_source(package_name + ".matching_verification", helper)
+        for name in ("matching_verification", "archive_io"):
+            helper = source.with_name(name + ".py")
+            if helper.is_file():
+                _load_source(package_name + "." + name, helper)
         module = _load_source(package_name + ".matching", source)
     except Exception:
         for name in list(sys.modules):

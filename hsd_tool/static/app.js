@@ -3,7 +3,8 @@
 (() => {
   const $ = (id) => document.getElementById(id);
   const isLan = () => window.HSD_ACCESS?.lan === true;
-  const uploadLimits = {workbook:100*1024*1024,source:1900*1024*1024,total:2*1024*1024*1024};
+  // null means no application byte cap. Never restore an old fallback limit.
+  const uploadLimits = {workbook:null,source:null,total:null};
   const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]));
   const state = {
     job: null, sourceType: 'zip', filter: 'awaiting', search: '',
@@ -89,37 +90,50 @@
     $('shutdown-button').disabled=busy || isBusy();
   }
   function formatBytes(bytes) {
-    return bytes>=1024*1024*1024?`${(bytes/(1024*1024*1024)).toFixed(2)} GiB`:`${(bytes/(1024*1024)).toFixed(1)} MiB`;
+    if (!Number.isFinite(bytes)||bytes<0) return '大小未知';
+    const units=['B','KiB','MiB','GiB','TiB','PiB'];
+    let amount=bytes,index=0;
+    while(amount>=1024&&index<units.length-1){amount/=1024;index++;}
+    return `${index===0?amount.toFixed(0):amount.toFixed(index>=3?2:1)} ${units[index]}`;
+  }
+  function uploadFileError(kind,file) {
+    const workbook=kind==='workbook';
+    if (!file) return workbook?'请先选择你电脑上的图片编号表。':'请先选择包含 AI 文件的 ZIP 压缩包。';
+    if (!(workbook?/\.xlsx$/i:/\.zip$/i).test(file.name)) return workbook?'图片编号表需要是 .xlsx 文件。':'AI 文件请先压缩成 .zip 文件后上传。';
+    if (!file.size) return '所选文件为空，请重新选择。';
+    const limit=uploadLimits[kind];
+    if (limit!==null&&file.size>limit) return `${workbook?'图片编号表':'AI 压缩包'}不能超过 ${formatBytes(limit)}。`;
+    return '';
   }
   function updateUploadSelection(id) {
     const input=$(id),file=input.files?.[0];
     $(id+'-name').textContent=file?`${file.name} · ${formatBytes(file.size)}`:'未选择文件';
     const kind=id==='workbook-upload'?'workbook':'source';
-    const error=file&&(!new RegExp(kind==='workbook'?'\\.xlsx$':'\\.zip$','i').test(file.name)?`请选择 ${kind==='workbook'?'.xlsx 表格':'.zip 压缩包'}。`:file.size>uploadLimits[kind]?`文件超过 ${kind==='workbook'?'100':'1900'} MiB，请分批处理。`:!file.size?'文件为空，请重新选择。':'');
-    fieldError(id,error||'');
+    fieldError(id,file?uploadFileError(kind,file):'');
   }
   function fieldError(id,message){const target=$(id+'-error');if(target){target.textContent=message;target.classList.toggle('hidden',!message);}$(id)?.setAttribute?.('aria-invalid',String(!!message));}
   function clearFieldErrors(){['workbook-upload','source-upload','start-number','local-workbook','local-source','local-output'].forEach((id)=>{const target=$(id+'-error');if(target){target.textContent='';target.classList.add('hidden');}});}
   function validateUploadFiles(workbook,source) {
-    if (!workbook) return '请先选择你电脑上的图片编号表。';
-    if (!/\.xlsx$/i.test(workbook.name)) return '图片编号表需要是 .xlsx 文件。';
-    if (!source) return '请先选择包含 AI 文件的 ZIP 压缩包。';
-    if (!/\.zip$/i.test(source.name)) return 'AI 文件请先压缩成 .zip 文件后上传。';
-    if (!workbook.size || !source.size) return '所选文件为空，请重新选择。';
-    if (workbook.size>uploadLimits.workbook) return '图片编号表不能超过 100 MiB。';
-    if (source.size>uploadLimits.source) return 'AI 压缩包不能超过 1900 MiB，请拆分批次后上传。';
-    if (workbook.size+source.size>uploadLimits.total) return '表格和 ZIP 合计不能超过 2 GiB，请拆分批次后上传。';
+    const error=uploadFileError('workbook',workbook)||uploadFileError('source',source);
+    if (error) return error;
+    if (uploadLimits.total!==null&&workbook.size+source.size>uploadLimits.total) return `表格和 ZIP 合计不能超过 ${formatBytes(uploadLimits.total)}。`;
     return '';
   }
   function renderUploadProgress(event) {
     const known=event?.lengthComputable&&event.total>0;
     const percent=known?Math.min(100,Math.round(event.loaded/event.total*100)):0;
     $('upload-progress').classList.remove('hidden');
-    $('upload-progress-fill').style.width=known?`${percent}%`:'';
-    $('upload-progress-fill').classList.toggle('indeterminate',!known);
-    $('upload-progress-percent').textContent=known?`${percent}%`:'';
-    $('upload-progress-label').textContent=known&&event.loaded>=event.total?'上传完成，正在检查文件…':'正在上传文件…';
-    $('upload-progress-detail').textContent=known?`${formatBytes(event.loaded)} / ${formatBytes(event.total)} · 请保持页面打开，上传完成后自动处理。`:'请保持此页面打开，上传完成后自动处理。';
+    const fill=$('upload-progress-fill'),width=known?`${percent}%`:'';
+    if(fill.style.width!==width)fill.style.width=width;
+    fill.classList.toggle('indeterminate',!known);
+    for(const [id,text] of [
+      ['upload-progress-percent',known?`${percent}%`:''],
+      ['upload-progress-label',known&&event.loaded>=event.total?'上传完成，正在检查文件…':'正在上传文件…'],
+      ['upload-progress-detail',known?`${formatBytes(event.loaded)} / ${formatBytes(event.total)} · 请保持页面打开，上传完成后自动处理。`:'请保持此页面打开，上传完成后自动处理。'],
+    ]){
+      const element=$(id);
+      if(element.textContent!==text)element.textContent=text;
+    }
   }
   function uploadFiles(workbook,source,start) {
     return new Promise((resolve,reject)=>{
@@ -128,7 +142,9 @@
       const request=new XMLHttpRequest();
       request.open('POST','/api/jobs/upload');
       request.setRequestHeader('X-HSD-Token',window.HSD_TOKEN||'');
-      request.timeout=30*60*1000;
+      // Large transfers can take longer than 30 minutes; connection and abort
+      // events still fail visibly without an artificial browser time ceiling.
+      request.timeout=0;
       request.upload.addEventListener('progress',renderUploadProgress);
       request.addEventListener('load',()=>{
         let result;
@@ -159,7 +175,7 @@
     const workbook=$('workbook-upload').files?.[0],source=$('source-upload').files?.[0];
     if (isLan()) {
       const error=validateUploadFiles(workbook,source);
-      if (error) {const id=!workbook||!/^.+\.xlsx$/i.test(workbook.name)||!workbook.size||workbook.size>uploadLimits.workbook?'workbook-upload':'source-upload';fieldError(id,error);$(id).focus();return;}
+      if (error) {const id=uploadFileError('workbook',workbook)?'workbook-upload':'source-upload';fieldError(id,error);$(id).focus();return;}
     } else {
       const fields=[['workbook-path','请先选择图片编号表。'],['source-path','请先选择 AI 压缩包或文件夹。'],['output-path','请先选择结果保存位置。']];
       for (const [id,message] of fields) {if (!$(id).value.trim()) {const target=$('local-'+id.replace('-path','')+'-error');if(target){target.textContent=message;target.classList.remove('hidden');}$(id).focus();return;}}
@@ -679,11 +695,9 @@
   }
   function configureAccess(access) {
     if (access) window.HSD_ACCESS=access;
-    if (access?.upload_limits) {
-      for (const [key,field] of [['workbook','workbook_bytes'],['source','source_bytes'],['total','total_bytes']]) {
-        const limit=Number(access.upload_limits[field]);
-        if (Number.isSafeInteger(limit)&&limit>0) uploadLimits[key]=limit;
-      }
+    for (const [key,field] of [['workbook','workbook_bytes'],['source','source_bytes'],['total','total_bytes']]) {
+      const limit=access?.upload_limits?.[field];
+      uploadLimits[key]=Number.isSafeInteger(limit)&&limit>0?limit:null;
     }
     const lan=isLan();
     ['local-workbook-field','local-source-field','local-output-field'].forEach((id)=>$(id).classList.toggle('hidden',lan));

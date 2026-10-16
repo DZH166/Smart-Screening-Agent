@@ -1,7 +1,12 @@
 from pathlib import Path
 import hashlib
+import os
+from io import BytesIO
+from contextlib import contextmanager
 import stat
+import struct
 import zipfile
+import zlib
 
 import cv2
 import numpy as np
@@ -211,14 +216,247 @@ def test_zip_symlink_is_rejected(tmp_path):
         scan_and_match(str(archive), [], str(tmp_path / 'work'))
 
 
-def test_zip_resource_limit_before_extraction(tmp_path, monkeypatch):
-    archive = tmp_path / 'oversize.zip'
+def test_zip_checks_actual_available_space_before_extraction(tmp_path, monkeypatch):
+    archive = tmp_path / 'needs-space.zip'
     with zipfile.ZipFile(archive, 'w') as z:
         z.writestr('large.ai', b'x' * 200)
-    monkeypatch.setattr(matching, 'MAX_FILE_BYTES', 100)
-    with pytest.raises(ValueError, match='容量'):
+    monkeypatch.setattr(matching.shutil, 'disk_usage', lambda _: type('Space', (), {'free': 100})())
+    with pytest.raises(ValueError, match='磁盘空间不足'):
         scan_and_match(str(archive), [], str(tmp_path / 'work'))
     assert not list((tmp_path / 'work').rglob('*.ai'))
+
+
+def test_legal_high_ratio_zip_is_streamed_without_ratio_rejection(tmp_path):
+    archive = tmp_path / 'compressible.zip'
+    payload = b'%PDF-1.4\n' + b'0' * (8 * 1024 * 1024)
+    with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as z:
+        z.writestr('legitimate-compressible.ai', payload)
+    with zipfile.ZipFile(archive) as z:
+        info = z.infolist()[0]
+        assert info.file_size / info.compress_size > 1000
+    directory = tmp_path / 'extracted'
+    directory.mkdir()
+    files = matching._collect(archive, directory, [])
+    assert len(files) == 1
+    assert files[0]['source_sha256'] == hashlib.sha256(payload).hexdigest()
+    assert Path(files[0]['source_path']).read_bytes() == payload
+
+
+def test_zip_incomplete_actual_content_is_rejected_and_removed(tmp_path, monkeypatch):
+    archive = tmp_path / 'short.zip'
+    with zipfile.ZipFile(archive, 'w') as z:
+        z.writestr('source.ai', b'x' * 200)
+    original_open = zipfile.ZipFile.open
+    def truncated(self, member, *args, **kwargs):
+        if getattr(member, 'filename', member) == 'source.ai':
+            return BytesIO(b'x' * 199)
+        return original_open(self, member, *args, **kwargs)
+    monkeypatch.setattr(zipfile.ZipFile, 'open', truncated)
+    directory = tmp_path / 'extracted'
+    directory.mkdir()
+    with pytest.raises(ValueError, match='损坏'):
+        matching._collect(archive, directory, [])
+    assert not list(directory.iterdir())
+
+
+def test_zip_actual_content_larger_than_declared_is_rejected(tmp_path, monkeypatch):
+    archive = tmp_path / 'long.zip'
+    with zipfile.ZipFile(archive, 'w') as z:
+        z.writestr('source.ai', b'x' * 200)
+    monkeypatch.setattr(zipfile.ZipFile, 'open', lambda *a, **kw: BytesIO(b'x' * 201))
+    directory = tmp_path / 'extracted'
+    directory.mkdir()
+    with pytest.raises(ValueError, match='损坏'):
+        matching._collect(archive, directory, [])
+    assert not list(directory.iterdir())
+
+
+def test_zip_crc_corruption_is_not_accepted(tmp_path):
+    archive = tmp_path / 'bad-crc.zip'
+    with zipfile.ZipFile(archive, 'w', zipfile.ZIP_STORED) as z:
+        z.writestr('source.ai', b'%PDF-1.4 known bytes')
+    damaged = archive.read_bytes().replace(b'%PDF-1.4 known bytes', b'%PDF-1.4 wrong bytes')
+    archive.write_bytes(damaged)
+    directory = tmp_path / 'extracted'
+    directory.mkdir()
+    with pytest.raises(ValueError, match='损坏'):
+        matching._collect(archive, directory, [])
+    assert not list(directory.iterdir())
+
+
+def test_render_uses_path_and_bounded_hash_reads(tmp_path, monkeypatch):
+    source, _ = setup_case(tmp_path, [artwork()])
+    path = source / 'original_0.ai'
+    previews = tmp_path / 'previews'
+    previews.mkdir()
+    record = matching._file_record(1, path.name, path)
+    original_open = pymupdf.open
+    calls = []
+    original_digest = matching._source_digest
+    class BoundedReader:
+        def __init__(self, stream):
+            self.stream = stream
+        def __getattr__(self, name):
+            return getattr(self.stream, name)
+        def read(self, size=-1):
+            assert 0 < size <= matching.IO_CHUNK_BYTES
+            return self.stream.read(size)
+    def checked_open(*args, **kwargs):
+        calls.append(kwargs.copy())
+        assert 'stream' not in kwargs
+        assert kwargs.get('filename') == str(path.resolve())
+        return original_open(*args, **kwargs)
+    monkeypatch.setattr(pymupdf, 'open', checked_open)
+    monkeypatch.setattr(matching, '_source_digest', lambda stream: original_digest(BoundedReader(stream)))
+    matching._render(record, previews)
+    assert len(calls) == 1 and record['preview_path']
+    assert record['source_sha256'] == hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def test_render_rejects_changed_extracted_source_before_preview(tmp_path):
+    source, _ = setup_case(tmp_path, [artwork()])
+    path = source / 'original_0.ai'
+    previews = tmp_path / 'previews'
+    previews.mkdir()
+    record = matching._file_record(1, path.name, path)
+    record['source_sha256'] = '0' * 64
+    with pytest.raises(ValueError, match='源文件发生变化'):
+        matching._render(record, previews)
+    assert record['preview_path'] is None
+    assert not list(previews.iterdir())
+
+
+@pytest.mark.parametrize('method', [zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED, zipfile.ZIP_BZIP2, zipfile.ZIP_LZMA])
+def test_zip_stream_validation_preserves_supported_compression_methods(tmp_path, method):
+    archive = tmp_path / 'method.zip'
+    payload = (b'%PDF-1.4 pattern content\n' * 65536) + b'last-byte'
+    with zipfile.ZipFile(archive, 'w', method) as z:
+        z.writestr('source.ai', payload)
+    directory = tmp_path / 'extracted'
+    directory.mkdir()
+    files = matching._collect(archive, directory, [])
+    assert Path(files[0]['source_path']).read_bytes() == payload
+
+
+@pytest.mark.parametrize('method', [zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED, zipfile.ZIP_BZIP2, zipfile.ZIP_LZMA])
+def test_forged_short_length_with_valid_prefix_crc_is_rejected(tmp_path, method):
+    archive = tmp_path / 'forged-short.zip'
+    payload = b'%PDF-1.4 pattern content' * 1000
+    with zipfile.ZipFile(archive, 'w', method) as z:
+        z.writestr('source.ai', payload)
+    data = bytearray(archive.read_bytes())
+    central = data.index(b'PK\x01\x02')
+    fake_size, fake_crc = len(payload) - 1, zlib.crc32(payload[:-1])
+    struct.pack_into('<I', data, 14, fake_crc)
+    struct.pack_into('<I', data, 22, fake_size)
+    struct.pack_into('<I', data, central + 16, fake_crc)
+    struct.pack_into('<I', data, central + 24, fake_size)
+    archive.write_bytes(data)
+    directory = tmp_path / 'extracted'
+    directory.mkdir()
+    with pytest.raises(ValueError, match='损坏'):
+        matching._collect(archive, directory, [])
+    assert not list(directory.iterdir())
+
+
+def test_truncated_deflate_end_marker_is_rejected_even_when_content_crc_matches(tmp_path):
+    archive = tmp_path / 'unfinished-stream.zip'
+    with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as z:
+        z.writestr('source.ai', b'PDF content' * 1000)
+    data = bytearray(archive.read_bytes())
+    central = data.index(b'PK\x01\x02')
+    compressed = struct.unpack_from('<I', data, central + 20)[0]
+    struct.pack_into('<I', data, 18, compressed - 1)
+    struct.pack_into('<I', data, central + 20, compressed - 1)
+    archive.write_bytes(data)
+    directory = tmp_path / 'extracted'
+    directory.mkdir()
+    with pytest.raises(ValueError, match='损坏'):
+        matching._collect(archive, directory, [])
+    assert not list(directory.iterdir())
+
+
+@pytest.mark.parametrize('method', [zipfile.ZIP_BZIP2, zipfile.ZIP_LZMA])
+def test_native_compressed_stream_uses_bounded_output_even_for_forged_small_size(tmp_path, monkeypatch, method):
+    from hsd_tool import archive_io
+    archive = tmp_path / 'bounded-native.zip'
+    payload = b'0' * (4 * 1024 * 1024)
+    with zipfile.ZipFile(archive, 'w', method) as z:
+        z.writestr('source.ai', payload)
+    data = bytearray(archive.read_bytes())
+    central = data.index(b'PK\x01\x02')
+    prefix_crc = zlib.crc32(payload[:1])
+    for offset, value in [(14, prefix_crc), (22, 1), (central + 16, prefix_crc), (central + 24, 1)]:
+        struct.pack_into('<I', data, offset, value)
+    archive.write_bytes(data)
+    module, name = (archive_io.bz2, 'BZ2Decompressor') if method == zipfile.ZIP_BZIP2 else (archive_io.lzma, 'LZMADecompressor')
+    original = getattr(module, name)
+    maxima = []
+    class CheckedInflater:
+        def __init__(self, *args, **kwargs):
+            self.wrapped = original(*args, **kwargs)
+        def __getattr__(self, key):
+            return getattr(self.wrapped, key)
+        def decompress(self, raw, max_length=-1):
+            maxima.append(max_length)
+            assert 0 < max_length <= 2
+            return self.wrapped.decompress(raw, max_length=max_length)
+    monkeypatch.setattr(module, name, CheckedInflater)
+    directory = tmp_path / 'extracted'
+    directory.mkdir()
+    with pytest.raises(ValueError, match='损坏'):
+        matching._collect(archive, directory, [])
+    assert maxima and not list(directory.iterdir())
+
+
+def test_render_rechecks_bytes_when_no_write_lease(tmp_path, monkeypatch):
+    source, _ = setup_case(tmp_path, [artwork()])
+    path = source / 'original_0.ai'
+    previews = tmp_path / 'previews'
+    previews.mkdir()
+    record = matching._file_record(1, path.name, path)
+    @contextmanager
+    def reader(filename):
+        with filename.open('rb') as stream:
+            yield stream, False
+    original_digest = matching._source_digest
+    calls = 0
+    def changed(stream):
+        nonlocal calls
+        calls += 1
+        digest, prefix = original_digest(stream)
+        return ('f' * 64 if calls == 2 else digest), prefix
+    monkeypatch.setattr(matching, '_source_reader', reader)
+    monkeypatch.setattr(matching, '_source_digest', changed)
+    with pytest.raises(ValueError, match='生成预览期间源文件发生变化'):
+        matching._render(record, previews)
+    assert calls == 2 and record['preview_path'] is None
+    assert not list(previews.iterdir())
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows shared-read source lease')
+def test_windows_render_lease_prevents_source_writer_during_preview(tmp_path, monkeypatch):
+    source, _ = setup_case(tmp_path, [artwork()])
+    path = source / 'original_0.ai'
+    original_bytes = path.read_bytes()
+    previews = tmp_path / 'previews'
+    previews.mkdir()
+    original_open = pymupdf.open
+    attempts = []
+    def checked_open(*args, **kwargs):
+        with pytest.raises(PermissionError):
+            with path.open('r+b'):
+                pytest.fail('Source must not be writable while its preview is rendered')
+        attempts.append(True)
+        return original_open(*args, **kwargs)
+    monkeypatch.setattr(pymupdf, 'open', checked_open)
+    record = matching._file_record(1, path.name, path)
+    matching._render(record, previews)
+    assert attempts == [True] and record['preview_path']
+    assert path.read_bytes() == original_bytes
+    # The reader owns no lingering lease after it has finished.
+    with path.open('r+b'):
+        pass
 
 
 def test_zip_extracts_private_names_and_original_remains_intact(tmp_path):

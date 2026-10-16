@@ -122,8 +122,7 @@ def test_login_requires_correct_code_and_sets_limited_http_only_session(app):
     assert config.status_code == 200 and config.json["access"]["remote"]
     assert config.json["access"]["upload"] is True
     assert config.json["access"]["upload_limits"] == {
-        "workbook_bytes": 100 * 1024**2, "source_bytes": 1900 * 1024**2,
-        "total_bytes": 2 * 1024**3,
+        "workbook_bytes": None, "source_bytes": None, "total_bytes": None,
     }
     assert "input_root" not in config.json["access"] and "output_root" not in config.json["access"]
     assert config.json["last_workbook"] == config.json["last_source"] == config.json["last_output"] == ""
