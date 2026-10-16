@@ -61,7 +61,9 @@ async function main(){
   assert.ok(!element('workbook-upload').disabled && !element('source-upload').disabled);
   assert.ok(element('ai-settings-button').classList.contains('hidden'));
   assert.ok(!element('open-output-button').classList.contains('hidden'));
-  assert.ok(element('lan-note').textContent.includes('无需重复设置'));
+  assert.ok(element('lan-note').classList.contains('hidden'));
+  assert.ok(element('host-management').classList.contains('hidden'));
+  assert.ok(element('shutdown-button').classList.contains('hidden'));
   assert.ok(!element('lan-note').textContent.includes('素材目录'));
 
   const pending=ui.uploadFiles(workbook,zip,12);
@@ -83,10 +85,13 @@ async function main(){
   xhrs.at(-1).load(413,{error:'文件过大'});
   await assert.rejects(failure,/文件过大/);
 
-  ui.state.job={id:'my-job',status:'queued',queue_position:2,progress:{}};
+  ui.state.job={id:'my-job',status:'queued',queue_position:2,progress:{current:8,total:20}};
   assert.ok(ui.isBusy());ui.renderProgress();
   assert.equal(element('processing-title').textContent,'排队等待处理…');
   assert.ok(element('processing-message').textContent.includes('第 2 位'));
+  assert.equal(element('progress-percent').textContent,'','queued work must not display a stale stage percentage');
+  assert.equal(element('progress-detail').textContent,'等待开始');
+  assert.equal(element('progress-fill').style.width,'');
   ui.state.job={id:'my/job',status:'done',rows:[],download_ready:true};
   ui.renderDone();
   assert.equal(element('open-output-button').textContent,'下载结果 ZIP ↓');
@@ -97,7 +102,8 @@ async function main(){
   assert.ok(element('open-output-button').disabled);
   ui.state.job={id:'summary',status:'ready',rows:[],output_root:'private-host-path'};
   ui.renderSummary();
-  assert.equal(element('summary-output').textContent,'完成后下载到你的电脑');
+  assert.match(element('summary-output').textContent,/下载.*电脑/);
+  assert.ok(!element('summary-output').textContent.includes('private-host-path'));
 
   ui.configureAccess({lan:false,remote:false});ui.setFormBusy(false);
   assert.ok(!element('local-workbook-field').classList.contains('hidden'));

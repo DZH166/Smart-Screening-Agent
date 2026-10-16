@@ -132,23 +132,41 @@
   function rowHtml(row, candidateName, selectedId) {
     const review = row?.ai_review;
     if (!review) return '';
-    const labels = {same:'建议为同一张图',different:'发现图案差异',uncertain:'仍无法确定',inconclusive:'仍无法确定',unknown:'仍无法确定',error:'本次复核未完成'};
+    const labels = {same:'AI 建议相同',different:'AI 发现差异',uncertain:'AI 无法确定',inconclusive:'AI 无法确定',unknown:'AI 无法确定'};
+    // Only the server's effective row status grants export eligibility. A model
+    // verdict or stale outcome must never turn a review row into an accepted one.
     const auto = row.status === 'auto' && review.outcome === 'auto_passed';
-    const hasDecision = ['same','different','uncertain'].includes(review.verdict);
-    const title = auto ? 'AI 复核 · 条件验证后自动通过' : review.outcome === 'error' ? 'AI 复核未完成 · 继续人工处理' : review.outcome === 'skipped' ? '本项未进行 AI 复核' : `AI 复核建议 · ${labels[review.verdict] || '请结合画面确认'}`;
-    const differences = Array.isArray(review.differences) ? review.differences.join('；') : typeof review.differences === 'string' ? review.differences : '';
+    const resolved = row.status === 'confirmed' || row.status === 'skipped';
+    const title = auto ? 'AI 复核 · 条件验证后自动通过' : review.outcome === 'error' ? 'AI 复核未完成' : review.outcome === 'skipped' ? '本项未进行 AI 复核' : labels[review.verdict] || 'AI 复核建议';
+    const action = auto ? '' : row.status === 'confirmed' ? '本项已由员工确认' : row.status === 'skipped' ? '本项已跳过' : '需人工确认';
+    const differenceItems = Array.isArray(review.differences) ? review.differences : typeof review.differences === 'string' ? [review.differences] : [];
+    const differences = [...new Set(differenceItems.map((item)=>String(item ?? '').trim()).filter(Boolean))].join('；');
     const differentSelection = review.candidate_id && review.candidate_id !== selectedId;
-    const candidate = review.candidate_id ? `<p class="ai-candidate-label" title="${escapeHtml(candidateName || review.candidate_id)}">复核对象：${escapeHtml(candidateName || review.candidate_id)}${differentSelection ? '（与当前选择不同）' : ''}</p>` : '';
+    const objectName = candidateName || review.candidate_id || '';
+    const candidate = differentSelection ? `<p class="ai-candidate-label ai-selection-warning">AI 复核对象：${escapeHtml(objectName)}（与当前选择不同）</p><button type="button" class="text-button" data-candidate-id="${escapeHtml(review.candidate_id)}">查看 AI 复核的候选</button>` : '';
     const checks = {content_same:'图案内容相同',colors_same:'颜色相同',complete_coverage:'内容覆盖完整',extra_content_absent:'没有额外内容',unique_candidate:'候选唯一'};
     const checksHtml = review.checks && typeof review.checks === 'object' ? `<ul>${Object.entries(checks).filter(([key])=>typeof review.checks[key]==='boolean').map(([key,label])=>`<li>${label}：${review.checks[key]?'认为满足':'未确认满足'}</li>`).join('')}</ul>` : '';
-    const reason = String(review.reason || '');
-    const brief = Array.from(reason).slice(0,64).join('') + (Array.from(reason).length > 64 ? '…' : '');
-    const gateReasons = Array.isArray(review.gate_failures) ? [...new Set(review.gate_failures.map((item)=>String(item?.reason||'')).filter(Boolean))] : [];
-    const gatesHtml = !auto && gateReasons.length ? `<ul class="ai-gate-note">${gateReasons.map((value)=>`<li>${escapeHtml(value)}</li>`).join('')}</ul>` : !auto&&review.gate_reason ? `<p class="ai-gate-note">未自动通过：${escapeHtml(review.gate_reason)}</p>` : '';
-    const inconsistent = review.protocol_diagnostics?.inconsistent === true || review.protocol_diagnostics?.protocol_inconsistent === true;
-    const protocolHtml = inconsistent ? '<p class="ai-gate-note">模型回答存在矛盾，本项保留人工判断。</p>' : '';
-    const details = reason || differences || gatesHtml || checksHtml || protocolHtml ? `<details class="ai-check-details"><summary>查看差异与完整复核说明</summary>${reason ? `<p>${escapeHtml(reason)}</p>` : ''}${differences ? `<p>需注意：${escapeHtml(differences)}</p>` : ''}${protocolHtml}${gatesHtml}${checksHtml}</details>` : '';
-    return `<section class="ai-row-note"><strong>${escapeHtml(title)}</strong>${candidate}${brief ? `<p class="ai-row-summary">${escapeHtml(brief)}</p>` : ''}${differentSelection ? `<button type="button" class="text-button" data-candidate-id="${escapeHtml(review.candidate_id)}">查看 AI 复核的候选</button>` : ''}${hasDecision&&!auto ? '<small>仅供参考，仍需人工确认。</small>' : ''}${details}</section>`;
+    const reason = String(review.reason || '').trim();
+    const failures = Array.isArray(review.gate_failures) ? review.gate_failures : [];
+    const failureCodes = new Set(failures.map((item)=>String(item?.code || '')));
+    if (review.reason_code) failureCodes.add(review.reason_code);
+    const inconsistent = review.protocol_diagnostics?.inconsistent === true || review.protocol_diagnostics?.protocol_inconsistent === true || failureCodes.has('model_protocol_inconsistent');
+    const warnings = [];
+    if (inconsistent) warnings.push('模型回答存在矛盾，请对照图片判断。');
+    if (failureCodes.has('local_evidence_conflict')) warnings.push('本地检测到图案或颜色差异，不能按 AI 建议直接通过。');
+    if (failureCodes.has('source_changed') || failureCodes.has('stale_case')) warnings.push('复核图片或原文件已变化，请重新导入。');
+    const warningHtml = warnings.length ? `<p class="ai-gate-note ai-visible-warning">${warnings.map(escapeHtml).join(' ')}</p>` : '';
+    // Specific differences stay readable; no character slicing or visual clamp.
+    // A long general explanation is available once under the explicit detail entry.
+    const sentence = reason.match(/^[^。！？\n]+[。！？]?/u)?.[0] || reason;
+    const brief = differences || (Array.from(reason).length <= 140 ? reason : Array.from(sentence).length <= 140 ? sentence.trim() : '完整判断理由请展开下方说明。');
+    const gateReasons = !auto ? [...new Set(failures.map((item)=>String(item?.reason || '').trim()).filter(Boolean))] : [];
+    if (!auto && review.gate_reason && !gateReasons.includes(review.gate_reason)) gateReasons.push(review.gate_reason);
+    const gatesHtml = gateReasons.length ? `<div class="ai-gate-details"><p>未自动通过的依据</p><ul>${gateReasons.map((value)=>`<li>${escapeHtml(value)}</li>`).join('')}</ul></div>` : '';
+    const objectDetails = objectName ? `<p>复核对象：${escapeHtml(objectName)}</p>` : '';
+    const protocolHtml = inconsistent ? '<p>协议检查：模型结论与检查项不一致。</p>' : '';
+    const details = objectDetails || reason || differences || gatesHtml || checksHtml || protocolHtml ? `<details class="ai-check-details" data-detail-key="ai-review"><summary>完整 AI 复核说明</summary>${objectDetails}${reason && reason !== brief ? `<p>${escapeHtml(reason)}</p>` : ''}${protocolHtml}${gatesHtml}${checksHtml}</details>` : '';
+    return `<section class="ai-row-note${resolved?' ai-resolved-note':''}"><strong>${escapeHtml(title)}${action ? ` · ${escapeHtml(action)}` : ''}</strong>${candidate}${brief ? `<p class="ai-row-summary">${differences ? '差异：' : ''}${escapeHtml(brief)}</p>` : ''}${warningHtml}${details}</section>`;
   }
 
   window.HSDAI = Object.freeze({open, refresh, usageText, rowHtml, getSettings:()=>settings});

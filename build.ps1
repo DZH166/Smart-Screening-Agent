@@ -29,6 +29,11 @@ try {
     foreach ($file in @('launch.py', 'requirements.txt', 'requirements-dev.txt', 'build.ps1', 'README.md', 'AGENTS.md', 'CONTRACTS.md', 'CHANGELOG.md', '使用说明.txt')) {
         Copy-Item -LiteralPath (Join-Path $workspace $file) -Destination $sourceDestination -Force
     }
+    $documentationDestination = Join-Path $sourceDestination 'docs'
+    New-Item -ItemType Directory -Path $documentationDestination -Force | Out-Null
+    Get-ChildItem -LiteralPath (Join-Path $workspace 'docs') -File -Filter '*.md' | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination $documentationDestination -Force
+    }
     & $pythonExe tools\collect_licenses.py $destination
     if ($LASTEXITCODE -ne 0) { throw '依赖说明生成失败。' }
     & $pythonExe tools\build_manifest.py $destination
