@@ -120,7 +120,17 @@ def test_login_requires_correct_code_and_sets_limited_http_only_session(app):
     assert app.permanent_session_lifetime.total_seconds() == 8 * 60 * 60
     config = remote_request(client, "/api/config")
     assert config.status_code == 200 and config.json["access"]["remote"]
-    assert config.json["access"]["input_root"] == str(app.config["HSD_MANAGER"].data_dir.parent / "inputs")
+    assert config.json["access"]["upload"] is True
+    assert config.json["access"]["upload_limits"] == {
+        "workbook_bytes": 100 * 1024**2, "source_bytes": 1900 * 1024**2,
+        "total_bytes": 2 * 1024**3,
+    }
+    assert "input_root" not in config.json["access"] and "output_root" not in config.json["access"]
+    assert config.json["last_workbook"] == config.json["last_source"] == config.json["last_output"] == ""
+    for private in (str(app.config["HSD_MANAGER"].data_dir.parent / "inputs"),
+                    str(app.config["HSD_MANAGER"].data_dir.parent / "outputs")):
+        assert private not in config.get_data(as_text=True)
+        assert private.replace("\\", "\\\\") not in config.get_data(as_text=True)
     html = remote_request(client, "/").get_data(as_text=True)
     assert TOKEN in html and ACCESS_CODE not in html and "__HSD_TOKEN__" not in html
 
@@ -293,7 +303,7 @@ def test_resolved_link_cannot_escape_test_directories(lan, tmp_path, key):
         lan.validate_paths(payload)
 
 
-def test_remote_job_creation_checks_paths_before_manager(app, lan, monkeypatch):
+def test_remote_path_job_creation_is_disabled_before_manager(app, lan, monkeypatch):
     client = app.test_client()
     login(client)
     calls = []
@@ -301,10 +311,9 @@ def test_remote_job_creation_checks_paths_before_manager(app, lan, monkeypatch):
     payload = input_payload(lan)
     outside = dict(payload, source_path=str(lan.input_root.parent / "private-originals"))
     denied = remote_request(client, "/api/jobs", method="POST", payload=outside, token=TOKEN)
-    assert denied.status_code == 400 and not calls
-    accepted = remote_request(client, "/api/jobs", method="POST", payload=payload, token=TOKEN)
-    assert accepted.status_code == 200 and accepted.json["id"] == "synthetic-job"
-    assert calls == [lan.validate_paths(payload)]
+    assert denied.status_code == 403 and not calls
+    inside = remote_request(client, "/api/jobs", method="POST", payload=payload, token=TOKEN)
+    assert inside.status_code == 403 and not calls
 
 
 def test_remote_ai_settings_response_is_only_sanitized_configuration(app):
@@ -326,7 +335,7 @@ def test_access_code_is_only_visible_in_host_config(app):
     assert host.json["access"]["code"] == ACCESS_CODE
 
 
-def install_synthetic_job(app, lan):
+def install_synthetic_job(app, lan, client):
     from test_service import prepared
 
     batch = lan.input_root / "synthetic-batch"
@@ -334,6 +343,8 @@ def install_synthetic_job(app, lan):
     owner, job = prepared(batch, [""])
     try:
         job["_output_root"] = str(lan.output_root)
+        with client.session_transaction(base_url=ORIGIN) as state:
+            job["_owner_id"] = state["employee_id"]
         app.config["HSD_MANAGER"].jobs[job["id"]] = job
     finally:
         owner.close()
@@ -343,9 +354,9 @@ def install_synthetic_job(app, lan):
 @pytest.mark.parametrize("action", ["resolve", "undo", "export"])
 @pytest.mark.parametrize("revision", [None, True, 0.0, "0", -1])
 def test_lan_mutations_require_current_integer_revision(app, lan, action, revision):
-    job = install_synthetic_job(app, lan)
     client = app.test_client()
     login(client)
+    job = install_synthetic_job(app, lan, client)
     payload = {"row_id": "r2", "file_id": None}
     if revision is not None:
         payload["expected_revision"] = revision
@@ -355,10 +366,14 @@ def test_lan_mutations_require_current_integer_revision(app, lan, action, revisi
 
 
 def test_two_pages_cannot_overwrite_newer_resolution_or_export_stale_summary(app, lan):
-    install_synthetic_job(app, lan)
     first, second = app.test_client(), app.test_client()
     login(first)
-    login(second)
+    install_synthetic_job(app, lan, first)
+    # Tabs in one employee browser share a session; different employees do not.
+    cookie_name = app.config["SESSION_COOKIE_NAME"]
+    cookie = first.get_cookie(cookie_name, domain=HOST)
+    assert cookie is not None
+    second.set_cookie(cookie_name, cookie.value, domain=HOST)
     initial = remote_request(first, "/api/jobs/sample").json
     assert initial["revision"] == remote_request(second, "/api/jobs/sample").json["revision"] == 0
     accepted = remote_request(first, "/api/jobs/sample/resolve", method="POST", token=TOKEN,
@@ -380,10 +395,10 @@ def test_two_pages_cannot_overwrite_newer_resolution_or_export_stale_summary(app
 
 @pytest.mark.parametrize("path", ["/api/jobs/sample", "/api/jobs/sample/image/row/r2"])
 def test_existing_job_outside_test_root_cannot_be_exposed(app, lan, tmp_path, path):
-    job = install_synthetic_job(app, lan)
-    job["_source_path"] = str(tmp_path / "private-originals")
     client = app.test_client()
     login(client)
+    job = install_synthetic_job(app, lan, client)
+    job["_source_path"] = str(tmp_path / "private-originals")
     assert remote_request(client, path).status_code == 400
 
 

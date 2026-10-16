@@ -13,6 +13,7 @@ import shutil
 import threading
 import time
 import uuid
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
@@ -20,6 +21,7 @@ from pathlib import Path
 from . import __version__
 
 ACCEPTED = {"auto", "confirmed"}
+BUSY = {"queued", "importing", "matching", "ai_review", "exporting"}
 INVALID_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 RESERVED_NAME = re.compile(r"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)", re.I)
 
@@ -42,20 +44,28 @@ def csv_safe(value):
     return "'" + value if value.startswith(("=", "+", "-", "@", "\t", "\r")) else value
 
 
+def _is_link_or_reparse(path):
+    path = Path(path)
+    return path.is_symlink() or bool(getattr(path.lstat(), "st_file_attributes", 0) & 0x400)
+
+
 class JobManager:
-    def __init__(self, data_dir: str | Path):
+    def __init__(self, data_dir: str | Path, *, settings_dir: str | Path | None = None):
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.lock = threading.RLock()
         self.jobs = {}
+        self._queue_sequence = 0
         self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="hsd")
         self.settings_path = self.data_dir / "settings.json"
         from .ai_settings import AiSettings
-        self.ai_settings = AiSettings(self.data_dir)
+        shared_settings = Path(settings_dir) if settings_dir is not None else self.data_dir
+        shared_settings.mkdir(parents=True, exist_ok=True)
+        self.ai_settings = AiSettings(shared_settings)
         from .ai_usage import UsageLedger
         from .ai_registry import ValidationRegistry
-        self.ai_usage = UsageLedger(self.data_dir)
-        self.ai_validation = ValidationRegistry(self.data_dir)
+        self.ai_usage = UsageLedger(shared_settings)
+        self.ai_validation = ValidationRegistry(shared_settings)
         self.cleanup_cache()
 
     def cleanup_cache(self):
@@ -104,7 +114,7 @@ class JobManager:
         temporary.write_text(json.dumps(values, ensure_ascii=False, indent=2), "utf-8")
         os.replace(temporary, self.settings_path)
 
-    def create(self, payload: dict):
+    def create(self, payload: dict, *, owner_id=None, downloadable=False, display_names=None):
         workbook = Path(str(payload.get("workbook_path", "")).strip().strip('"')).resolve()
         source = Path(str(payload.get("source_path", "")).strip().strip('"')).resolve()
         output_text = str(payload.get("output_root", "")).strip().strip('"')
@@ -125,27 +135,49 @@ class JobManager:
         if source.is_dir() and output.is_relative_to(source):
             raise ValueError("结果保存位置不能在 AI 源文件夹内部，请选择旁边的文件夹，避免下次把历史结果重复导入。")
         with self.lock:
-            if any(j["status"] in {"importing", "matching", "ai_review", "exporting"} for j in self.jobs.values()):
+            if owner_id is None and any(j["status"] in BUSY for j in self.jobs.values()):
                 raise ValueError("当前任务仍在处理，请完成后再导入。")
             identifier = uuid.uuid4().hex
             work_dir = self.data_dir / "jobs" / identifier
             work_dir.mkdir(parents=True)
             (work_dir / ".hsd-job").write_text(identifier, "ascii")
-            job = {"id": identifier, "status": "importing", "progress": {"message": "正在读取表格…", "current": 0, "total": 1},
-                   "error": None, "sheet_name": "", "workbook_name": workbook.name, "source_name": source.name,
+            display_names = display_names or {}
+            job = {"id": identifier, "status": "queued" if owner_id is not None else "importing", "progress": {"message": "正在排队，轮到本批后会自动处理…" if owner_id is not None else "正在读取表格…", "current": 0, "total": 1},
+                   "error": None, "sheet_name": "", "workbook_name": display_names.get("workbook_name", workbook.name), "source_name": display_names.get("source_name", source.name),
                    "start_number": start, "prefix": "HSD", "rows": [], "files": [], "warnings": [],
                    "output_dir": None, "output_target": str(output), "report": None, "stats": {}, "_workbook_path": str(workbook),
                    "_source_path": str(source), "_output_root": str(output), "_work_dir": str(work_dir),
                    "_reserved": [], "_input_digest": None, "revision": 0,
-                   "timings": {}, "_history": [], "_image_assets": {}, "_started_perf": time.perf_counter()}
+                   "timings": {}, "_history": [], "_image_assets": {}, "_started_perf": time.perf_counter(),
+                   "_owner_id": owner_id, "_downloadable": bool(downloadable)}
             self.jobs[identifier] = job
             try:
-                self._save_config(job)
+                if owner_id is None:
+                    self._save_config(job)
             except OSError:
                 logging.exception("Could not save input preferences")
                 job["warnings"].append("本机设置未能保存，本次处理仍会继续；下次可能需要重新选择路径。")
-            self.pool.submit(self._process, identifier)
+            self._submit(job, self._process)
         return identifier
+
+    def _submit(self, job, operation):
+        """Called under the manager lock; one worker serializes expensive jobs."""
+        self._queue_sequence += 1
+        job["_queue_order"] = self._queue_sequence
+        job["_queued_perf"] = time.perf_counter()
+        self.pool.submit(operation, job["id"])
+
+    def _start_operation(self, identifier, status, message):
+        with self.lock:
+            job = self.jobs[identifier]
+            queued_at = job.pop("_queued_perf", None)
+            job.pop("_queue_order", None)
+            if queued_at is not None:
+                job.setdefault("timings", {})["queue_seconds"] = round(
+                    job.get("timings", {}).get("queue_seconds", 0) + time.perf_counter() - queued_at, 3)
+            job["status"] = status
+            job["progress"] = {"message": message, "current": 0, "total": 1}
+            return job
 
     def _progress(self, identifier, message, current=0, total=1):
         with self.lock:
@@ -153,9 +185,10 @@ class JobManager:
 
     def _process(self, identifier):
         try:
+            job = self._start_operation(identifier, "importing", "正在读取表格…")
+            job["_started_perf"] = time.perf_counter()
             from .workbook import inspect_workbook
             from .matching import scan_and_match
-            job = self.jobs[identifier]
             workbook_path = job["_workbook_path"]
             job["_input_digest"] = sha256(workbook_path)
             snapshot_path = Path(job["_work_dir"]) / "source.xlsx"
@@ -315,13 +348,15 @@ class JobManager:
                 raise ValueError("请先在AI设置中填写密钥并启用复核。")
             if job.get("_ai_runs", 0) >= 3:
                 raise ValueError("本批已完成多次复核，请人工处理剩余项，或重新导入。")
-            if any(j["status"] in {"importing", "matching", "ai_review", "exporting"} for j in self.jobs.values()):
+            if job.get("_owner_id") is None and any(j["status"] in BUSY for j in self.jobs.values()):
                 raise ValueError("当前仍有任务正在处理。")
-            job["status"] = "ai_review"
-            self.pool.submit(self._rerun_ai, identifier)
+            job["status"] = "queued" if job.get("_owner_id") is not None else "ai_review"
+            job["progress"] = {"message": "正在排队等待 AI 复核…", "current": 0, "total": 1}
+            self._submit(job, self._rerun_ai)
 
     def _rerun_ai(self, identifier):
         try:
+            self._start_operation(identifier, "ai_review", "正在进行 AI 复核…")
             self._review_ai(identifier)
         finally:
             with self.lock:
@@ -392,13 +427,14 @@ class JobManager:
             self._plan(job)
             if not job["stats"]["exportable"]:
                 raise ValueError("还没有可导出的对应关系，请先确认至少一项匹配。")
-            job["status"] = "exporting"
+            job["status"] = "queued" if job.get("_owner_id") is not None else "exporting"
+            job["progress"] = {"message": "正在排队等待导出…", "current": 0, "total": 1}
             job["error"] = None
             job["_export_started_perf"] = time.perf_counter()
-            self.pool.submit(self._export, identifier)
+            self._submit(job, self._export)
 
     def _export(self, identifier):
-        job = self.jobs[identifier]
+        job = self._start_operation(identifier, "exporting", "正在导出结果…")
         staging = None
         staging_created = False
 
@@ -431,6 +467,18 @@ class JobManager:
             if job.get("_source_archive_digest") and sha256(job["_source_path"]) != job["_source_archive_digest"]:
                 raise ValueError("导入后源压缩包发生了变化，请重新导入再导出。")
             verify_ai_comparison_sources()
+            completed = job.get("_completed_export")
+            if (completed and completed["revision"] == job.get("revision", 0)
+                    and completed["plan"] == self._export_plan(job)):
+                files = {f["id"]: f for f in job["files"]}
+                for row in job["rows"]:
+                    if row["status"] in ACCEPTED:
+                        source = files[row["file_id"]]
+                        if source.get("source_sha256") and sha256(source["source_path"]) != source["source_sha256"]:
+                            raise ValueError("匹配后源文件发生了变化，请重新导入再导出。")
+                self._finish_export(job, Path(completed["path"]), completed["report"], completed["timings"])
+                return
+            job.pop("_completed_export", None)
             root = Path(job["_output_root"])
             root.mkdir(parents=True, exist_ok=True)
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -510,10 +558,11 @@ class JobManager:
             if final.exists():
                 raise ValueError("输出文件夹已存在，请重新导入后重试。")
             staging.rename(final)
-            with self.lock:
-                job["output_dir"], job["report"], job["status"] = str(final), report, "done"
-                job["timings"] = timings
-                job["progress"] = {"message": "导出完成，原文件已保留", "current": len(rows) + 1, "total": len(rows) + 1}
+            if job.get("_downloadable"):
+                job["_completed_export"] = {"path": str(final), "report": report, "timings": timings,
+                    "revision": job.get("revision", 0), "plan": self._export_plan(job),
+                    "manifest": self._output_manifest(job, final)}
+            self._finish_export(job, final, report, timings)
         except Exception as exc:
             # Only remove the exact staging directory created by this invocation.
             if staging_created and staging and staging.is_dir() and staging.name == f".HSD处理中_{identifier}" and staging.parent.resolve() == Path(job["_output_root"]).resolve():
@@ -527,6 +576,104 @@ class JobManager:
                 if staging_created and staging and staging.exists():
                     job["error"] += f" 未完成的临时结果暂被占用：{staging}。关闭占用它的程序后，重新导入再导出。"
                 job["progress"] = {"message": "导出未完成，可以修正问题后重试", "current": 0, "total": 1}
+
+    @staticmethod
+    def _export_plan(job):
+        return [(r["id"], r["status"], r.get("file_id"), r.get("planned_number"), r.get("_accepted_by"))
+                for r in job["rows"]]
+
+    def _output_members(self, job, directory):
+        """Only walk the exact output tree; reject links and escaping entries."""
+        directory = Path(directory)
+        root = directory.resolve(strict=True)
+        if _is_link_or_reparse(directory) or _is_link_or_reparse(directory.parent) or root.parent != Path(job["_output_root"]).resolve():
+            raise ValueError("结果目录位置异常，不能打包。")
+        result = []
+        for current, directories, files in os.walk(directory, followlinks=False):
+            for name in directories + files:
+                entry = Path(current) / name
+                if _is_link_or_reparse(entry) or not entry.resolve(strict=True).is_relative_to(root):
+                    raise ValueError("结果包含链接或目录之外的文件，不能打包。")
+            for name in files:
+                entry = Path(current) / name
+                if not entry.is_file():
+                    raise ValueError("结果包含不能读取的文件，不能打包。")
+                result.append(entry)
+        return sorted(result)
+
+    def _output_manifest(self, job, directory):
+        return {path.relative_to(directory).as_posix(): sha256(path)
+                for path in self._output_members(job, directory)}
+
+    def _task_work_root(self, job):
+        identifier = job["id"]
+        if Path(identifier).name != identifier or identifier in {".", ".."}:
+            raise ValueError("任务下载目录异常。")
+        expected = self.data_dir.absolute() / "jobs" / identifier
+        work_dir = Path(job["_work_dir"]).absolute()
+        if (work_dir != expected or _is_link_or_reparse(work_dir) or _is_link_or_reparse(work_dir.parent)
+                or work_dir.resolve(strict=True) != expected):
+            raise ValueError("任务下载目录异常。")
+        return expected
+
+    def _package_download(self, job, directory):
+        """Create an atomic, task-private archive of verified output copies only."""
+        directory = Path(directory)
+        manifest = job["_completed_export"]["manifest"]
+        members = self._output_members(job, directory)
+        if {p.relative_to(directory).as_posix() for p in members} != set(manifest):
+            raise ValueError("导出结果文件发生变化，不能生成下载包。")
+        work_root = self._task_work_root(job)
+        target = work_root / "HSD编号结果.zip"
+        if target.is_symlink() or (target.exists() and _is_link_or_reparse(target)):
+            raise ValueError("任务下载文件位置异常。")
+        temporary = work_root / (".download-" + uuid.uuid4().hex + ".tmp")
+        self._progress(job["id"], "正在打包下载结果…", 0, len(members))
+        try:
+            with temporary.open("xb") as stream:
+                with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=1) as archive:
+                    for index, path in enumerate(members, 1):
+                        relative = path.relative_to(directory).as_posix()
+                        digest = hashlib.sha256()
+                        with path.open("rb") as source, archive.open(directory.name + "/" + relative, "w", force_zip64=True) as destination:
+                            for chunk in iter(lambda: source.read(4 * 1024 * 1024), b""):
+                                digest.update(chunk)
+                                destination.write(chunk)
+                        if digest.hexdigest() != manifest[relative] or _is_link_or_reparse(path) or not path.resolve().is_relative_to(directory.resolve()):
+                            raise ValueError("打包期间导出结果发生变化，请检查结果后重试。")
+                        self._progress(job["id"], "正在打包下载结果…", index, len(members))
+                stream.flush()
+                os.fsync(stream.fileno())
+            digest = sha256(temporary)
+            os.replace(temporary, target)
+            with self.lock:
+                job["_download_path"], job["_download_sha256"] = str(target), digest
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    def _finish_export(self, job, directory, report, timings):
+        if job.get("_downloadable"):
+            self._package_download(job, directory)
+        with self.lock:
+            job["output_dir"], job["report"], job["status"] = str(directory), report, "done"
+            job["timings"] = timings
+            job["error"] = None
+            job["progress"] = {"message": "结果已打包，可直接下载" if job.get("_downloadable") else "导出完成，原文件已保留",
+                "current": report["exported"] + 1, "total": report["exported"] + 1}
+
+    def download_asset(self, identifier):
+        with self.lock:
+            job = self._get(identifier)
+            if job["status"] != "done" or not job.get("_downloadable") or not job.get("_download_path"):
+                raise KeyError("结果尚未准备好，请等待导出完成。")
+            path = Path(job["_download_path"])
+            root = self._task_work_root(job)
+            if not path.is_file() or _is_link_or_reparse(path) or path.absolute().parent != root or path.resolve().parent != root:
+                raise KeyError("结果下载文件不可用。")
+            expected = job.get("_download_sha256")
+        if not expected or sha256(path) != expected:
+            raise ValueError("下载结果发生变化，请重新处理。")
+        return path, expected
 
     def _get(self, identifier):
         if identifier not in self.jobs:
@@ -545,6 +692,17 @@ class JobManager:
             result["output_root"] = job["_output_root"]
             result["can_undo"] = job["status"] == "ready" and bool(job.get("_history"))
             result["revision"] = job.get("revision", 0)
+            if job["status"] == "queued":
+                order = job.get("_queue_order", float("inf"))
+                ahead = sum(j is not job and (j.get("_queue_order", float("inf")) < order
+                    or ("_queue_order" not in j and j["status"] in BUSY and j["status"] != "queued"))
+                    for j in self.jobs.values())
+                result["queue_position"] = ahead + 1
+            else:
+                result["queue_position"] = 0
+            result["download_ready"] = bool(job["status"] == "done" and job.get("_downloadable")
+                and job.get("_download_path") and Path(job["_download_path"]).is_file())
+            result["download_name"] = "HSD编号结果.zip" if job.get("_downloadable") else None
             if result.get("ai_review"):
                 config = self.ai_settings.snapshot()
                 result["ai_review"]["can_retry"] = bool(job["status"] == "ready" and config["enabled"]

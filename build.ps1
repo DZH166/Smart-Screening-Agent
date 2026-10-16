@@ -20,6 +20,7 @@ try {
     foreach ($directory in @('hsd_tool', 'tests', 'tools')) {
         Get-ChildItem -LiteralPath (Join-Path $workspace $directory) -File -Recurse | Where-Object { $_.Extension -in @('.py', '.js', '.css', '.html', '.json') } | ForEach-Object {
             $relative = $_.FullName.Substring($workspace.Length + 1)
+            if ($relative -eq 'tests\sample_visual_reference.json') { return }
             $targetFile = Join-Path $sourceDestination $relative
             New-Item -ItemType Directory -Path (Split-Path -Parent $targetFile) -Force | Out-Null
             Copy-Item -LiteralPath $_.FullName -Destination $targetFile -Force

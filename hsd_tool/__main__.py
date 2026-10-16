@@ -40,6 +40,7 @@ def main():
     parser.add_argument("--pick", choices=["workbook", "zip", "folder", "output"])
     parser.add_argument("--result")
     parser.add_argument("--data-dir")
+    parser.add_argument("--settings-dir", type=Path, help="复用主机的 DeepSeek 加密设置与用量目录")
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--lan", help="显式开启局域网测试，例：192.168.0.160/24")
     parser.add_argument("--lan-input-root", type=Path, help="允许远程测试使用的主机素材目录")
@@ -112,7 +113,7 @@ def main():
     try:
         from werkzeug.serving import make_server
         from .server import create_app
-        app = create_app(data, lan=lan)
+        app = create_app(data, lan=lan, settings_dir=args.settings_dir)
         server = make_server(lan.host if lan else "127.0.0.1", args.port, app, threaded=True)
         app.config["HSD_PORT"] = server.server_port
         app.config["HSD_SHUTDOWN"] = server.shutdown

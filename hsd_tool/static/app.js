@@ -2,11 +2,13 @@
 
 (() => {
   const $ = (id) => document.getElementById(id);
+  const isLan = () => window.HSD_ACCESS?.lan === true;
+  const uploadLimits = {workbook:100*1024*1024,source:1900*1024*1024,total:2*1024*1024*1024};
   const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]));
   const state = {
     job: null, sourceType: 'zip', filter: 'awaiting', search: '',
     selectedRowId: null, selectedFileId: null, manualOpen: false, manualQuery: '',
-    resolving: false, starting: false, picking: false, pollTimer: null, pollFailures: 0,
+    resolving: false, starting: false, uploading: false, picking: false, pollTimer: null, pollFailures: 0,
     showDone: true, stopped: false, lastJobError: null,
     forceReview: false, showSummary: false, candidatesOpen: false, history: [],
   };
@@ -15,7 +17,7 @@
   const statusNames = {auto:'自动通过', confirmed:'已确认', review:'待确认', unmatched:'未找到', skipped:'已跳过'};
   const matched = (row) => ['auto','confirmed'].includes(row.status) && !!row.file_id;
   const awaiting = (row) => ['review','unmatched'].includes(row.status);
-  const isBusy = () => ['importing','matching','ai_review','exporting'].includes(state.job?.status) || state.starting;
+  const isBusy = () => ['queued','importing','matching','ai_review','exporting'].includes(state.job?.status) || state.starting;
   const fileById = (id) => (state.job?.files || []).find((file) => file.id === id);
   const rowById = (id) => (state.job?.rows || []).find((row) => row.id === id);
   const ownerOf = (id, rowId) => (state.job?.rows || []).find((row) => row.id !== rowId && row.file_id === id && matched(row));
@@ -68,8 +70,60 @@
   }
   function setFormBusy(busy) {
     $('import-form').querySelectorAll('button,input').forEach((element)=>element.disabled=busy);
-    $('start-button').textContent=state.starting?'正在创建任务…':'开始自动处理 →';
+    ['workbook-path','source-path','output-path'].forEach((id)=>$(id).disabled=busy||isLan());
+    ['workbook-upload','source-upload'].forEach((id)=>$(id).disabled=busy||!isLan());
+    $('start-button').textContent=state.uploading?'正在上传…':state.starting?'正在创建任务…':isLan()?'上传并自动处理 →':'开始自动处理 →';
     $('shutdown-button').disabled=busy || isBusy();
+  }
+  function formatBytes(bytes) {
+    return bytes>=1024*1024*1024?`${(bytes/(1024*1024*1024)).toFixed(2)} GiB`:`${(bytes/(1024*1024)).toFixed(1)} MiB`;
+  }
+  function updateUploadSelection(id) {
+    const input=$(id),file=input.files?.[0];
+    $(id+'-name').textContent=file?`${file.name} · ${formatBytes(file.size)}`:id==='workbook-upload'?'选择你电脑上的表格，最大 100 MiB。':'把 AI 文件夹压缩成 ZIP 后选择，最大 1900 MiB。';
+  }
+  function validateUploadFiles(workbook,source) {
+    if (!workbook) return '请先选择你电脑上的图片编号表。';
+    if (!/\.xlsx$/i.test(workbook.name)) return '图片编号表需要是 .xlsx 文件。';
+    if (!source) return '请先选择包含 AI 文件的 ZIP 压缩包。';
+    if (!/\.zip$/i.test(source.name)) return 'AI 文件请先压缩成 .zip 文件后上传。';
+    if (!workbook.size || !source.size) return '所选文件为空，请重新选择。';
+    if (workbook.size>uploadLimits.workbook) return '图片编号表不能超过 100 MiB。';
+    if (source.size>uploadLimits.source) return 'AI 压缩包不能超过 1900 MiB，请拆分批次后上传。';
+    if (workbook.size+source.size>uploadLimits.total) return '表格和 ZIP 合计不能超过 2 GiB，请拆分批次后上传。';
+    return '';
+  }
+  function renderUploadProgress(event) {
+    const known=event?.lengthComputable&&event.total>0;
+    const percent=known?Math.min(100,Math.round(event.loaded/event.total*100)):0;
+    $('upload-progress').classList.remove('hidden');
+    $('upload-progress-fill').style.width=known?`${percent}%`:'';
+    $('upload-progress-fill').classList.toggle('indeterminate',!known);
+    $('upload-progress-percent').textContent=known?`${percent}%`:'';
+    $('upload-progress-label').textContent=known&&event.loaded>=event.total?'上传完成，正在检查文件…':'正在上传文件…';
+    $('upload-progress-detail').textContent=known?`${formatBytes(event.loaded)} / ${formatBytes(event.total)} · 请保持页面打开，上传完成后自动处理。`:'请保持此页面打开，上传完成后自动处理。';
+  }
+  function uploadFiles(workbook,source,start) {
+    return new Promise((resolve,reject)=>{
+      const data=new FormData();
+      data.append('workbook',workbook);data.append('source',source);data.append('start_number',String(start));
+      const request=new XMLHttpRequest();
+      request.open('POST','/api/jobs/upload');
+      request.setRequestHeader('X-HSD-Token',window.HSD_TOKEN||'');
+      request.timeout=30*60*1000;
+      request.upload.addEventListener('progress',renderUploadProgress);
+      request.addEventListener('load',()=>{
+        let result;
+        try {result=JSON.parse(request.responseText);} catch (_) {reject(new Error('上传未能返回有效结果，请确认主机仍在运行后重试。'));return;}
+        if (request.status<200||request.status>=300) {const error=new Error(result.error||`上传未完成（${request.status}），请重试。`);error.status=request.status;reject(error);return;}
+        if (!result.id) {reject(new Error('上传结果缺少批次编号，请重试。'));return;}
+        resolve(result);
+      });
+      request.addEventListener('error',()=>reject(new Error('上传连接中断，请确认与主机处于同一局域网后重试。')));
+      request.addEventListener('timeout',()=>reject(new Error('上传超时，请检查网络或拆分压缩包后重试。')));
+      request.addEventListener('abort',()=>reject(new Error('上传已中止，请重新上传。')));
+      renderUploadProgress();request.send(data);
+    });
   }
   async function pick(button) {
     if (state.picking || state.starting) return;
@@ -84,18 +138,24 @@
     event.preventDefault();
     if (state.starting || state.picking) return;
     clearNotice();
-    const fields=[['workbook-path','请先选择图片编号表。'],['source-path','请先选择 AI 压缩包或文件夹。'],['output-path','请先选择结果保存位置。']];
-    for (const [id,message] of fields) {if (!$(id).value.trim()) {notice(message);$(id).focus();return;}}
+    const workbook=$('workbook-upload').files?.[0],source=$('source-upload').files?.[0];
+    if (isLan()) {
+      const error=validateUploadFiles(workbook,source);
+      if (error) {notice(error);return;}
+    } else {
+      const fields=[['workbook-path','请先选择图片编号表。'],['source-path','请先选择 AI 压缩包或文件夹。'],['output-path','请先选择结果保存位置。']];
+      for (const [id,message] of fields) {if (!$(id).value.trim()) {notice(message);$(id).focus();return;}}
+    }
     const start=Number($('start-number').value);
     if (!Number.isInteger(start)||start<1||start>9999) {notice('起始流水号应为 1 到 9999 之间的整数。');$('start-number').focus();return;}
-    state.starting=true;setFormBusy(true);
+    state.starting=true;state.uploading=isLan();setFormBusy(true);
     try {
-      const data=await api('/api/jobs',{method:'POST',body:{workbook_path:$('workbook-path').value.trim(),source_path:$('source-path').value.trim(),output_root:$('output-path').value.trim(),start_number:start}});
-      state.job={id:data.id,status:'importing',progress:{message:'正在读取编号表与 AI 文件',current:0,total:0},rows:[],files:[]};
+      const data=isLan()?await uploadFiles(workbook,source,start):await api('/api/jobs',{method:'POST',body:{workbook_path:$('workbook-path').value.trim(),source_path:$('source-path').value.trim(),output_root:$('output-path').value.trim(),start_number:start}});
+      state.job={id:data.id,status:isLan()?'queued':'importing',progress:{message:isLan()?'文件已上传，正在准备处理':'正在读取编号表与 AI 文件',current:0,total:0},rows:[],files:[]};
       state.filter='awaiting';state.search='';state.selectedRowId=null;state.selectedFileId=null;state.showDone=true;state.pollFailures=0;state.lastJobError=null;
       state.forceReview=false;state.showSummary=false;state.candidatesOpen=false;state.history=[];
       $('row-search').value='';rememberJob(data.id);renderJob();schedulePoll(100);
-    } catch(error) {notice(error.message);} finally {state.starting=false;setFormBusy(false);$('shutdown-button').disabled=isBusy();}
+    } catch(error) {notice(error.message);} finally {state.starting=false;state.uploading=false;$('upload-progress').classList.add('hidden');setFormBusy(false);$('shutdown-button').disabled=isBusy();}
   }
   function schedulePoll(delay=1000) {clearTimeout(state.pollTimer);if (!state.stopped) state.pollTimer=setTimeout(pollJob,delay);}
   async function pollJob() {
@@ -119,7 +179,7 @@
     state.job=job;
     if (job.error && job.error !== state.lastJobError && job.status !== 'error') {notice(job.error);state.lastJobError=job.error;}
     if (!job.error) state.lastJobError=null;
-    if (!rowById(state.selectedRowId) || (['importing','matching','ai_review'].includes(previousStatus) && job.status==='ready')) {
+    if (!rowById(state.selectedRowId) || (['queued','importing','matching','ai_review'].includes(previousStatus) && job.status==='ready')) {
       const first=(job.rows||[]).find(awaiting) || (job.rows||[]).find((row)=>!matched(row)) || job.rows?.[0];
       selectRow(first?.id,null,false);
     }
@@ -129,7 +189,7 @@
   function renderJob() {
     if (!state.job) {showView('import-view',1);return;}
     const job=state.job;
-    if (['importing','matching','ai_review','exporting'].includes(job.status)) {renderProgress();return;}
+    if (['queued','importing','matching','ai_review','exporting'].includes(job.status)) {renderProgress();return;}
     if (job.status==='error') {$('job-error').textContent=job.error||'文件处理失败，请检查文件是否有效后再试。';showView('error-view',1);return;}
     if (job.status==='done'&&state.showDone) {renderDone();return;}
     if (job.status==='ready' && (state.showSummary || (counts().review===0 && !state.forceReview))) {renderSummary();return;}
@@ -138,10 +198,11 @@
   function renderProgress() {
     const job=state.job;
     const exporting=job.status==='exporting';
+    const queued=job.status==='queued';
     showView('processing-view',exporting?3:2);
-    $('processing-eyebrow').textContent=exporting?'正在保存本批结果':job.status==='ai_review'?'DEEPSEEK · 视觉二次复核':'本机自动匹配';
-    $('processing-title').textContent=exporting?'正在整理并导出…':job.status==='ai_review'?'正在复核有疑问的图片…':job.status==='matching'?'正在比对图片…':'正在读取文件…';
-    $('processing-message').textContent=job.status==='ai_review'?(job.ai_review?.message||job.progress?.message||'仅发送符合条件的表格图片与候选预览。'):job.progress?.message||'请稍候';
+    $('processing-eyebrow').textContent=queued?'文件已上传':exporting?'正在保存本批结果':job.status==='ai_review'?'DEEPSEEK · 视觉二次复核':isLan()?'主机自动匹配':'本机自动匹配';
+    $('processing-title').textContent=queued?'排队等待处理…':exporting?'正在整理并导出…':job.status==='ai_review'?'正在复核有疑问的图片…':job.status==='matching'?'正在比对图片…':'正在读取文件…';
+    $('processing-message').textContent=queued?(job.queue_position?`当前排在第 ${job.queue_position} 位，轮到后会自动开始。`:'其他批次正在处理，轮到本批后会自动开始。'):job.status==='ai_review'?(job.ai_review?.message||job.progress?.message||'仅发送符合条件的表格图片与候选预览。'):job.progress?.message||'请稍候';
     const current=Math.max(0,Number(job.progress?.current)||0),total=Math.max(0,Number(job.progress?.total)||0);
     const percent=total?Math.min(100,Math.round(current/total*100)):0;
     $('progress-fill').style.width=total?`${percent}%`:'';
@@ -173,7 +234,7 @@
     $('summary-title').textContent=c.matched?`准备导出 ${c.matched} 个已对应文件。`:'本批暂时没有可导出的对应文件。';
     $('summary-subtitle').textContent=c.awaiting?`还有 ${c.review} 项待确认、${c.unmatched} 项未找到文件；可继续处理，也可只导出已完成部分。`:'没有需要继续判断的疑问项。确认下面的摘要后即可导出。';
     $('summary-stats').innerHTML=`<div class="done-stat"><strong>${c.total}</strong><span>本批图片</span></div><div class="done-stat"><strong>${c.localAuto}</strong><span>本机自动通过</span></div><div class="done-stat"><strong>${c.aiAuto}</strong><span>AI 条件通过</span></div><div class="done-stat"><strong>${c.confirmed}</strong><span>人工确认</span></div><div class="done-stat"><strong>${c.newNumbers}</strong><span>新增编号</span></div>`;
-    $('summary-output').textContent=job.output_target||job.output_root||job.output_dir||'导入时选择的位置';
+    $('summary-output').textContent=isLan()?'完成后下载到你的电脑':job.output_target||job.output_root||job.output_dir||'导入时选择的位置';
     $('summary-detail').textContent=`结果包含编号表格、${c.matched} 个按编号命名的 AI 文件与处理清单。${pending?`待确认 ${c.review} 行、未找到 ${c.unmatched} 行、已跳过 ${c.skipped} 行保持原状，不填写新号。`:''}原始表格和原 AI 文件保持不变。`;
     $('summary-export-button').disabled=state.resolving||c.matched===0;
     $('summary-browse-button').disabled=state.resolving;
@@ -453,11 +514,21 @@
     showView('done-view',3);
     const c=counts();
     $('done-stats').innerHTML=`<div class="done-stat"><strong>${c.matched}</strong><span>AI 文件已整理</span></div><div class="done-stat"><strong>${c.newNumbers}</strong><span>新增编号</span></div><div class="done-stat"><strong>${c.awaiting}</strong><span>留待处理</span></div><div class="done-stat"><strong>${c.skipped}</strong><span>已跳过</span></div>`;
-    $('output-directory').textContent=state.job.output_dir||'保存位置尚未返回';
+    if (isLan()) {
+      $('done-view').querySelector('.subtitle').textContent='原始文件保持不变，下载结果压缩包即可保存到你的电脑。';
+      $('output-directory').previousElementSibling.textContent='结果下载';
+      $('output-directory').textContent=state.job.download_ready?'结果压缩包已准备好，包含表格、AI 文件和处理清单。':'结果压缩包尚未就绪，请稍后刷新。';
+      $('open-output-button').textContent='下载结果 ZIP ↓';
+    } else $('output-directory').textContent=state.job.output_dir||'保存位置尚未返回';
     $('done-summary').textContent=(c.awaiting+c.skipped)?`结果包含更新后的 Excel 表格、${c.matched} 个按编号命名的 AI 文件，以及待处理清单。待确认 ${c.review} 行、未找到 ${c.unmatched} 行、已跳过 ${c.skipped} 行保持原状，请根据清单继续核对。`:`结果包含更新后的 Excel 表格、${c.matched} 个按编号命名的 AI 文件及处理清单。全部表格图片均已对应。`;
-    $('open-output-button').disabled=!state.job.output_dir;renderAiOverview();
+    $('open-output-button').disabled=isLan()?!state.job.download_ready:!state.job.output_dir;renderAiOverview();
   }
   async function openOutput() {
+    if (isLan()) {
+      if (!state.job?.download_ready) {notice('结果压缩包尚未就绪，请稍后重试。');return;}
+      window.location.assign(`/api/jobs/${encodeURIComponent(state.job.id)}/download`);
+      toast('已发起下载，请在浏览器下载列表中查看。');return;
+    }
     $('open-output-button').disabled=true;
     try {await api(`/api/jobs/${encodeURIComponent(state.job.id)}/open-output`,{method:'POST',body:{}});toast('已打开结果文件夹');} catch(error){notice(error.message);} finally {$('open-output-button').disabled=false;}
   }
@@ -467,6 +538,7 @@
     clearTimeout(state.pollTimer);state.job=null;state.selectedRowId=null;state.selectedFileId=null;state.showDone=true;state.lastJobError=null;
     state.forceReview=false;state.showSummary=false;state.candidatesOpen=false;state.history=[];state.filter='awaiting';
     rememberJob(null);clearNotice();showView('import-view',1);window.scrollTo({top:0,behavior:'smooth'});
+    if (isLan()) {['workbook-upload','source-upload'].forEach((id)=>{$(id).value='';updateUploadSelection(id);});}
   }
   async function shutdown() {
     if (isBusy()||state.resolving||state.picking||state.stopped)return;
@@ -482,7 +554,9 @@
     } catch(error){notice(error.message);$('shutdown-button').disabled=false;}
   }
   async function init() {
+    configureAccess(window.HSD_ACCESS);
     setFormBusy(true);
+    window.addEventListener('beforeunload',(event)=>{if(state.uploading){event.preventDefault();event.returnValue='';}});
     window.addEventListener('resize',scheduleReviewLayout,{passive:true});
     if ('ResizeObserver' in window) {
       const observer=new ResizeObserver(scheduleReviewLayout);
@@ -492,6 +566,7 @@
     document.querySelectorAll('.browse').forEach((button)=>button.addEventListener('click',()=>pick(button)));
     document.querySelectorAll('[data-source-type]').forEach((button)=>button.addEventListener('click',()=>setSourceType(button.dataset.sourceType)));
     $('start-number').addEventListener('input',updateNumberExample);$('import-form').addEventListener('submit',startJob);
+    ['workbook-upload','source-upload'].forEach((id)=>$(id).addEventListener('change',()=>updateUploadSelection(id)));
     document.querySelectorAll('[data-filter]').forEach((button)=>button.addEventListener('click',()=>{state.filter=button.dataset.filter;renderTable();}));
     $('row-search').addEventListener('input',(event)=>{state.search=event.target.value;renderTable();});
     $('rows-body').addEventListener('click',(event)=>{const row=event.target.closest('[data-row-id]');if(row&&!state.resolving)selectRow(row.dataset.rowId);});
@@ -508,34 +583,43 @@
     document.addEventListener('click',(event)=>{if(event.target.closest('[data-ai-retry]'))retryAiReview();});
     document.addEventListener('hsd-ai-settings-updated',async()=>{if(state.job?.status==='ready'&&!state.resolving){try{acceptJob(await api(`/api/jobs/${encodeURIComponent(state.job.id)}`));renderJob();}catch(_){}}});
     document.addEventListener('error',(event)=>{if(event.target instanceof HTMLImageElement)event.target.classList.add('image-broken');},true);
+    let config=null;
     try {
-      const config=await api('/api/config');
-      if (config.access?.lan) {
-        const note=$('lan-note');
-        note.textContent=`局域网共享测试：文件和结果均在主机上。素材目录：${config.access.input_root}；结果目录：${config.access.output_root}。当前批次由测试人员共同操作。`;
-        if (!config.access.remote && config.access.code) note.textContent+=` 分享地址：${location.origin}；访问码：${config.access.code}（仅主机显示）。`;
-        note.classList.remove('hidden');
-        if (config.access.remote) {
-          document.querySelectorAll('.browse').forEach((button)=>button.classList.add('hidden'));
-          ['shutdown-button','open-output-button','ai-settings-button'].forEach((id)=>$(id).classList.add('hidden'));
-          $('workbook-path').placeholder='填写主机素材目录中的 .xlsx 完整路径';
-          $('source-path').placeholder='填写主机素材目录中的 ZIP 或文件夹路径';
-        }
-      }
+      config=await api('/api/config');
+      configureAccess(config.access);
       $('workbook-path').value=config.last_workbook||'';$('source-path').value=config.last_source||'';$('output-path').value=config.last_output||'';
       $('start-number').value=config.last_start||1;$('app-version').textContent=config.version||'1.0.0';
       if (config.last_source) setSourceType(/\.zip$/i.test(config.last_source)?'zip':'folder');
       updateNumberExample();
     } catch(error){notice(error.message);}
-    let jobId=storedJob();
-    if (!jobId && window.HSD_ACCESS?.lan) {
-      try {jobId=(await api('/api/config')).active_job_id || null;} catch (_) {}
-    }
+    const jobId=isLan()?config?.active_job_id||null:storedJob();
     if(jobId) {
       try {const job=await api(`/api/jobs/${encodeURIComponent(jobId)}`);acceptJob(job);renderJob();if(isBusy())schedulePoll();}
       catch(error){rememberJob(null);if(error.status!==404)notice(error.message);}
     }
     setFormBusy(false);
+  }
+  function configureAccess(access) {
+    if (access) window.HSD_ACCESS=access;
+    if (access?.upload_limits) {
+      for (const [key,field] of [['workbook','workbook_bytes'],['source','source_bytes'],['total','total_bytes']]) {
+        const limit=Number(access.upload_limits[field]);
+        if (Number.isSafeInteger(limit)&&limit>0) uploadLimits[key]=limit;
+      }
+    }
+    const lan=isLan();
+    ['local-workbook-field','local-source-field','local-output-field'].forEach((id)=>$(id).classList.toggle('hidden',lan));
+    $('upload-fields').classList.toggle('hidden',!lan);
+    $('number-settings-title').textContent=lan?'确认本批起始号':'确认编号与保存位置';
+    if (!lan) return;
+    const note=$('lan-note');
+    note.textContent='员工入口：选择自己电脑上的表格和 ZIP，上传后自动处理，完成后直接下载结果。DeepSeek 使用主机已配置的密钥，无需重复设置。';
+    if (!access.remote && access.code) note.textContent+=` 分享地址：${location.origin}；访问码：${access.code}（仅主机显示）。`;
+    note.classList.remove('hidden');
+    if (access.remote) ['shutdown-button','ai-settings-button'].forEach((id)=>$(id).classList.add('hidden'));
+    $('open-output-button').classList.remove('hidden');
+    $('summary-output').previousElementSibling.textContent='结果获取方式';
+    $('open-output-button').textContent='下载结果 ZIP ↓';
   }
   init().catch((error)=>notice(error.message||'界面加载遇到问题，请刷新页面重试。'));
 })();

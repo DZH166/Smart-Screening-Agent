@@ -12,13 +12,14 @@ from datetime import timedelta
 from pathlib import Path
 
 from flask import Flask, jsonify, request, send_file, session
-from werkzeug.exceptions import Conflict
+from werkzeug.exceptions import BadRequest, Conflict, RequestEntityTooLarge
 
 from .service import JobManager
+from .uploads import EmployeeUploads, MAX_UPLOAD_BYTES, MAX_WORKBOOK_BYTES, MAX_SOURCE_BYTES
 from . import __version__
 
 
-def create_app(data_dir: str | Path, token: str | None = None, *, lan=None):
+def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, settings_dir=None):
     static = Path(__file__).resolve().parent / "static"
     app = Flask(__name__, static_folder=str(static), static_url_path="/static")
     app.config.update(MAX_CONTENT_LENGTH=64 * 1024, JSON_AS_ASCII=False)
@@ -26,7 +27,12 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None):
         app.config.update(SECRET_KEY=secrets.token_bytes(32), SESSION_COOKIE_HTTPONLY=True,
                           SESSION_COOKIE_SAMESITE="Strict", SESSION_COOKIE_NAME="hsd_lan_" + secrets.token_hex(6),
                           PERMANENT_SESSION_LIFETIME=timedelta(hours=8), SESSION_REFRESH_EACH_REQUEST=False)
-    manager = JobManager(data_dir)
+    manager = JobManager(data_dir, settings_dir=settings_dir)
+    uploads = EmployeeUploads(data_dir) if lan else None
+    app.config["HSD_UPLOADS"] = uploads
+    app.config["HSD_ACTIVE_UPLOADS"] = 0
+    app.config["HSD_ACTIVE_DOWNLOADS"] = 0
+    app.config["HSD_STOPPING"] = False
     token = token or secrets.token_urlsafe(32)
     app.config["HSD_TOKEN"] = token
     app.config["HSD_MANAGER"] = manager
@@ -39,6 +45,39 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None):
         manifest = Path(sys.executable).parent / "构建校验.json"
         runtime["build_manifest_sha256"] = sha256(manifest) if manifest.is_file() else None
     dialog_lock = threading.Lock()
+
+    def employee_id():
+        if not lan:
+            return None
+        if not session.get("employee_id"):
+            session["employee_id"] = secrets.token_hex(16)
+            session.permanent = True
+        return session["employee_id"]
+
+    def public_job(identifier):
+        result = manager.snapshot(identifier)
+        if lan:
+            result.update(output_root="", output_target="处理完成后下载到你的电脑",
+                          output_dir="结果已就绪，可下载" if result["status"] == "done" else None)
+            roots = {str(manager.data_dir.resolve())}
+            with manager.lock:
+                job = manager._get(identifier)
+                roots.update(str(Path(job[key]).resolve()) for key in ("_work_dir", "_upload_dir", "_output_root") if job.get(key))
+            variants = set()
+            for root in roots:
+                variants.update((root, root.replace("\\", "/"), root.replace("\\", "\\\\")))
+            def redact(value):
+                if isinstance(value, str):
+                    for root in sorted(variants, key=len, reverse=True):
+                        value = value.replace(root, "任务文件")
+                    return value
+                if isinstance(value, list):
+                    return [redact(item) for item in value]
+                if isinstance(value, dict):
+                    return {key: redact(item) for key, item in value.items()}
+                return value
+            result = redact(result)
+        return result
 
     @app.before_request
     def guard_local():
@@ -53,11 +92,12 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None):
         if lan and port and request.host not in {f"{host}:{port}" for host in hosts}:
             return jsonify(error="不支持此访问地址。"), 403
         remote = bool(lan and not lan.is_host(request.remote_addr))
+        is_upload = request.endpoint == "upload_job"
         if request.method == "POST":
             origin = request.headers.get("Origin")
             if (origin and origin != request.host_url.rstrip("/")) or (remote and not origin):
                 return jsonify(error="请求来源不匹配。"), 403
-            if not request.is_json or not isinstance(request.get_json(silent=True), dict):
+            if not is_upload and (not request.is_json or not isinstance(request.get_json(silent=True), dict)):
                 return jsonify(error="请求必须使用 JSON 对象。"), 400
         if lan and request.endpoint == "lan_login":
             return None
@@ -68,15 +108,26 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None):
         if remote and (request.endpoint in {"pick", "open_output", "shutdown"}
                        or (request.endpoint == "save_ai_settings")):
             return jsonify(error="此操作只能在主机上完成。"), 403
+        if lan:
+            employee_id()
         if lan and (request.view_args or {}).get("identifier"):
             with manager.lock:
                 job = manager._get(request.view_args["identifier"])
-                lan.validate_paths({"workbook_path": job["_workbook_path"], "source_path": job["_source_path"],
-                                    "output_root": job["_output_root"]})
+                if job.get("_owner_id") != employee_id():
+                    raise KeyError("找不到此任务，请在上传时使用的浏览器中打开。")
+                if job.get("_upload_managed"):
+                    uploads.validate_job(job)
+                else:
+                    lan.validate_paths({"workbook_path": job["_workbook_path"], "source_path": job["_source_path"],
+                                        "output_root": job["_output_root"]})
         if request.method == "POST":
             provided = request.headers.get("X-HSD-Token", "")
-            if not secrets.compare_digest(provided, token):
+            if not secrets.compare_digest(provided.encode(), token.encode()):
                 return jsonify(error="会话已失效，请重新打开工具页面。"), 403
+        if is_upload:
+            request.max_content_length = MAX_UPLOAD_BYTES
+            request.max_form_memory_size = 512 * 1024
+            request.max_form_parts = 8
 
     @app.after_request
     def response_headers(response):
@@ -97,12 +148,22 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None):
     def conflict(exc):
         return jsonify(error=exc.description), 409
 
+    @app.errorhandler(RequestEntityTooLarge)
+    def too_large(exc):
+        return jsonify(error="上传超出容量：表格最大100MB，AI压缩包最大1900MB，每批合计不超过2GB。"), 413
+
+    @app.errorhandler(BadRequest)
+    def bad_request(exc):
+        return jsonify(error="文件上传中断或请求格式不完整，请重新上传。"), 400
+
     @app.errorhandler(KeyError)
     def missing(exc):
         return jsonify(error=str(exc.args[0])), 404
 
     @app.errorhandler(OSError)
     def file_error(exc):
+        if lan:
+            return jsonify(error="任务文件无法读取或写入，请重新上传；若仍失败，请联系主机管理员检查磁盘空间与权限。"), 400
         return jsonify(error=f"无法访问文件或文件夹：{exc}"), 400
 
     @app.get("/")
@@ -125,6 +186,7 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None):
         session.clear()
         session.permanent = True
         session["lan_authenticated"] = True
+        session["employee_id"] = secrets.token_hex(16)
         return jsonify(ok=True)
 
     @app.post("/api/lan/logout")
@@ -143,15 +205,18 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None):
         result = manager.config()
         if lan:
             result["access"] = {"lan": True, "remote": not lan.is_host(request.remote_addr),
-                                "input_root": str(lan.input_root), "output_root": str(lan.output_root)}
+                                "upload": True, "upload_limits": {"workbook_bytes": MAX_WORKBOOK_BYTES,
+                                "source_bytes": MAX_SOURCE_BYTES, "total_bytes": MAX_UPLOAD_BYTES}}
             if lan.is_host(request.remote_addr):
                 result["access"]["code"] = lan.code
-            for key in ("last_workbook", "last_source"):
-                if result.get(key) and not Path(result[key]).resolve().is_relative_to(lan.input_root):
-                    result[key] = ""
-            result["last_output"] = str(lan.output_root)
+            for key in ("last_workbook", "last_source", "last_output"):
+                result[key] = ""
+            result["last_start"] = 1
             with manager.lock:
-                result["active_job_id"] = next(reversed(manager.jobs), None)
+                own_jobs = [job for job in manager.jobs.values() if job.get("_owner_id") == employee_id()]
+                result["active_job_id"] = own_jobs[-1]["id"] if own_jobs else None
+                if own_jobs:
+                    result["last_start"] = own_jobs[-1]["start_number"]
         return jsonify(result)
 
     @app.get("/api/ai/settings")
@@ -164,13 +229,15 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None):
     @app.post("/api/ai/settings")
     def save_ai_settings():
         with manager.lock:
-            if any(j["status"] in {"importing", "matching", "ai_review", "exporting"} for j in manager.jobs.values()):
+            if any(j["status"] in {"queued", "importing", "matching", "ai_review", "exporting"} for j in manager.jobs.values()):
                 raise ValueError("当前任务正在处理，请完成后再修改AI设置。")
             manager.ai_settings.save(request.get_json())
         return jsonify(manager.ai_config())
 
     @app.get("/api/ai/usage")
     def ai_usage():
+        if lan and not lan.is_host(request.remote_addr):
+            return jsonify(error="累计费用仅在主机查看；本批用量可在结果摘要查看。"), 403
         return jsonify(manager.ai_usage.snapshot())
 
     @app.post("/api/jobs/<identifier>/ai-review")
@@ -207,12 +274,42 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None):
     def create_job():
         payload = request.get_json()
         if lan:
+            if not lan.is_host(request.remote_addr):
+                return jsonify(error="请直接上传本机的表格和 AI 压缩包。"), 403
             payload = lan.validate_paths(payload)
+        if lan:
+            return jsonify(id=manager.create(payload, owner_id=employee_id()))
         return jsonify(id=manager.create(payload))
+
+    @app.post("/api/jobs/upload")
+    def upload_job():
+        if not lan:
+            raise KeyError("员工上传需要开启局域网模式。")
+        if request.mimetype != "multipart/form-data":
+            raise ValueError("请使用文件上传表单提交表格和压缩包。")
+        directory = None
+        committed = False
+        with manager.lock:
+            if app.config["HSD_STOPPING"]:
+                raise Conflict("主机正在退出，请稍后重新打开员工入口。")
+            app.config["HSD_ACTIVE_UPLOADS"] += 1
+        try:
+            directory, payload, names = uploads.receive(request.files, request.form)
+            with manager.lock:
+                identifier = manager.create(payload, owner_id=employee_id(), downloadable=True, display_names=names)
+                job = manager._get(identifier)
+                job.update(_upload_managed=True, _upload_dir=str(directory))
+                committed = True
+            return jsonify(id=identifier)
+        finally:
+            with manager.lock:
+                app.config["HSD_ACTIVE_UPLOADS"] -= 1
+            if directory is not None and not committed:
+                uploads.discard(directory)
 
     @app.get("/api/jobs/<identifier>")
     def read_job(identifier):
-        return jsonify(manager.snapshot(identifier))
+        return jsonify(public_job(identifier))
 
     @app.post("/api/jobs/<identifier>/resolve")
     def resolve(identifier):
@@ -222,7 +319,8 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None):
             raise ValueError("恢复操作参数无效。")
         with manager.lock:
             check_revision(identifier, payload)
-            return jsonify(manager.resolve(identifier, payload.get("row_id"), payload.get("file_id"), revert=revert))
+            manager.resolve(identifier, payload.get("row_id"), payload.get("file_id"), revert=revert)
+            return jsonify(public_job(identifier))
 
     @app.post("/api/jobs/<identifier>/export")
     def export(identifier):
@@ -236,7 +334,11 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None):
     def undo(identifier):
         with manager.lock:
             check_revision(identifier, request.get_json())
-            return jsonify(manager.undo(identifier))
+            result = manager.undo(identifier)
+            public = public_job(identifier)
+            if result.get("last_undone_row_id"):
+                public["last_undone_row_id"] = result["last_undone_row_id"]
+            return jsonify(public)
 
     def check_revision(identifier, payload):
         expected = payload.get("expected_revision")
@@ -253,7 +355,25 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None):
             raise ValueError("不支持的图片尺寸。")
         path, digest = manager.image_asset(identifier, kind, item_id, thumbnail=variant == "thumb")
         response = send_file(path, etag=digest, conditional=True, max_age=86400)
-        response.headers["Cache-Control"] = "private, max-age=86400, immutable"
+        response.headers["Cache-Control"] = "private, no-cache, must-revalidate" if lan else "private, max-age=86400, immutable"
+        return response
+
+    @app.get("/api/jobs/<identifier>/download")
+    def download(identifier):
+        if not lan:
+            raise KeyError("此任务不提供浏览器下载。")
+        path, digest = manager.download_asset(identifier)
+        with manager.lock:
+            if app.config["HSD_STOPPING"]:
+                raise Conflict("主机正在退出，请稍后再下载。")
+            response = send_file(path, as_attachment=True, download_name="HSD编号结果.zip", etag=digest, conditional=True)
+            app.config["HSD_ACTIVE_DOWNLOADS"] += 1
+        response.direct_passthrough = False
+        @response.call_on_close
+        def download_finished():
+            with manager.lock:
+                app.config["HSD_ACTIVE_DOWNLOADS"] -= 1
+        response.headers["Cache-Control"] = "private, no-store"
         return response
 
     @app.post("/api/jobs/<identifier>/open-output")
@@ -268,8 +388,11 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None):
     @app.post("/api/shutdown")
     def shutdown():
         with manager.lock:
-            if any(j["status"] in {"importing", "matching", "ai_review", "exporting"} for j in manager.jobs.values()):
+            if app.config["HSD_ACTIVE_UPLOADS"] or app.config["HSD_ACTIVE_DOWNLOADS"]:
+                raise ValueError("员工正在上传或下载文件，请传输完成后再退出。")
+            if any(j["status"] in {"queued", "importing", "matching", "ai_review", "exporting"} for j in manager.jobs.values()):
                 raise ValueError("任务正在处理，请完成后再退出工具。")
+            app.config["HSD_STOPPING"] = True
         callback = app.config.get("HSD_SHUTDOWN")
         if callback:
             threading.Timer(0.3, callback).start()

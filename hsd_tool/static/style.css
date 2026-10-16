@@ -46,6 +46,20 @@
 .ai-job-overview{border:1px solid #e0e8f5;background:#f5f8fe;border-radius:9px;padding:12px 16px;margin-bottom:17px;display:flex;align-items:center;justify-content:space-between;gap:16px;text-align:left}.ai-job-overview strong{font-size:11px;color:#6680a8;font-weight:600}.ai-job-overview p{font-size:10px;color:#8f9eb4;line-height:1.8;margin-top:5px}.ai-job-overview p.ai-job-cost{font-size:9px;color:#a1adbf;margin-top:4px}.ai-job-overview .button{font-size:10px;padding:8px 12px;min-height:33px}.ai-check-details{margin-top:8px;padding-top:7px;border-top:1px solid #e3eaf5}.ai-check-details summary{font-size:9px;color:#8b9dbc;cursor:pointer}.ai-check-details ul{font-size:9px;line-height:1.9;color:#8d9fb9;margin:7px 0 0;padding-left:15px}.ai-row-note .text-button{font-size:9px;margin:6px 0 0;padding:2px 0}.ai-row-note p{margin-top:4px}#summary-view .done-stats{grid-template-columns:repeat(5,1fr)}#summary-view .done-stat span{font-size:10px}#summary-view .done-actions{flex-wrap:wrap}#summary-view .done-card{max-width:780px;padding:30px 38px}.header-tools{gap:11px}.brand{min-width:210px}#done-ai-overview{margin:18px 0 0}.local-badge{font-size:10px;padding:6px 8px}.ai-settings-dialog #ai-api-key:disabled{background:#f6f8fb}.ai-settings-dialog .ai-settings-intro{white-space:normal}.ai-settings-dialog .ai-enable-row small{white-space:normal}.ai-settings-dialog form>p{white-space:normal}@media(max-width:1150px){.header-tools .local-badge{display:none}.brand{min-width:190px}.ai-job-overview{padding:10px 13px;gap:10px}}@media(max-width:730px){.brand{min-width:0}.header-tools{top:23px}.ai-job-overview{flex-direction:column;align-items:stretch;gap:10px}.ai-job-overview .button{align-self:flex-start}#summary-view .done-stats{grid-template-columns:repeat(3,1fr);row-gap:20px}#summary-view .done-stat:nth-child(3){border-right:0}#summary-view .done-card{padding:27px 22px}.ai-settings-button{font-size:9px;padding:6px 7px}.shutdown-button{font-size:9px}}
 .ai-row-note .ai-gate-note{color:#a48249;background:#fffaef;border-radius:4px;padding:5px 7px}
 
+/* Employees select their own files; no host filesystem paths are required. */
+.upload-fields{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.upload-fields>.field-hint{grid-column:1/-1;margin:0;line-height:1.8}
+.upload-field{min-width:0;margin:18px 0 0;padding:16px;border:1px dashed #cbd8ed;border-radius:9px;background:#f8faff}
+.upload-field input[type=file]{display:block;max-width:100%;width:100%;font:inherit;font-size:11px;color:#617794;padding:8px 0;cursor:pointer}
+.upload-field input[type=file]::file-selector-button{font:inherit;border:1px solid #d7e1f0;border-radius:6px;background:#fff;color:#526e99;padding:8px 10px;margin-right:9px;cursor:pointer}
+.upload-file-name{font-size:10px;line-height:1.8;color:#8a99ae;overflow-wrap:anywhere;margin-top:5px}
+.upload-progress{border:1px solid #dce6f6;border-radius:8px;background:#f4f8ff;padding:13px 15px;margin-top:20px}
+.upload-progress-caption{display:flex;justify-content:space-between;gap:12px;font-size:11px;color:#627fa9}
+.upload-progress-caption strong{font-weight:500}
+.upload-progress .progress-track{margin:11px 0 8px;height:6px}
+.upload-progress p{font-size:10px;line-height:1.8;color:#8a9db7}
+@media(max-width:730px){.upload-fields{grid-template-columns:1fr;gap:0}.upload-fields>.field-hint{margin-top:12px}.upload-field{padding:13px}}
+
 /* Keep review actions in their own visible footer, outside scrolling evidence. */
 .review-panel{display:flex;flex-direction:column;height:var(--review-panel-height,60vh);min-height:0;max-height:none;overflow:hidden;padding:16px}
 .review-panel .panel-heading{flex:0 0 auto;margin-bottom:10px}
