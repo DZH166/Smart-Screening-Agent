@@ -154,6 +154,11 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
         if remote and (request.endpoint in {"pick", "open_output", "shutdown"}
                        or (request.endpoint == "save_ai_settings")):
             return jsonify(error="此操作只能在主机上完成。"), 403
+        protected_static = (request.endpoint == "static" and
+            Path(str((request.view_args or {}).get("filename", "")).replace("\\", "/")).name.split(":", 1)[0].rstrip(" .").casefold()
+            in {"admin.html", "admin.js", "admin.css"})
+        if remote and (request.path == "/admin" or request.path.startswith("/api/admin/") or protected_static):
+            return jsonify(error="管理员分区只能在主机上打开。"), 403
         if lan:
             employee_id()
         if lan and (request.view_args or {}).get("identifier"):
@@ -234,6 +239,41 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
         html = (static / "index.html").read_text("utf-8")
         access = {"lan": bool(lan), "remote": bool(lan and not lan.is_host(request.remote_addr))}
         return html.replace("__HSD_TOKEN__", json.dumps(token)).replace("__HSD_ACCESS__", json.dumps(access))
+
+    @app.get("/admin")
+    def admin_page():
+        return (static / "admin.html").read_text("utf-8").replace("__HSD_TOKEN__", json.dumps(token))
+
+    @app.get("/api/admin/overview")
+    def admin_overview():
+        return jsonify(settings=manager.ai_config(), pool=manager.ai_key_pool.snapshot(),
+                       usage=manager.ai_usage.snapshot(), debug=manager.ai_debug.snapshot())
+
+    @app.get("/api/admin/debug")
+    def admin_debug():
+        if set(request.args) - {"after", "limit"}:
+            raise ValueError("调试查询参数无效。")
+        try:
+            if any(len(request.args.getlist(key)) != 1 for key in request.args):
+                raise ValueError()
+            after, limit = int(request.args.get("after", "0")), int(request.args.get("limit", "100"))
+        except (TypeError, ValueError):
+            raise ValueError("调试记录游标或条数无效。") from None
+        return jsonify(manager.ai_debug.snapshot(after, limit))
+
+    @app.post("/api/admin/keys")
+    def admin_keys():
+        with manager.lock:
+            if any(job["status"] in {"queued", "importing", "matching", "ai_review", "exporting"}
+                   for job in manager.jobs.values()):
+                raise ValueError("当前任务正在处理，请完成后再修改 Key。")
+            payload = request.get_json()
+            if type(payload.get("expected_revision")) is not int:
+                raise ValueError("请先读取当前 Key 配置后再保存。")
+            if payload["expected_revision"] != manager.ai_settings.snapshot()["key_revision"]:
+                raise Conflict("Key 配置已在其他页面更新，请重新读取后再保存。")
+            manager.ai_settings.save_pool(payload)
+        return jsonify(settings=manager.ai_config(), pool=manager.ai_key_pool.snapshot())
 
     @app.post("/api/lan/login")
     def lan_login():

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light">
+  <title>DeepSeek 管理 · HSD 图号助手</title>
+  <link rel="stylesheet" href="/static/admin.css">
+  <script>window.HSD_TOKEN = __HSD_TOKEN__;</script>
+  <script src="/static/admin.js" defer></script>
+</head>
+<body>
+  <div class="admin-shell">
+    <header class="admin-header"><div><a class="back-link" href="/">← 返回图片编号</a><h1>DeepSeek 管理</h1></div><button id="admin-refresh" class="button secondary" type="button">重新读取</button></header>
+    <div id="admin-message" class="notice hidden" role="status" aria-live="polite"></div>
+    <main>
+      <section class="panel settings-panel" aria-labelledby="settings-heading">
+        <div class="section-heading"><div><h2 id="settings-heading">复核设置</h2><p id="model-label">正在读取设置…</p></div><form id="enable-form"><label class="enable-control"><input id="ai-enabled" type="checkbox" disabled><span>启用 DeepSeek 复核</span></label><button id="enable-save" class="button secondary" type="submit" disabled>保存开关</button></form></div>
+        <p id="settings-state" class="state-line">正在读取密钥状态…</p>
+        <div id="storage-warning" class="notice warning hidden" role="alert"></div>
+        <details class="details"><summary>发送范围与自动通过资格</summary><div class="detail-body"><p>仅对符合现有规则的疑难项发送表格图片、候选预览及完整分段。原始 XLSX、ZIP、AI 文件和本机路径不会发送。</p><p id="qualification-state">正在读取资格状态…</p><p>多个 Key 用于管理与可用性，不会增加官方账号限流额度。限流时按服务端冷却等待。</p><p id="persistence-state"></p></div></details>
+      </section>
+      <section class="panel keys-panel" aria-labelledby="keys-heading">
+        <div class="section-heading"><div><h2 id="keys-heading">API Key 管理 <span id="key-count" class="count"></span></h2><p>密钥保存在主机，员工继续共用，无需重新配置。</p></div></div>
+        <form id="key-add-form" class="add-form" autocomplete="off">
+          <label for="key-batch">批量添加 Key</label><textarea id="key-batch" rows="3" autocomplete="off" spellcheck="false" autocapitalize="off" aria-describedby="batch-help" placeholder="每行粘贴一个 API Key" disabled></textarea><div class="add-actions"><p id="batch-help">一次最多 100 个；提交即清空，不回显密钥或尾号。</p><button id="key-add" class="button primary" type="submit" disabled>添加 Key</button></div>
+        </form>
+        <p class="muted">认证失败或余额不足的 Key 会暂停使用；修复后可先停用、再启用恢复尝试。保存成功不代表接口验证成功。</p>
+        <div id="key-list" class="key-list" aria-live="polite"><p class="empty">正在读取密钥…</p></div>
+      </section>
+      <section class="panel debug-panel" aria-labelledby="debug-heading">
+        <div class="section-heading"><div><h2 id="debug-heading">实时调试</h2><p id="debug-connection" role="status">正在连接…</p></div><label class="check-control"><input id="debug-follow" type="checkbox" checked>跟随最新记录</label></div>
+        <p class="debug-help">展示准备、调用、重试、返回和校验过程及脱敏结果；不展示模型隐藏思维、原始请求或业务图片。无任务时会等待新记录。</p>
+        <div id="debug-gap" class="notice warning hidden" role="status"></div>
+        <div id="debug-active" class="active-list" aria-live="polite"></div>
+        <div id="debug-log" class="debug-log" tabindex="0" aria-label="DeepSeek 调试记录"><p id="debug-empty" class="empty">暂时没有调试记录。</p><ol id="debug-events" class="events"></ol></div>
+      </section>
+      <section class="panel usage-panel" aria-labelledby="usage-heading"><div class="section-heading"><div><h2 id="usage-heading">累计用量与费用估算</h2><p id="usage-counts">正在读取用量…</p></div><strong id="usage-cost">费用估算暂不可用</strong></div><p id="usage-unknown" class="warning-text hidden"></p><p class="muted">按已知用量与峰值单价估算，单位 USD；实际费用以 DeepSeek 账单为准。未知用量不计为零。</p></section>
+    </main>
+  </div>
+</body>
+</html>

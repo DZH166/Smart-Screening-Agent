@@ -28,9 +28,20 @@ def _sources_unchanged(case, files, digest):
 
 
 def review_job(manager, identifier):
+    started = time.perf_counter()
+    try:
+        return _review_job(manager, identifier)
+    finally:
+        manager.ai_debug.emit("run_finished", job_id=identifier,
+                             elapsed_ms=int((time.perf_counter()-started)*1000))
+
+
+def _review_job(manager, identifier):
     from .service import sha256
     job = manager.jobs[identifier]
     started = time.perf_counter()
+    trace = lambda stage, **values: manager.ai_debug.emit(stage, job_id=identifier, **values)
+    trace("run_started")
     runtime = manager.ai_settings.runtime()
     prior = job.get("ai_review", {})
     usage = dict(prior.get("usage") or empty_usage())
@@ -48,16 +59,19 @@ def review_job(manager, identifier):
         if case["eligible"]:
             cases.append((row, case))
         elif row["status"] == "review":
+            trace("ineligible", row_id=row["id"], reason_code=case["reason_code"])
             with manager.lock:
                 row["ai_review"] = {"outcome": "skipped", "reason_code": case["reason_code"], "reason": case["reason"]}
                 summary["skipped"] += 1
     with manager.lock:
         summary["eligible"] = len(cases)
     if not runtime["enabled"] or not runtime["api_key"]:
+        trace("disabled")
         with manager.lock:
             summary.update(message="AI复核未启用；可在设置中填写密钥后运行。", unresolved=len(cases))
         return
     if not cases:
+        trace("no_cases")
         with manager.lock:
             summary["message"] = "没有适合AI复核的疑难项；原有可靠匹配可直接导出。"
         return
@@ -92,11 +106,13 @@ def review_job(manager, identifier):
                     job["warnings"].append(warning)
 
     checkpoint()
-    client = DeepSeekClient(runtime["api_key"])
+    from .ai_dispatch import ManagedReviewClient
+    client = ManagedReviewClient(manager, DeepSeekClient, identifier)
     stop_code = None
     for index, (row, original_case) in enumerate(cases, 1):
         manager._progress(identifier, f"DeepSeek正在复核 {index}/{len(cases)} 张疑难图片…", index - 1, len(cases))
         if stop_code:
+            trace("skipped", row_id=row["id"], error_code=stop_code)
             with manager.lock:
                 row["ai_review"] = {"outcome": "skipped", "reason_code": stop_code,
                                     "reason": "接口暂不可用，已保留人工审核。"}
@@ -106,18 +122,20 @@ def review_job(manager, identifier):
             continue
         result = None
         try:
+            trace("preparing", row_id=row["id"], candidate_count=len(original_case["candidate_ids"]))
             if ValidationRegistry._implementation() != artifact["implementation_sha256"]:
                 raise ReviewError("implementation_changed", "复核实现已更新，请重新启动工具后导入。")
             case = select_review_case(row, job["rows"], job["files"])
             if not case["eligible"] or case["fingerprint"] != original_case["fingerprint"] or not _sources_unchanged(case, job["files"], sha256):
                 raise ReviewError("source_changed", "原文件或预览已变化，仍需重新导入核对。")
-            result = client.review(prepare_content(case, row, job["files"]))
+            result = client.review(prepare_content(case, row, job["files"]), row_id=row["id"])
             with manager.lock:
                 merge_usage(usage, result["usage"])
             manager.ai_usage.add(result["usage"])
             # Envelope fields come from local content and actual API metadata,
             # not from the model's text. Rebuild the content-bound case after IO.
             envelope = {"model": result["model"], "case_fingerprint": case["fingerprint"], "decision": result["decision"]}
+            trace("verifying", row_id=row["id"])
             fresh = select_review_case(row, job["rows"], job["files"])
             case_still_valid = (fresh.get("eligible") and fresh.get("fingerprint") == case["fingerprint"]
                                 and ValidationRegistry._implementation() == artifact["implementation_sha256"]
@@ -126,6 +144,10 @@ def review_job(manager, identifier):
                 fresh = {"eligible": False, "reason_code": "source_changed", "reason": "复核期间原稿发生变化，请重新导入。"}
             verdict = evaluate_suggestion(fresh, envelope, manager.ai_validation.load())
             decision = result["decision"]
+            trace("auto" if verdict["accepted"] else "manual", row_id=row["id"],
+                  verdict=decision["verdict"], candidate_id=decision.get("candidate_id"),
+                  reason_code=verdict.get("reason_code"),
+                  gate_failures=[item["code"] for item in verdict.get("failed_checks", [])])
             with manager.lock:
                 summary["reviewed"] += 1
                 summary["suggested_same"] += decision["verdict"] == "same"
@@ -149,6 +171,7 @@ def review_job(manager, identifier):
                     observations[index - 1].update(error="case_invalidated_after_request",
                                                     validation_eligible=False)
         except ReviewError as error:
+            trace("failed", row_id=row["id"], error_code=error.code)
             if result is None:
                 with manager.lock:
                     merge_usage(usage, error.usage)
@@ -157,9 +180,10 @@ def review_job(manager, identifier):
                 row["ai_review"] = {"outcome": "error", "reason_code": error.code, "reason": error.message}
                 observations[index - 1] = {"case_id": row["id"], "case_fingerprint": original_case["fingerprint"],
                     "source": "deepseek_live", "error": error.code, "usage": error.usage}
-            if error.code in {"authentication", "insufficient_balance", "rate_limit", "network_error", "provider_error", "request_rejected", "redirect_blocked", "implementation_changed"}:
+            if error.code in {"authentication", "insufficient_balance", "rate_limit", "network_error", "provider_error", "request_rejected", "redirect_blocked", "implementation_changed", "pool_unavailable", "not_configured"}:
                 stop_code = error.code
         except Exception:
+            trace("failed", row_id=row["id"], error_code="review_unavailable")
             # Never serialize exception text: it may include private paths or
             # provider request data. A local failure affects this row only.
             with manager.lock:

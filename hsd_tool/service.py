@@ -66,6 +66,10 @@ class JobManager:
         from .ai_registry import ValidationRegistry
         self.ai_usage = UsageLedger(shared_settings)
         self.ai_validation = ValidationRegistry(shared_settings)
+        from .ai_admin import AiDebugTrace
+        self.ai_debug = AiDebugTrace()
+        from .ai_key_pool import ApiKeyPool
+        self.ai_key_pool = ApiKeyPool(self.ai_settings)
         self.cleanup_cache()
 
     def cleanup_cache(self):

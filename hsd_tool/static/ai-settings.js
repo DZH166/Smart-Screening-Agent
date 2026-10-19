@@ -4,28 +4,27 @@
   const $ = (id) => document.getElementById(id);
   const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   let settings = null;
-  let saving = false;
   let loading = false;
 
-  async function request(path, payload) {
+  async function refresh() {
+    if (loading) return settings;
+    loading = true;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 20000);
     try {
-      const response = await fetch(path, {
-        method: payload === undefined ? 'GET' : 'POST',
-        headers: payload === undefined ? {} : {'Content-Type':'application/json','X-HSD-Token':window.HSD_TOKEN || ''},
-        body: payload === undefined ? undefined : JSON.stringify(payload),
-        cache: 'no-store', signal: controller.signal,
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || '设置服务暂不可用。');
-      return result;
-    } catch (error) {
-      if (error.name === 'AbortError') throw new Error('读取超时，请确认本机工具仍在运行。');
-      if (error instanceof TypeError) throw new Error('暂时无法连接本机工具。');
-      throw error;
-    } finally { clearTimeout(timer); }
+      const response = await fetch('/api/ai/settings', {cache:'no-store',signal:controller.signal});
+      if (!response.ok) return settings;
+      settings = await response.json();
+      const active = !!settings.enabled && !!settings.configured;
+      $('processing-mode-label').textContent = active ? '本机匹配 + AI 复核' : '本机匹配';
+      $('import-processing-note').textContent = active ? '已启用 DeepSeek 预览复核' : '本机匹配，原文件保留';
+      document.dispatchEvent(new CustomEvent('hsd-ai-settings-updated', {detail:settings}));
+    } catch (_) { /* Keep employee workflow usable when settings cannot be read. */ }
+    finally { clearTimeout(timer); loading = false; }
+    return settings;
   }
+
+  function open() { if (!window.HSD_ACCESS?.remote) window.location.assign('/admin'); }
 
   function usageText(usage) {
     if (!usage) return {cost:'费用估算暂不可用', unknown:'', counts:'用量记录暂不可用'};
@@ -40,93 +39,6 @@
       unknown: unknown > 0 ? `另有 ${unknown} 次用量未知，费用统计不完整。` : incomplete ? '部分用量尚未返回，费用统计不完整。' : '',
       counts: `累计 ${requests} 次请求 · 成功 ${Number(usage.successes || 0)} 次 · 未成功 ${Number(usage.failures || 0)} 次`,
     };
-  }
-
-  function controls() {
-    const locked = loading || saving || !settings;
-    ['ai-enabled','ai-api-key','ai-clear-key','ai-settings-save'].forEach((id) => $(id).disabled = locked);
-    $('ai-api-key').disabled = locked || $('ai-clear-key').checked;
-    $('ai-settings-reload').disabled = loading || saving;
-    $('ai-settings-save').textContent = saving ? '正在保存…' : '保存设置';
-  }
-
-  function updateSettings(value) {
-    settings = value;
-    $('ai-enabled').checked = !!value.enabled;
-    $('ai-clear-key').checked = false;
-    $('ai-api-key').value = '';
-    $('ai-key-status').textContent = value.configured ? '已配置（不回显）' : '尚未配置';
-    $('ai-api-key').placeholder = value.configured ? '留空保留现有密钥；粘贴可更换' : '粘贴 DeepSeek API Key';
-    const environmentKey = /env/i.test(String(value.key_source || ''));
-    $('ai-key-hint').textContent = environmentKey ? '当前密钥来自环境变量；清除本机保存的密钥不会删除环境变量。' : value.configured ? '留空保存不会更改已有密钥。保存与关闭窗口时，输入内容都会清空。' : '仅保存到本机设置服务，不在页面、日志或结果文件中显示。';
-    $('ai-model-label').textContent = `模型：${value.model || 'deepseek-flash'}`;
-    $('ai-mode-note').textContent = value.mode === 'validated' ? '已进入经验证模式：仅满足全部条件的复核结果可自动通过，其余仍需人工确认。' : '验证未完成，AI 先给出复核建议，仍需人工确认。';
-    const active = !!value.enabled && !!value.configured;
-    $('processing-mode-label').textContent = active ? '本机匹配 + AI 复核' : '本机匹配';
-    $('import-processing-note').textContent = active ? '已启用 DeepSeek 预览复核' : '本机匹配，原文件保留';
-    document.dispatchEvent(new CustomEvent('hsd-ai-settings-updated', {detail:value}));
-    controls();
-  }
-
-  function message(text, error = false) {
-    $('ai-settings-message').textContent = text;
-    $('ai-settings-message').classList.toggle('hidden', !text);
-    $('ai-settings-message').classList.toggle('error', error);
-  }
-
-  async function refreshUsage() {
-    $('ai-usage-refresh').disabled = true;
-    try {
-      const usage = await request('/api/ai/usage');
-      const text = usageText(usage);
-      $('ai-usage-counts').textContent = text.counts;
-      $('ai-usage-cost').textContent = text.cost;
-      $('ai-usage-unknown').textContent = text.unknown;
-      $('ai-usage-unknown').classList.toggle('hidden', !text.unknown);
-    } catch (_) {
-      $('ai-usage-counts').textContent = '暂时无法读取调用记录，可稍后刷新。';
-      $('ai-usage-cost').textContent = '费用估算暂不可用';
-      $('ai-usage-unknown').classList.add('hidden');
-    } finally { $('ai-usage-refresh').disabled = false; }
-  }
-
-  async function refresh(visible = false) {
-    if (loading || saving) return settings;
-    loading = true; controls();
-    if (visible) message('');
-    try { updateSettings(await request('/api/ai/settings')); }
-    catch (_) { if (visible) message('暂时无法读取 AI 设置，请确认程序仍在运行后重新读取。', true); }
-    finally { loading = false; controls(); }
-    return settings;
-  }
-
-  async function open() {
-    $('ai-api-key').value = '';
-    $('ai-clear-key').checked = false;
-    message('');
-    $('ai-settings-dialog').showModal();
-    await Promise.allSettled([refresh(true), refreshUsage()]);
-  }
-
-  async function save(event) {
-    event.preventDefault();
-    if (saving || loading || !settings) return;
-    const payload = {enabled:$('ai-enabled').checked};
-    if ($('ai-clear-key').checked) payload.clear_key = true;
-    else if ($('ai-api-key').value.trim()) payload.api_key = $('ai-api-key').value.trim();
-    // Credentials are cleared before awaiting the request, including every error path.
-    $('ai-api-key').value = '';
-    saving = true; controls(); message('');
-    try {
-      updateSettings(await request('/api/ai/settings', payload));
-      message(settings.enabled && !settings.configured ? '设置已保存，但尚无可用密钥；请填写密钥后启用复核。' : '设置已保存。密钥不会在界面中回显。');
-    } catch (_) {
-      message('设置未保存。请确认本机工具仍在运行，重新填写密钥后再试。', true);
-    } finally {
-      delete payload.api_key;
-      $('ai-api-key').value = '';
-      saving = false; controls();
-    }
   }
 
   function rowHtml(row, candidateName, selectedId) {
@@ -170,17 +82,9 @@
   }
 
   window.HSDAI = Object.freeze({open, refresh, usageText, rowHtml, getSettings:()=>settings});
-  if (window.HSD_ACCESS?.remote) {
-    $('ai-settings-button').classList.add('hidden');
-    refresh(false);
-    return;
-  }
-  $('ai-settings-button').addEventListener('click', open);
-  $('ai-settings-close').addEventListener('click', () => $('ai-settings-dialog').close());
-  $('ai-settings-dialog').addEventListener('close', () => { $('ai-api-key').value = ''; $('ai-clear-key').checked = false; });
-  $('ai-clear-key').addEventListener('change', () => { if ($('ai-clear-key').checked) $('ai-api-key').value = ''; controls(); });
-  $('ai-settings-form').addEventListener('submit', save);
-  $('ai-settings-reload').addEventListener('click', () => refresh(true));
-  $('ai-usage-refresh').addEventListener('click', refreshUsage);
-  refresh(false);
+  if (window.HSD_ACCESS?.remote) $('ai-settings-button').classList.add('hidden');
+  else $('ai-settings-button').addEventListener('click', open);
+  // A return from the separate admin page refreshes the employee-mode hint.
+  window.addEventListener?.('pageshow', () => refresh());
+  refresh();
 })();
