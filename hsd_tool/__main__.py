@@ -43,6 +43,7 @@ def main():
     parser.add_argument("--settings-dir", type=Path, help="复用主机的 DeepSeek 加密设置与用量目录")
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--lan", help="显式开启局域网测试，例：192.168.0.160/24")
+    parser.add_argument("--lan-code", help="局域网上传访问码，默认 HSD")
     parser.add_argument("--gateway", action="store_true", help="作为内网 AI 网关运行，Key 只保存在本机")
     parser.add_argument("--gateway-bind", help="网关监听的本机内网 IPv4 地址")
     parser.add_argument("--lan-input-root", type=Path, help="允许远程测试使用的主机素材目录")
@@ -80,7 +81,7 @@ def main():
             parser.error("局域网测试需要指定 --lan-input-root 和 --lan-output-root。")
         from .lan import LanAccess
         try:
-            lan = LanAccess(args.lan, args.lan_input_root, args.lan_output_root)
+            lan = LanAccess(args.lan, args.lan_input_root, args.lan_output_root, code=args.lan_code)
         except ValueError as exc:
             parser.error(str(exc))
     elif args.lan_input_root or args.lan_output_root:

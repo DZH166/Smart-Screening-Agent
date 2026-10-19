@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from hsd_tool.lan import LanAccess
+from hsd_tool.lan import DEFAULT_CODE, LanAccess
 from hsd_tool.server import create_app
 
 
@@ -20,6 +20,30 @@ def lan(tmp_path):
     inputs = tmp_path / "inputs"
     inputs.mkdir()
     return LanAccess(f"{HOST}/24", inputs, tmp_path / "outputs", code=ACCESS_CODE)
+
+
+def test_default_access_code_is_hsd(tmp_path):
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    lan = LanAccess(f"{HOST}/24", inputs, tmp_path / "outputs")
+    assert DEFAULT_CODE == "HSD" and lan.code == "HSD"
+    assert lan.login(REMOTE, "HSD") is True
+    assert lan.login(REMOTE, "hsd") is False
+
+
+@pytest.mark.parametrize("code", ["", "   ", "a b", "码", "x" * 65])
+def test_invalid_access_codes_are_rejected(tmp_path, code):
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    with pytest.raises(ValueError):
+        LanAccess(f"{HOST}/24", inputs, tmp_path / "outputs", code=code)
+
+
+def test_custom_access_code_is_trimmed(tmp_path):
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    lan = LanAccess(f"{HOST}/24", inputs, tmp_path / "outputs", code="  custom-1  ")
+    assert lan.code == "custom-1" and lan.login(REMOTE, "custom-1") is True
 
 
 @pytest.fixture

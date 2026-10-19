@@ -19,10 +19,13 @@ TOKEN = "synthetic-employee-token"
 
 
 def zip_bytes(parts):
+    """Deterministic archive bytes: a real clock would flake byte comparisons."""
     result = BytesIO()
     with zipfile.ZipFile(result, "w", zipfile.ZIP_DEFLATED) as archive:
         for name, data in parts.items():
-            archive.writestr(name, data)
+            info = zipfile.ZipInfo(name, date_time=(2026, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_DEFLATED
+            archive.writestr(info, data)
     return result.getvalue()
 
 

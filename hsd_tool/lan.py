@@ -8,6 +8,8 @@ import time
 from collections import defaultdict, deque
 from pathlib import Path
 
+DEFAULT_CODE = "HSD"
+
 
 class LanAccess:
     def __init__(self, interface: str, input_root: Path, output_root: Path, *, code: str | None = None):
@@ -29,9 +31,18 @@ class LanAccess:
         if self.output_root.is_relative_to(self.input_root):
             raise ValueError("局域网输出目录必须位于素材目录之外。")
         self.output_root.mkdir(parents=True, exist_ok=True)
-        self.code = code or secrets.token_urlsafe(12)
+        self.code = self._code(code if code is not None else DEFAULT_CODE)
         self._attempts = defaultdict(deque)
         self._lock = threading.Lock()
+
+    @staticmethod
+    def _code(value) -> str:
+        if not isinstance(value, str):
+            raise ValueError("局域网访问码格式不正确。")
+        value = value.strip()
+        if not 1 <= len(value) <= 64 or any(not 33 <= ord(character) <= 126 for character in value):
+            raise ValueError("局域网访问码只能是 1–64 位可见字符。")
+        return value
 
     def is_host(self, address: str | None) -> bool:
         return address in {self.host, "127.0.0.1", "::1"}
