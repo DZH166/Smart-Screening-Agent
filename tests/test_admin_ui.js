@@ -58,8 +58,9 @@ async function main(){
   ui.applySettings(json(initial));ui.state.pool={keys:[]};ui.renderKeys();
   assert.equal(element('settings-state').textContent,'已配置 Key。');
   const ledgerRow=ui.ledgerHtml({id:'ledger-a',label:'主密钥',api_key:'sk-ledger-visible-value'});
-  assert.ok(ledgerRow.includes('sk-ledger-visible-value'));
-  assert.ok(ledgerRow.includes('data-copy')&&ledgerRow.includes('data-ledger-id'));
+  assert.ok(ledgerRow.includes('data-value="sk-ledger-visible-value"'),'copy keeps the value');
+  assert.ok(!/>sk-ledger-visible-value</.test(ledgerRow),'the value stays masked until revealed');
+  assert.ok(ledgerRow.includes('data-reveal')&&ledgerRow.includes('data-copy'));
   assert.ok(!ledgerRow.includes('<script>'));
   element('debug-follow').checked=true;
   assert.equal(ui.processDebug({instance:'first',events:[{seq:1,stage:'requesting',message:'正在调用'}],cursor:1,last_seq:9,oldest_seq:1,dropped:0,active:[]}),true);

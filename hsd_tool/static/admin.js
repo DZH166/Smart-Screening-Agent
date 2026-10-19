@@ -113,8 +113,12 @@
     $('storage-warning').classList.toggle('hidden', !settings.storage_warning);
   }
 
+  function maskKey(value) {
+    return value ? '••••••••' : '';
+  }
+
   function ledgerHtml(key) {
-    return `<div class="ledger-row" data-ledger-id="${escapeHtml(key.id)}"><span class="ledger-label">${escapeHtml(key.label || '未命名')}</span><code class="ledger-key">${escapeHtml(key.api_key || '')}</code><span class="badge">${isEnvironment(key) ? '环境变量' : '主机保存'}</span><button type="button" class="button quiet" data-copy>复制</button></div>`;
+    return `<div class="ledger-row" data-ledger-id="${escapeHtml(key.id)}"><span class="ledger-label">${escapeHtml(key.label || '未命名')}</span><code class="ledger-key" data-value="${escapeHtml(key.api_key || '')}" data-shown="false">${escapeHtml(maskKey(key.api_key || ''))}</code><span class="badge">${isEnvironment(key) ? '环境变量' : '主机保存'}</span><button type="button" class="button quiet" data-reveal>显示</button><button type="button" class="button quiet" data-copy>复制</button></div>`;
   }
 
   async function loadLedger() {
@@ -134,18 +138,24 @@
     }
   }
 
-  async function copyLedgerKey(event) {
-    const button = event.target.closest('[data-copy]');
-    if (!button) return;
-    const code = button.closest('[data-ledger-id]')?.querySelector('.ledger-key');
+  function ledgerClick(event) {
+    const row = event.target.closest('[data-ledger-id]');
+    const code = row?.querySelector('.ledger-key');
     if (!code) return;
-    try {
-      await navigator.clipboard.writeText(code.textContent || '');
-      button.textContent = '已复制';
-    } catch (error) {
-      button.textContent = '复制失败';
+    if (event.target.closest('[data-reveal]')) {
+      const shown = code.dataset.shown === 'true';
+      code.textContent = shown ? maskKey(code.dataset.value) : (code.dataset.value || '');
+      code.dataset.shown = String(!shown);
+      event.target.closest('[data-reveal]').textContent = shown ? '显示' : '隐藏';
+      return;
     }
-    setTimeout(() => { button.textContent = '复制'; }, 1200);
+    if (event.target.closest('[data-copy]')) {
+      const button = event.target.closest('[data-copy]');
+      navigator.clipboard.writeText(code.dataset.value || '').then(() => {
+        button.textContent = '已复制';
+        setTimeout(() => { button.textContent = '复制'; }, 1200);
+      }).catch(() => { button.textContent = '复制失败'; });
+    }
   }
 
   function eventKeyLabel(event) {
@@ -303,7 +313,7 @@
 
   async function boot() {
     $('admin-refresh').addEventListener('click',()=>{refreshOverview(true);loadLedger();});
-    $('ledger-list').addEventListener('click',copyLedgerKey);
+    $('ledger-list').addEventListener('click',ledgerClick);
     $('key-add-form').addEventListener('submit',addKeys);
     $('enable-form').addEventListener('submit',saveEnabled);
     $('ai-enabled').addEventListener('change',()=>{state.enableDirty = true;});
