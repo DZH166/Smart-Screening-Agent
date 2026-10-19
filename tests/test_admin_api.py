@@ -26,14 +26,14 @@ ADMIN_GETS = ["/api/admin/overview", "/api/admin/debug", "/admin",
 
 
 def call(client, path, *, address=HOST, method="GET", token=TOKEN,
-         origin=ORIGIN, payload=None, headers=None):
+         origin=ORIGIN, payload=None, headers=None, admin=True):
     headers = dict(headers or {})
     if token is not None:
         headers["X-HSD-Token"] = token
     if origin is not None:
         headers["Origin"] = origin
     options = {"json": payload} if payload is not None else {}
-    if path == "/admin" or path.startswith("/api/admin/"):
+    if admin and (path == "/admin" or path.startswith("/api/admin/")):
         # The console password is covered by test_admin_login; these tests cover
         # the key-management boundaries behind it.
         with client.session_transaction() as stored:
@@ -61,20 +61,36 @@ def admin_app(tmp_path, monkeypatch):
     application.config["HSD_MANAGER"].close()
 
 
-@pytest.mark.parametrize("path", ADMIN_GETS)
-def test_unauthenticated_remote_cannot_read_admin(admin_app, path):
-    response = call(admin_app.test_client(), path, address=REMOTE)
+def test_remote_without_admin_login_only_gets_the_login_form(admin_app):
+    response = call(admin_app.test_client(), "/admin", address=REMOTE, admin=False)
+    assert response.status_code == 200
+    assert '<form id="login"' in response.get_data(as_text=True)
+    assert TOKEN not in response.get_data(as_text=True)
+
+
+@pytest.mark.parametrize("path", ["/api/admin/overview", "/api/admin/debug", "/api/admin/ledger"])
+def test_remote_admin_api_requires_login(admin_app, path):
+    response = call(admin_app.test_client(), path, address=REMOTE, admin=False)
     assert response.status_code == 401
     assert TOKEN not in response.get_data(as_text=True)
 
 
-@pytest.mark.parametrize("path", ADMIN_GETS)
-def test_authenticated_employee_cannot_read_admin(admin_app, path):
+def test_remote_admin_can_log_in_with_credentials(admin_app, monkeypatch):
+    monkeypatch.setattr(admin_auth, "verify_credentials",
+                        lambda username, password: (username, password) == ("15159156156", "stub"))
+    client = admin_app.test_client()
+    response = call(client, "/admin/login", address=REMOTE, method="POST", admin=False,
+                    payload={"username": "15159156156", "password": "stub"})
+    assert response.status_code == 200
+    assert call(client, "/api/admin/overview", address=REMOTE, admin=False).status_code == 200
+
+
+def test_employee_login_does_not_grant_admin(admin_app):
     client = admin_app.test_client()
     login(client)
-    response = call(client, path, address=REMOTE)
-    assert response.status_code == 403
-    assert TOKEN not in response.get_data(as_text=True)
+    page = call(client, "/admin", address=REMOTE, admin=False)
+    assert page.status_code == 200 and '<form id="login"' in page.get_data(as_text=True)
+    assert call(client, "/api/admin/overview", address=REMOTE, admin=False).status_code == 401
 
 
 @pytest.mark.parametrize("path", [
@@ -83,11 +99,12 @@ def test_authenticated_employee_cannot_read_admin(admin_app, path):
     "/static/%61dmin.js", "/static/%2e/admin.html",
     "/static/admin.js.", "/static/admin.js%20", "/static/admin.js::$DATA",
 ])
-def test_employee_cannot_read_windows_static_aliases(admin_app, path):
+def test_admin_static_aliases_never_expose_a_token(admin_app, path):
     client = admin_app.test_client()
     login(client)
-    response = call(client, path, address=REMOTE)
-    assert response.status_code == 403
+    response = call(client, path, address=REMOTE, admin=False)
+    assert response.status_code in {200, 404}
+    assert TOKEN not in response.get_data(as_text=True)
 
 
 @pytest.mark.parametrize("headers", [
@@ -97,19 +114,20 @@ def test_employee_cannot_read_windows_static_aliases(admin_app, path):
 def test_forwarding_headers_do_not_make_employee_an_admin(admin_app, headers):
     client = admin_app.test_client()
     login(client)
-    assert call(client, "/api/admin/overview", address=REMOTE,
-                headers=headers).status_code == 403
+    assert call(client, "/api/admin/overview", address=REMOTE, admin=False,
+                headers=headers).status_code == 401
 
 
-@pytest.mark.parametrize("logged_in,expected", [(False, 401), (True, 403)])
-def test_remote_cannot_write_admin_keys(admin_app, logged_in, expected):
+def test_remote_admin_write_requires_login(admin_app):
     client = admin_app.test_client()
-    if logged_in:
-        login(client)
-    result = call(client, "/api/admin/keys", address=REMOTE,
-                  method="POST", payload={"keys": [SECRET]})
-    assert result.status_code == expected
-    assert SECRET not in result.get_data(as_text=True)
+    denied = call(client, "/api/admin/keys", address=REMOTE, method="POST",
+                  payload={"keys": [SECRET]}, admin=False)
+    assert denied.status_code == 401
+    assert SECRET not in denied.get_data(as_text=True)
+    allowed = call(client, "/api/admin/keys", address=REMOTE, method="POST",
+                   payload={"keys": [SECRET]})
+    assert allowed.status_code == 400
+    assert SECRET not in allowed.get_data(as_text=True)
 
 
 @pytest.mark.parametrize("token,origin", [

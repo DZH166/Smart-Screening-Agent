@@ -150,20 +150,23 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
                 return jsonify(error="请求必须使用 JSON 对象。"), 400
         if lan and request.endpoint == "lan_login":
             return None
-        if remote and not session.get("lan_authenticated"):
+        admin_area = request.path == "/admin" or request.path.startswith("/api/admin/")
+        protected_static = (request.endpoint == "static" and
+            Path(str((request.view_args or {}).get("filename", "")).replace("\\", "/")).name.split(":", 1)[0].rstrip(" .").casefold()
+            in {"admin.html", "admin.js", "admin.css"})
+        # The admin area authenticates itself: an operator may open it from
+        # another computer on the LAN with the account/password, without the
+        # employee access code. Employee-only paths still require that code.
+        admin_entry = (admin_area or protected_static
+                       or request.endpoint in {"admin_login_page", "admin_login", "admin_logout"})
+        if remote and not session.get("lan_authenticated") and not admin_entry:
             if request.endpoint == "index" and request.method == "GET":
                 return (static / "lan-login.html").read_text("utf-8")
             return jsonify(error="请先输入局域网访问码。"), 401
         if remote and (request.endpoint in {"pick", "open_output", "shutdown"}
                        or (request.endpoint == "save_ai_settings")):
             return jsonify(error="此操作只能在主机上完成。"), 403
-        protected_static = (request.endpoint == "static" and
-            Path(str((request.view_args or {}).get("filename", "")).replace("\\", "/")).name.split(":", 1)[0].rstrip(" .").casefold()
-            in {"admin.html", "admin.js", "admin.css"})
-        if remote and (request.path == "/admin" or request.path.startswith("/api/admin/") or protected_static):
-            return jsonify(error="管理员分区只能在主机上打开。"), 403
-        if request.path == "/admin" or request.path.startswith("/api/admin/"):
-            # A password gate on top of the existing host-only and token checks.
+        if admin_area:
             if not admin_auth.authenticated(session):
                 if request.path.startswith("/api/admin/"):
                     return jsonify(error="请先登录管理员分区。"), 401

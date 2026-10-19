@@ -31,3 +31,4 @@ ai_observations_*.json
 instance.json
 /jobs/
 /task_records/
+tests/.admin-password
