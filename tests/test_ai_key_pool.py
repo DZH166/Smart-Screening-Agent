@@ -80,7 +80,7 @@ def test_disable_delete_and_global_disable_immediately_affect_acquire(tmp_path):
     assert pool.acquire()["id"] != first["id"]
     change(settings, remove=[first["id"]])
     assert first["id"] not in {row["id"] for row in pool.snapshot()["keys"]}
-    pool.report(first["id"], code="authentication")  # Removed in-flight result is ignored.
+    pool.report(first["id"], code="authentication")  # Totals remain; the removed Key is not restored.
     settings.save({"enabled": False})
     with pytest.raises(KeyPoolUnavailable) as error:
         pool.acquire()
@@ -152,3 +152,29 @@ def test_environment_key_disabled_persists_and_cannot_be_restarted_by_pool(tmp_p
     assert restored.snapshot()["keys"][0]["enabled"] is False
     with pytest.raises(KeyPoolUnavailable):
         ApiKeyPool(restored).acquire()
+
+
+def test_rate_limit_applies_to_all_keys_and_newly_added_keys_until_expiry(tmp_path):
+    settings, pool, now = prepared(tmp_path, 2)
+    first = pool.acquire()
+    pool.report(first["id"], code="rate_limit")
+    assert all(row["status"] == "cooldown" for row in pool.snapshot()["keys"])
+    change(settings, add=[{"api_key": "sk-new-key-not-an-account-limit-escape"}])
+    with pytest.raises(KeyPoolUnavailable):
+        pool.acquire(exclude_ids=[first["id"]])
+    now[0] += 60
+    assert pool.acquire()["id"] != first["id"]
+
+
+def test_removed_inflight_credential_is_not_resurrected_and_charges_still_count(tmp_path):
+    settings, pool, _ = prepared(tmp_path, 1)
+    admitted = pool.acquire()
+    change(settings, remove=[admitted["id"]])
+    usage = empty_usage()
+    usage.update(requests=1, successes=1, estimated_usd=.001, estimated_usd_upper_bound=.001)
+    pool.report(admitted["id"], usage=usage)
+    state = pool.snapshot()
+    assert state["key_count"] == 0 and state["keys"] == []
+    assert state["usage"]["requests"] == 1 and state["usage"]["estimated_usd"] == .001
+    with pytest.raises(KeyPoolUnavailable):
+        pool.acquire()

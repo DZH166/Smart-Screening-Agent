@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+from acceptance_records import read_export_record
 from io import BytesIO
 from pathlib import Path
 
@@ -105,7 +106,7 @@ try:
         time.sleep(0.5)
     assert result["status"] == "done", result.get("error")
     output = Path(result["output_dir"])
-    report = json.loads((output / "处理记录.json").read_text("utf-8"))
+    report = read_export_record(WORK / 'state', identifier)
     for mapping in report["mapping"]:
         digest = hashlib.sha256((output / "已编号AI" / mapping["output"]).read_bytes()).hexdigest()
         assert digest == mapping["sha256"]

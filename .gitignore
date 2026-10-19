@@ -30,3 +30,4 @@ ai_observations_*.json
 .ai-usage-*.tmp
 instance.json
 /jobs/
+/task_records/

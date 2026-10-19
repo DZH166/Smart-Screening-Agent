@@ -26,7 +26,7 @@ STAGES = {
 ERROR_CODES = {"authentication", "insufficient_balance", "rate_limit", "network_error", "provider_error",
                "request_rejected", "redirect_blocked", "implementation_changed", "source_changed",
                "invalid_response", "invalid_decision", "invalid_input", "not_configured", "pool_unavailable",
-               "review_unavailable", "validation_required", "case_invalidated_after_request"}
+               "review_unavailable", "validation_required", "case_invalidated_after_request", "stale_case"}
 SAFE_ID = re.compile(r"[A-Za-z0-9_-]{1,80}\Z")
 GATE_REASONS = {
     "validation_required": "未取得独立验证资格，仅供人工参考",

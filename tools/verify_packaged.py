@@ -8,6 +8,7 @@ import sys
 import time
 import urllib.request
 import zipfile
+from acceptance_records import read_export_record
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8790"
@@ -17,6 +18,7 @@ SAMPLE = Path(sys.argv[2] if len(sys.argv) > 2 else os.environ.get("HSD_SAMPLE_D
                                                                  str(ROOT / "测试样本")))
 WORK = Path(os.environ.get("HSD_VERIFY_WORK", str(ROOT / "tmp" / "packaged_validation")))
 WORK.mkdir(parents=True, exist_ok=True)
+DATA = Path(os.environ['HSD_VERIFY_DATA_DIR'])  # Explicit isolated instance; never search user settings.
 original = SAMPLE / (sys.argv[3] if len(sys.argv) > 3 else "10月表格.xlsx")
 ai_zip = SAMPLE / (sys.argv[4] if len(sys.argv) > 4 else "10.10.zip")
 assert original.is_file(), f"找不到图片编号表：{original}"
@@ -99,7 +101,7 @@ while time.monotonic() < deadline:
     time.sleep(0.5)
 assert result["status"] == "done", result.get("error")
 output = Path(result["output_dir"])
-report = json.loads((output / "处理记录.json").read_text("utf-8"))
+report = read_export_record(DATA, identifier)
 assert report["new_numbers"] == 2
 assert report["exported"] == job["stats"]["exportable"]
 assert report["pending"] == 60 - report["exported"]

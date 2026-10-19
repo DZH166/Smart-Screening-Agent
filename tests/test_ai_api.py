@@ -91,7 +91,7 @@ def test_export_uses_server_status_not_an_ai_suggestion(tmp_path):
         result = wait_export(manager)
         assert result["status"] == "done" and result["report"]["exported"] == 1
         assert result["report"]["new_numbers"] == 0
-        report = json.loads((Path(result["output_dir"]) / "处理记录.json").read_text("utf-8"))
+        report = json.loads((Path(job["_records_dir"]) / "处理记录.json").read_text("utf-8"))
         assert report["pending_rows"][0]["status"] == "review"
     finally:
         manager.close()

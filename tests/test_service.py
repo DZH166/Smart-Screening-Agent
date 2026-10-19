@@ -102,7 +102,7 @@ def test_non_destructive_export_and_pending_report(tmp_path):
         assert z.read("xl/media/preserve.bin") == b"picture-unchanged"
         sheet = z.read("xl/worksheets/sheet1.xml").decode()
         assert "HSD0001" in sheet and "HSD0002" not in sheet
-    report = json.loads((folder / "处理记录.json").read_text("utf-8"))
+    report = json.loads((Path(job["_records_dir"]) / "处理记录.json").read_text("utf-8"))
     assert report["exported"] == 2 and report["new_numbers"] == 1 and report["pending"] == 1
 
 

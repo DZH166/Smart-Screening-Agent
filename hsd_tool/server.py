@@ -175,6 +175,9 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
             provided = request.headers.get("X-HSD-Token", "")
             if not secrets.compare_digest(provided.encode(), token.encode()):
                 return jsonify(error="会话已失效，请重新打开工具页面。"), 403
+            with manager.lock:
+                if app.config["HSD_STOPPING"] and request.endpoint != "shutdown":
+                    raise Conflict("主机正在退出，请稍后重新打开员工入口。")
         if is_upload:
             request._hsd_upload_unlimited = True
             request.max_content_length = None
@@ -264,8 +267,7 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
     @app.post("/api/admin/keys")
     def admin_keys():
         with manager.lock:
-            if any(job["status"] in {"queued", "importing", "matching", "ai_review", "exporting"}
-                   for job in manager.jobs.values()):
+            if manager.has_active_operations():
                 raise ValueError("当前任务正在处理，请完成后再修改 Key。")
             payload = request.get_json()
             if type(payload.get("expected_revision")) is not int:
@@ -332,7 +334,7 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
     @app.post("/api/ai/settings")
     def save_ai_settings():
         with manager.lock:
-            if any(j["status"] in {"queued", "importing", "matching", "ai_review", "exporting"} for j in manager.jobs.values()):
+            if manager.has_active_operations():
                 raise ValueError("当前任务正在处理，请完成后再修改AI设置。")
             manager.ai_settings.save(request.get_json())
         return jsonify(manager.ai_config())
@@ -425,14 +427,14 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
         revert = payload.get("revert", False)
         if not isinstance(revert, bool):
             raise ValueError("恢复操作参数无效。")
-        with manager.lock:
+        with manager.job_operation(identifier):
             check_revision(identifier, payload)
             manager.resolve(identifier, payload.get("row_id"), payload.get("file_id"), revert=revert)
             return jsonify(public_job(identifier))
 
     @app.post("/api/jobs/<identifier>/export")
     def export(identifier):
-        with manager.lock:
+        with manager.job_operation(identifier):
             if lan:
                 check_revision(identifier, request.get_json())
             manager.export(identifier, request.get_json().get("expected_revision"))
@@ -440,7 +442,7 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
 
     @app.post("/api/jobs/<identifier>/undo")
     def undo(identifier):
-        with manager.lock:
+        with manager.job_operation(identifier):
             check_revision(identifier, request.get_json())
             result = manager.undo(identifier)
             public = public_job(identifier)
@@ -498,7 +500,7 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
         with manager.lock:
             if app.config["HSD_ACTIVE_UPLOADS"] or app.config["HSD_ACTIVE_DOWNLOADS"]:
                 raise ValueError("员工正在上传或下载文件，请传输完成后再退出。")
-            if any(j["status"] in {"queued", "importing", "matching", "ai_review", "exporting"} for j in manager.jobs.values()):
+            if manager.has_active_operations():
                 raise ValueError("任务正在处理，请完成后再退出工具。")
             app.config["HSD_STOPPING"] = True
         callback = app.config.get("HSD_SHUTDOWN")

@@ -247,6 +247,10 @@ def verify(args):
             assert result["status"] == "done" and result["download_ready"]
             payload = employee.raw(f"/api/jobs/{identifier}/download")
             check_download(payload, workbook, original_ai, number)
+            from acceptance_records import read_export_record
+            record = read_export_record(state, identifier)
+            assert record['exported'] == record['new_numbers'] == 1
+            assert 'ai_observation_runs' in record
             downloads.append({"number": number, "bytes": len(payload), "auto": 1,
                               "manual_confirmations": 0, "observed_states": sorted(states)})
         final = host.request("/api/admin/overview")

@@ -28,7 +28,7 @@ class Client:
             if job["status"] != previous:
                 print(job["status"], job["progress"]["message"], flush=True)
                 previous = job["status"]
-            if job["status"] not in {"importing", "matching", "ai_review", "exporting"}:
+            if job["status"] not in {"queued", "importing", "matching", "ai_review", "exporting"}:
                 assert job["status"] != "error", job.get("error")
                 return job
             time.sleep(.5)

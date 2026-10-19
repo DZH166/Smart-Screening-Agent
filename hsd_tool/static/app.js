@@ -233,10 +233,11 @@
     const job=state.job;
     const exporting=job.status==='exporting';
     const queued=job.status==='queued';
-    showView('processing-view',exporting?3:2);
+    const queueStage={cpu:'本机处理',ai:'AI 复核',export:'导出'}[job.queue_stage]||'处理';
+    showView('processing-view',exporting||(queued&&job.queue_stage==='export')?3:2);
     $('processing-eyebrow').textContent=queued?'排队中':exporting?'导出结果':job.status==='ai_review'?'复核疑难项':job.status==='matching'?'匹配图片':'读取文件';
-    $('processing-title').textContent=queued?'排队等待处理…':exporting?'正在整理并导出…':job.status==='ai_review'?'正在复核有疑问的图片…':job.status==='matching'?'正在比对图片…':'正在读取文件…';
-    $('processing-message').textContent=queued?(job.queue_position?`当前排在第 ${job.queue_position} 位，轮到后会自动开始。`:'其他批次正在处理，轮到本批后会自动开始。'):job.status==='ai_review'?'正在复核可处理的疑难图片，完成后会自动进入下一步。':job.progress?.message||'完成后会自动进入下一步。';
+    $('processing-title').textContent=queued?`等待${queueStage}…`:exporting?'正在整理并导出…':job.status==='ai_review'?'正在复核有疑问的图片…':job.status==='matching'?'正在比对图片…':'正在读取文件…';
+    $('processing-message').textContent=queued?(job.queue_position?`${queueStage}队列第 ${job.queue_position} 位，轮到后会自动开始。`:`正在等待${queueStage}，轮到后会自动开始。`):job.status==='ai_review'?'正在复核可处理的疑难图片，完成后会自动进入下一步。':job.progress?.message||'完成后会自动进入下一步。';
     const current=queued?0:Math.max(0,Number(job.progress?.current)||0),total=queued?0:Math.max(0,Number(job.progress?.total)||0);
     const percent=total?Math.min(100,Math.round(current/total*100)):0;
     $('progress-fill').style.width=total?`${percent}%`:'';

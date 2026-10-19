@@ -39,6 +39,9 @@ def test_auth_failure_switches_keys_within_two_actual_requests_and_keeps_usage()
     assert keys[0]["status"] == "paused_authentication"
     assert keys[1]["status"] == "available"
     assert waits == [.5]
+    assert [item["code"] for item in result["attempt_history"]] == ["authentication", "ok"]
+    assert [item["key_id"] for item in result["attempt_history"]] == ["test-key-0", "test-key-1"]
+    assert sum(item["usage"]["requests"] for item in result["attempt_history"]) == 2
     events = manager.ai_debug.snapshot()["events"]
     assert [event["key_id"] for event in events if event["stage"] == "requesting"] == ["test-key-0", "test-key-1"]
     text = json.dumps({"events":events,"pool":manager.ai_key_pool.snapshot()})
@@ -51,6 +54,7 @@ def test_three_bad_keys_do_not_multiply_the_original_attempt_budget():
         client.review(CONTENT, row_id="r2")
     assert caught.value.usage["requests"] == 2 and caught.value.usage["failures"] == 2
     assert [len(opener.calls) for opener in openers.values()] == [1,1,0]
+    assert [item["code"] for item in caught.value.attempt_history] == ["authentication", "insufficient_balance"]
 
 
 def test_account_rate_limit_is_not_evaded_by_immediately_switching_keys():
@@ -69,6 +73,8 @@ def test_provider_retry_uses_same_enabled_key_and_retains_unknown_cost():
     assert usage["requests"] == 2 and usage["successes"] == usage["failures"] == 1
     assert usage["unknown_usage_requests"] == 1 and usage["estimated_usd_upper_bound"] is None
     assert [len(opener.calls) for opener in openers.values()] == [2,0] and waits == [.5]
+    assert [item["code"] for item in result["attempt_history"]] == ["provider_error", "ok"]
+    assert result["attempt_history"][0]["usage"]["unknown_usage_requests"] == 1
 
 
 def test_disabling_key_during_backoff_prevents_reusing_a_stale_credential():
@@ -96,3 +102,51 @@ def test_debug_rejects_unstructured_data_and_reports_all_local_gate_reasons():
     event = trace.snapshot()["events"][0]
     assert secret not in json.dumps(event)
     assert "独立验证资格" in event["gate_reason"] and "重要区域" in event["gate_reason"] and "颜色" in event["gate_reason"]
+
+
+def test_credential_disabled_during_client_construction_never_sends_http():
+    manager, client, openers, _ = manager_and_client([[response()]])
+    original_factory = client.factory
+    def disabling_factory(key):
+        value = original_factory(key)
+        manager.ai_settings.keys[0]["enabled"] = False
+        return value
+    client.factory = disabling_factory
+    with pytest.raises(ReviewError) as caught:
+        client.review(CONTENT, row_id="r2")
+    assert caught.value.code == "pool_unavailable"
+    assert caught.value.usage["requests"] == 0
+    assert all(not opener.calls for opener in openers.values())
+    assert caught.value.attempt_history[0]["usage"]["requests"] == 0
+    assert caught.value.attempt_history[0]["not_called"] is True
+
+
+def test_local_factory_failure_is_not_a_request_and_never_exposes_exception():
+    manager, client, openers, _ = manager_and_client([[response()]])
+    secret = manager.ai_settings.keys[0]["api_key"]
+    def broken_factory(key):
+        raise RuntimeError("local-private-path-and-secret " + key)
+    client.factory = broken_factory
+    with pytest.raises(ReviewError) as caught:
+        client.review(CONTENT, row_id="r2")
+    assert caught.value.usage["requests"] == caught.value.usage["unknown_usage_requests"] == 0
+    assert caught.value.attempt_history[0]["not_called"] is True
+    assert all(not opener.calls for opener in openers.values())
+    assert manager.ai_key_pool.snapshot()["usage"]["requests"] == 0
+    assert secret not in str(caught.value) + json.dumps(caught.value.attempt_history)
+    assert "local-private" not in str(caught.value)
+
+
+def test_unexpected_failure_after_review_entry_keeps_unknown_charge():
+    manager, client, _, _ = manager_and_client([[response()]])
+    class FailsDuringReview:
+        def review(self, content):
+            raise RuntimeError("private provider failure must be hidden")
+    client.factory = lambda key: FailsDuringReview()
+    with pytest.raises(ReviewError) as caught:
+        client.review(CONTENT, row_id="r2")
+    assert caught.value.usage["requests"] == caught.value.usage["unknown_usage_requests"] == 1
+    assert caught.value.usage["estimated_usd_upper_bound"] is None
+    assert not caught.value.attempt_history[0].get("not_called")
+    assert manager.ai_key_pool.snapshot()["usage"]["requests"] == 1
+    assert "private provider" not in str(caught.value) + json.dumps(caught.value.attempt_history)

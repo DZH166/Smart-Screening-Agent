@@ -31,7 +31,10 @@ class FakeXHR {
   load(status,response){this.status=status;this.responseText=JSON.stringify(response);this.listeners.load();}
 }
 const location={origin:'http://192.168.1.2:8805',assign(url){location.assigned=url;}};
-const sandbox={document:{getElementById:element,querySelectorAll(){return [];},body:{classList:{toggle(){}}},documentElement:{dataset:{}}},
+const sandbox={document:{getElementById:element,querySelectorAll(selector){
+  if(selector!=='.step')return [];
+  return [1,2,3].map((number)=>{const node=element(`step-${number}`);node.dataset.step=String(number);return node;});
+},body:{classList:{toggle(){}}},documentElement:{dataset:{}}},
   window:{HSD_ACCESS:{lan:true,remote:true},HSD_TOKEN:'session-token',location,setTimeout(){return 1;},clearTimeout(){},scrollTo(){}},
   location, performance:{now:()=>0},setTimeout:()=>1,clearTimeout(){},AbortController,
   FormData:class{constructor(){this.parts=[];}append(...part){this.parts.push(part);}},XMLHttpRequest:FakeXHR,
@@ -119,13 +122,48 @@ async function main(){
   assert.equal(xhrs.length,requestsBeforeInvalid);assert.match(element('start-number-error').textContent,/1 到 9999/);
   assert.equal(sandbox.document.activeElement,element('start-number'),'start-number validation and error focus remain required');
 
-  ui.state.job={id:'my-job',status:'queued',queue_position:2,progress:{current:8,total:20}};
-  assert.ok(ui.isBusy());ui.renderProgress();
-  assert.equal(element('processing-title').textContent,'排队等待处理…');
-  assert.ok(element('processing-message').textContent.includes('第 2 位'));
-  assert.equal(element('progress-percent').textContent,'','queued work must not display a stale stage percentage');
-  assert.equal(element('progress-detail').textContent,'等待开始');
-  assert.equal(element('progress-fill').style.width,'');
+  function assertStep(active){
+    for(const number of [1,2,3]){
+      const step=element(`step-${number}`);
+      assert.equal(step.classList.contains('active'),number===active,`step ${number} active`);
+      assert.equal(step.classList.contains('complete'),number<active,`step ${number} complete`);
+      assert.equal(step.querySelector('i').textContent,number<active?'✓':String(number));
+    }
+  }
+  for(const [stage,label,step] of [[undefined,'处理',2],['cpu','本机处理',2],['ai','AI 复核',2],['export','导出',3]]){
+    ui.state.job={id:'my-job',status:'queued',queue_stage:stage,queue_position:2,progress:{current:8,total:20}};
+    assert.ok(ui.isBusy());ui.renderProgress();
+    assert.equal(element('processing-eyebrow').textContent,'排队中');
+    assert.equal(element('processing-title').textContent,`等待${label}…`);
+    assert.equal(element('processing-message').textContent,`${label}队列第 2 位，轮到后会自动开始。`);
+    assert.equal(element('progress-percent').textContent,'','queued work must not display a stale stage percentage');
+    assert.equal(element('progress-detail').textContent,'等待开始');
+    assert.equal(element('progress-fill').style.width,'');
+    assert.ok(element('progress-fill').classList.contains('indeterminate'));
+    assertStep(step);
+    ui.state.job.queue_position=0;ui.renderProgress();
+    assert.equal(element('processing-message').textContent,`正在等待${label}，轮到后会自动开始。`,'unknown position must not imply zero jobs ahead');
+  }
+  for(const [status,eyebrow,title,step] of [
+    ['importing','读取文件','正在读取文件…',2],
+    ['matching','匹配图片','正在比对图片…',2],
+    ['ai_review','复核疑难项','正在复核有疑问的图片…',2],
+    ['exporting','导出结果','正在整理并导出…',3],
+  ]){
+    ui.state.job={id:'my-job',status,progress:{current:3,total:8,message:'阶段处理说明'}};
+    assert.ok(ui.isBusy());ui.renderProgress();
+    assert.equal(element('processing-eyebrow').textContent,eyebrow);
+    assert.equal(element('processing-title').textContent,title);
+    assert.equal(element('progress-percent').textContent,'38%');
+    assert.equal(element('progress-detail').textContent,'当前阶段 3 / 8','progress describes its own stage, not whole-batch completion');
+    assert.equal(element('progress-fill').style.width,'38%');
+    assert.ok(!element('progress-fill').classList.contains('indeterminate'));
+    assertStep(step);
+    ui.state.job.progress={current:0,total:0};ui.renderProgress();
+    assert.equal(element('progress-percent').textContent,'');
+    assert.equal(element('progress-detail').textContent,'准备中…');
+    assert.ok(element('progress-fill').classList.contains('indeterminate'));
+  }
   ui.state.job={id:'my/job',status:'done',rows:[],download_ready:true};
   ui.renderDone();
   assert.equal(element('open-output-button').textContent,'下载结果 ZIP ↓');

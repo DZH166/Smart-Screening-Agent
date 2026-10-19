@@ -36,7 +36,7 @@ def test_uploaded_hash_saves_only_redundant_reads(tmp_path, monkeypatch):
         identifier = manager.create(payload, owner_id="employee", downloadable=True, input_digests=digests)
         digests["workbook"] = "0" * 64  # stored metadata is not a caller-owned mutable dict
         manager._process(identifier)
-        assert manager.jobs[identifier]["status"] == "ready"
+        assert wait_finished(manager, identifier)["status"] == "ready"
         assert Path(payload["workbook_path"]) not in calls
         assert calls.count(Path(payload["source_path"])) == 1  # post-scan independent check retained
         assert sum(path.name == "source.xlsx" for path in calls) == 1
@@ -69,7 +69,7 @@ def test_local_mode_ignores_json_digest_injection(tmp_path, monkeypatch):
     try:
         identifier = manager.create(payload)
         manager._process(identifier)
-        assert manager.jobs[identifier]["status"] == "ready"
+        assert wait_finished(manager, identifier)["status"] == "ready"
         assert Path(payload["workbook_path"]) in calls
         assert calls.count(Path(payload["source_path"])) == 2
         with pytest.raises(ValueError, match="校验信息无效"):
