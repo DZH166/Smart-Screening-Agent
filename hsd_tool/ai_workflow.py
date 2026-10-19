@@ -92,7 +92,7 @@ def review_job(manager, identifier):
                     job["warnings"].append(warning)
 
     checkpoint()
-    client = DeepSeekClient(runtime["api_key"])
+    client = DeepSeekClient(runtime["api_key"], endpoint=runtime.get("endpoint"))
     stop_code = None
     for index, (row, original_case) in enumerate(cases, 1):
         manager._progress(identifier, f"DeepSeek正在复核 {index}/{len(cases)} 张疑难图片…", index - 1, len(cases))

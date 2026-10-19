@@ -2,7 +2,7 @@
 
 Windows 图片与 AI 设计文件对应编号工具，默认在本机使用，也可显式开启局域网员工上传、独立处理与结果下载。用户确认的范围：固定 XLSX 模板 A 列编号/B 列图片；HSD + 四位新流水号；保留已有编号；只对成功匹配的空白编号行填号；疑难项人工复核；非破坏性输出副本。
 
-当前版本：`v1.6.0`（2026-10-16）。Windows 便携程序见 [GitHub Releases](https://github.com/DZH166/Smart-Screening-Agent/releases/latest)，解压整个文件夹后双击 `HSD图号助手.exe`，不需要安装 Python。操作步骤见 [使用说明](使用说明.txt)，版本记录见 [CHANGELOG.md](CHANGELOG.md)。
+当前版本：`v1.7.0`（2026-10-19）。Windows 安装包见 [GitHub Releases](https://github.com/DZH166/Smart-Screening-Agent/releases/latest)，双击 `HSD图号助手-Setup-1.7.0.exe` 按向导安装，不需要管理员权限，也不需要安装 Python；仍可使用便携目录，解压整个文件夹后双击 `HSD图号助手.exe`。操作步骤见 [使用说明](使用说明.txt)，多台电脑共用同一份 DeepSeek Key 的部署方式见 [安装与内网网关部署](docs/安装与内网网关部署.md)，版本记录见 [CHANGELOG.md](CHANGELOG.md)。
 
 流程为“导入 → 本机匹配 → 可选 DeepSeek 二次复核 → 剩余人工审核 → 摘要确认并导出”。可靠匹配由服务端直接通过，无需员工逐张查看；没有疑问项时直接进入摘要。AI 复核默认关闭，启用后仍处于评估模式：**AI 只给建议，疑难项仍由员工确认**。发布包不预置 AI 业务自动通过资格。v1.6.0 移除表格、ZIP、HTTP 上传、单个 AI 与展开总量的固定字节上限及压缩比限制，并减少大文件复制和内存占用；沿用匹配判定、编号、员工任务隔离、DeepSeek 协议与资格、摘要确认及服务端导出校验。无固定字节上限不等于无限资源：仍须有足够的磁盘和内存，保留文件数量、图像像素及归档有效性检查。
 
@@ -43,6 +43,21 @@ v1.6.0 便携构建输出位于 `dist/v1.6.0/`，解压发布包后双击其中�
 ```
 
 `verify_portable.py` 核对实际运行的冻结程序及构建指纹，用缺号副本验证编号、表格局部更新、原稿不变和导出 AI 的原始字节。`prepare_delivery.py` 需验收成功后运行；先根据真实验收结果编写 `--notes` 指定的说明文件。它会再次校验构建一致性，生成 `交付/v1.6.0/` 下的 ZIP 和 SHA256。验收后若改动构建输入，应重新构建并验收。这组命令验证本机匹配与打包导出，不自动取得 AI 业务放行资格。员工上传、隔离及下载须另行按实际接口验收，不将合成结果冒充60张业务回归。
+
+## 安装包与内网 AI 网关
+
+v1.7.0 同时提供安装包和绿色版。安装包用 Inno Setup 制作，默认按当前用户安装到 `%LOCALAPPDATA%\Programs\HSD图号助手`，不需要管理员权限，包含开始菜单项、可选桌面快捷方式和标准卸载入口；静默安装参数为 `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART`。制作方式：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
+& "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" .\installer\HSD图号助手.iss
+```
+
+DeepSeek 密钥由 Windows DPAPI 按「当前用户 + 本机」加密保存，密文复制到另一台电脑无法解密，因此"配置一次、整个包发给所有人"无法实现。要让多台电脑共用同一份密钥，改用内网网关：在一台常开主机上运行 `HSD图号助手.exe --gateway --gateway-bind 192.168.0.160 --port 8899`，密钥只保存在这台机器；其余电脑在程序目录放一个 `gateway.json`（或设置 `HSD_AI_GATEWAY` 与 `HSD_AI_GATEWAY_TOKEN`），本机不需要任何 Key。程序的选择顺序是：本机已保存 Key → `DEEPSEEK_API_KEY` 环境变量 → 内网网关，前两者走官方接口。
+
+网关只监听一个明确的内网 IPv4，要求客户端携带随机生成的 Bearer 令牌，请求体上限 32 MiB、响应上限 1 MiB，上游重定向一律拒绝；状态页与密钥填写页只允许主机本机访问且不回显密钥。网关不可用时 AI 复核失败并回到人工审核，本机匹配、编号与导出不受影响。费用和用量仍按每台客户端各自记录，不跨机器汇总。
+
+完整部署步骤、防火墙规则和排查表见 [安装与内网网关部署](docs/安装与内网网关部署.md)。
 
 ## 局域网员工上传与下载
 
@@ -103,6 +118,7 @@ Remove-NetFirewallRule -DisplayName 'HSD员工服务v160-8816'
 - `ai_settings.py` / `ai_usage.py` / `ai_registry.py` / `ai_workflow.py`：加密设置、用量记录、限定场景验证资格与后台任务。
 - `service.py`：任务状态、编号规划、人工确认、文件校验、事务式导出。
 - `server.py` / `uploads.py`：本机/受限局域网接口、员工上传与任务归属、结果下载、主机原生文件选择窗口。
+- `gateway.py`：内网 AI 网关，持有唯一一份 Key，校验客户端令牌后转发复核请求。
 - `static/`：中文导入、复核、导出界面。
 
 编号与文件名冲突采用保守处理，不覆盖原件。新编号只规避当前表格中的已用号；跨批次起始号由员工确认。缺图和跳过行不会分配新号。输出保留完整工作簿，其余 XLSX 内部部件原字节复制。

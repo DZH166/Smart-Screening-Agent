@@ -39,7 +39,7 @@ def qualified_batch(tmp_path, monkeypatch):
     monkeypatch.setattr(manager.ai_settings, "runtime", lambda: {"enabled": True, "api_key": "unit-key-unused"})
     import hsd_tool.ai_workflow as workflow
     class Client:
-        def __init__(self, key):
+        def __init__(self, key, **kwargs):
             pass
         def review(self, content):
             return {"model": "revision-verified", "request_id": "unit-service-unused-request",
@@ -125,7 +125,7 @@ def test_model_cannot_automatically_take_an_owned_alternative(qualified_batch, m
     import hsd_tool.ai_workflow as workflow
     manager, job = qualified_batch
     class AlternativeClient:
-        def __init__(self, key):
+        def __init__(self, key, **kwargs):
             pass
         def review(self, content):
             return {"model": "revision-verified", "request_id": "unit-owned-alternative-request",

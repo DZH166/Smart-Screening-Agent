@@ -7,13 +7,18 @@ from __future__ import annotations
 
 import base64
 import ctypes
+import ipaddress
 import json
 import os
+import sys
 import tempfile
 import threading
+import urllib.parse
 from pathlib import Path
 
 MODEL = "deepseek-flash"
+OFFICIAL_ENDPOINT = "https://api.deepseek.com/chat/completions"
+GATEWAY_CONFIG = "gateway.json"
 PRICE_DATE = "2026-10-15"
 PRICES = {"cache_hit_usd_per_million": 0.006,
           "cache_miss_usd_per_million": 0.3,
@@ -23,6 +28,59 @@ PRICES = {"cache_hit_usd_per_million": 0.006,
 def _valid_key(value) -> bool:
     return (isinstance(value, str) and 10 <= len(value) <= 512
             and value.isascii() and all(33 <= ord(character) <= 126 for character in value))
+
+
+def _private_host(host: str) -> bool:
+    if host == "localhost":
+        return True
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return address.is_loopback or address.is_private
+
+
+def _valid_endpoint(value) -> bool:
+    """The public origin must stay https; an internal gateway may be http."""
+    if not isinstance(value, str) or not 12 <= len(value) <= 300 or not value.isascii():
+        return False
+    try:
+        parsed = urllib.parse.urlsplit(value)
+    except ValueError:
+        return False
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return False
+    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+        return False
+    return parsed.scheme == "https" or _private_host(parsed.hostname)
+
+
+def _gateway_config_path() -> Path | None:
+    """Only a frozen build looks beside the executable; source trees never do."""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).parent / GATEWAY_CONFIG
+    return None
+
+
+def load_gateway(environ=None, path=None) -> dict:
+    """Resolve the optional internal AI gateway; the environment wins over the file."""
+    source = os.environ if environ is None else environ
+    endpoint = str(source.get("HSD_AI_GATEWAY", "") or "").strip()
+    token = str(source.get("HSD_AI_GATEWAY_TOKEN", "") or "").strip()
+    if not endpoint:
+        target = Path(path) if path is not None else _gateway_config_path()
+        if target is not None and target.is_file():
+            try:
+                if target.stat().st_size <= 8192:
+                    payload = json.loads(target.read_text("utf-8"))
+                    if isinstance(payload, dict):
+                        endpoint = str(payload.get("endpoint", "") or "").strip()
+                        token = token or str(payload.get("token", "") or "").strip()
+            except (OSError, ValueError, TypeError):
+                endpoint = token = ""
+    if not _valid_endpoint(endpoint) or not _valid_key(token):
+        return {}
+    return {"endpoint": endpoint, "token": token}
 
 
 class _DPAPI:
@@ -73,10 +131,11 @@ _DEFAULT = object()
 
 
 class AiSettings:
-    def __init__(self, data_dir: str | Path, *, protector=_DEFAULT, environ=None):
+    def __init__(self, data_dir: str | Path, *, protector=_DEFAULT, environ=None, gateway=None):
         self.path = Path(data_dir) / "ai_settings.json"
         self._protector = (_DPAPI() if os.name == "nt" else None) if protector is _DEFAULT else protector
         self._environ = os.environ if environ is None else environ
+        self._gateway = load_gateway(self._environ) if gateway is None else dict(gateway or {})
         self._lock = threading.RLock()
         self._enabled = False
         self._key = ""
@@ -87,6 +146,8 @@ class AiSettings:
     def _load(self):
         try:
             if not self.path.exists():
+                # A machine deployed with a gateway has no local key to enter.
+                self._enabled = bool(self._gateway)
                 return
             if self.path.stat().st_size > 65536:
                 raise ValueError("oversized settings")
@@ -108,20 +169,24 @@ class AiSettings:
             self._enabled = False
             self._key = self._encrypted_key = ""
 
-    def _effective_key(self):
+    def _effective(self):
+        """A locally saved key always wins; otherwise an internal gateway is used."""
         if self._key:
-            return self._key, "saved"
+            return self._key, "saved", None
         environment_key = self._environ.get("DEEPSEEK_API_KEY", "")
         if _valid_key(environment_key):
-            return environment_key, "environment"
-        return "", "none"
+            return environment_key, "environment", None
+        if self._gateway:
+            return self._gateway["token"], "gateway", self._gateway["endpoint"]
+        return "", "none", None
 
     def snapshot(self) -> dict:
         with self._lock:
-            key, source = self._effective_key()
-            persistence = "windows_dpapi" if self._protector is not None else "session_only"
+            key, source, endpoint = self._effective()
+            persistence = "gateway" if endpoint else (
+                "windows_dpapi" if self._protector is not None else "session_only")
             return {"enabled": self._enabled, "configured": bool(key), "model": MODEL,
-                    "mode": "evaluation", "key_source": source,
+                    "mode": "evaluation", "key_source": source, "via_gateway": bool(endpoint),
                     "key_persistence": persistence, "price_date": PRICE_DATE,
                     "prices": dict(PRICES), "price_basis": "peak_upper_bound",
                     "storage_warning": self._storage_warning}
@@ -129,8 +194,9 @@ class AiSettings:
     def runtime(self) -> dict:
         """Private process-only values. Never serialize this return value to a client."""
         with self._lock:
-            key, _ = self._effective_key()
+            key, _, endpoint = self._effective()
             return {"enabled": self._enabled, "api_key": key, "model": MODEL,
+                    "endpoint": endpoint or OFFICIAL_ENDPOINT, "via_gateway": bool(endpoint),
                     "prices": dict(PRICES), "price_date": PRICE_DATE}
 
     def save(self, payload: dict) -> dict:

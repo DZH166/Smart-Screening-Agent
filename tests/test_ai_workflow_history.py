@@ -17,7 +17,7 @@ def test_review_checkpoints_planned_cases_before_io_and_completed_cases_between_
     observed = []
 
     class Client:
-        def __init__(self, key):
+        def __init__(self, key, **kwargs):
             self.count = 0
 
         def review(self, content):
@@ -47,7 +47,7 @@ def test_retry_does_not_discard_failed_run_or_circuit_break_skips(tmp_path, monk
     manager, job = workflow_manager(tmp_path, monkeypatch)
 
     class FailedClient:
-        def __init__(self, key):
+        def __init__(self, key, **kwargs):
             pass
 
         def review(self, content):
@@ -55,7 +55,7 @@ def test_retry_does_not_discard_failed_run_or_circuit_break_skips(tmp_path, monk
                 **empty_usage(), "requests": 1, "failures": 1, "unknown_usage_requests": 1})
 
     class WorkingClient:
-        def __init__(self, key):
+        def __init__(self, key, **kwargs):
             self.count = 0
 
         def review(self, content):
@@ -86,7 +86,7 @@ def test_export_preserves_failed_run_and_successful_retry(qualified_batch, monke
     working_client = workflow.DeepSeekClient
 
     class FailedClient:
-        def __init__(self, key):
+        def __init__(self, key, **kwargs):
             pass
 
         def review(self, content):

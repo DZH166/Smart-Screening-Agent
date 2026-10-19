@@ -43,6 +43,8 @@ def main():
     parser.add_argument("--settings-dir", type=Path, help="复用主机的 DeepSeek 加密设置与用量目录")
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--lan", help="显式开启局域网测试，例：192.168.0.160/24")
+    parser.add_argument("--gateway", action="store_true", help="作为内网 AI 网关运行，Key 只保存在本机")
+    parser.add_argument("--gateway-bind", help="网关监听的本机内网 IPv4 地址")
     parser.add_argument("--lan-input-root", type=Path, help="允许远程测试使用的主机素材目录")
     parser.add_argument("--lan-output-root", type=Path, help="允许远程测试导出的主机结果目录")
     parser.add_argument("--no-browser", action="store_true")
@@ -50,6 +52,27 @@ def main():
     args = parser.parse_args()
     if args.pick:
         native_picker(args.pick, args.result)
+        return
+    if args.gateway:
+        from .gateway import default_bind, run_gateway, valid_bind
+        try:
+            bind = valid_bind(args.gateway_bind) if args.gateway_bind else default_bind()
+        except ValueError as exc:
+            parser.error(str(exc))
+        gateway_data = Path(args.data_dir) if args.data_dir else (
+            Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "HSD图片编号工具-网关")
+        gateway_data.mkdir(parents=True, exist_ok=True)
+        logging.basicConfig(filename=str(gateway_data / "运行日志.log"), level=logging.INFO,
+                            format="%(asctime)s %(levelname)s %(message)s", encoding="utf-8")
+        try:
+            run_gateway(gateway_data, bind=bind, port=args.port or 8899,
+                        open_browser=not args.no_browser)
+        except Exception:
+            logging.exception("Gateway failed")
+            if os.name == "nt":
+                ctypes.windll.user32.MessageBoxW(
+                    None, f"网关启动失败，请查看：{gateway_data / '运行日志.log'}", "智筛 Agent 内网网关", 16)
+            raise
         return
     lan = None
     if args.lan:

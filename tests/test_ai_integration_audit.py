@@ -252,7 +252,7 @@ def test_actual_workflow_keeps_unqualified_model_agreement_in_manual_state(tmp_p
     import hsd_tool.ai_workflow as workflow
     manager, job = workflow_manager(tmp_path, monkeypatch)
     class Client:
-        def __init__(self, key):
+        def __init__(self, key, **kwargs):
             self.count = 0
         def review(self, content):
             self.count += 1
@@ -275,7 +275,7 @@ def test_auth_failure_stops_later_calls_and_records_every_planned_case(tmp_path,
     manager, job = workflow_manager(tmp_path, monkeypatch)
     calls = []
     class Client:
-        def __init__(self, key):
+        def __init__(self, key, **kwargs):
             pass
         def review(self, content):
             calls.append(content)
@@ -299,7 +299,7 @@ def test_source_changes_during_network_io_cannot_be_applied_even_with_qualified_
         "policy_version": POLICY_VERSION, "prompt_version": PROMPT_VERSION, "categories": ["texture_review"],
         "approved_origins": ["independent_manual"]})
     class Client:
-        def __init__(self, key):
+        def __init__(self, key, **kwargs):
             self.count = 0
         def review(self, content):
             self.count += 1

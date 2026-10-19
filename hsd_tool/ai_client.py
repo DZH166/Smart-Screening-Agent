@@ -15,9 +15,9 @@ import time
 import urllib.error
 import urllib.request
 
-from .ai_settings import MODEL, PRICES, _valid_key
+from .ai_settings import MODEL, OFFICIAL_ENDPOINT, PRICES, _valid_endpoint, _valid_key
 
-ENDPOINT = "https://api.deepseek.com/chat/completions"
+ENDPOINT = OFFICIAL_ENDPOINT
 PROMPT_VERSION = "hsd-ai-review-2"
 MAX_RESPONSE_BYTES = 1024 * 1024
 MAX_REQUEST_BYTES = 32 * 1024 * 1024
@@ -80,14 +80,17 @@ def _count(value):
 
 
 class DeepSeekClient:
-    def __init__(self, api_key: str, *, timeout=30, attempts=2, opener=None, sleeper=None):
+    def __init__(self, api_key: str, *, endpoint=None, timeout=30, attempts=2, opener=None, sleeper=None):
         if not _valid_key(api_key):
             raise ReviewError("not_configured", "请先在本机设置中填写有效的 DeepSeek API Key")
         if type(attempts) is not int or not 1 <= attempts <= 2:
             raise ValueError("请求尝试次数必须为 1 或 2")
         if type(timeout) not in (int, float) or not 0 < timeout <= 30:
             raise ValueError("请求超时必须在 30 秒以内")
+        if endpoint is not None and not _valid_endpoint(endpoint):
+            raise ReviewError("not_configured", "内网网关地址格式不正确，请检查安装配置")
         self._key = api_key
+        self.endpoint = endpoint or ENDPOINT
         self.timeout = timeout
         self.attempts = attempts
         self._opener = opener or urllib.request.build_opener(_NoRedirect())
@@ -257,12 +260,12 @@ class DeepSeekClient:
         usage = empty_usage()
         for attempt in range(self.attempts):
             usage["requests"] += 1
-            request = urllib.request.Request(ENDPOINT, data=body, method="POST", headers={
+            request = urllib.request.Request(self.endpoint, data=body, method="POST", headers={
                 "Authorization": "Bearer " + self._key, "Content-Type": "application/json",
                 "Accept": "application/json", "User-Agent": "HSD-Image-Assistant/DeepSeek"})
             try:
                 with self._opener.open(request, timeout=self.timeout) as response:
-                    if response.geturl() != ENDPOINT:
+                    if response.geturl() != self.endpoint:
                         raise ReviewError("redirect_blocked", "复核接口发生重定向，已阻止发送凭据")
                     raw = response.read(MAX_RESPONSE_BYTES + 1)
                     if len(raw) > MAX_RESPONSE_BYTES:
