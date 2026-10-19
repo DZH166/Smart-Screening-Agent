@@ -21,6 +21,7 @@ import urllib.request
 import uuid
 import xml.etree.ElementTree as ET
 import zipfile
+from acceptance_records import read_export_record
 from io import BytesIO
 from pathlib import Path
 
@@ -146,7 +147,7 @@ def check_download(payload, original_workbook, original_ai, expected_number):
         assert len(workbooks) == len(ai_files) == 1
         assert ai_files[0].endswith("/已编号AI/" + expected_number + ".ai")
         assert hashlib.sha256(archive.read(ai_files[0])).hexdigest() == digest(original_ai)
-        assert any(name.endswith("/待处理清单.csv") for name in names)
+        assert len(names) == 2 and len(set(names)) == 2, 'Only one numbered AI and one Excel may be downloaded'
         assert not any("/matching/" in name or "/uploads/" in name or "settings" in name.lower() for name in names)
         workbook_data = archive.read(workbooks[0])
     with zipfile.ZipFile(original_workbook) as original, zipfile.ZipFile(BytesIO(workbook_data)) as numbered:
@@ -255,6 +256,9 @@ def verify(args):
             assert result["report"]["pending"] == 0
             payload = browser.raw(f"/api/jobs/{identifier}/download")
             check_download(payload, workbook, original_ai, number)
+            record = read_export_record(state, identifier)
+            assert record['exported'] == record['new_numbers'] == 1 and record['pending'] == 0
+            assert len(record['mapping']) == 1 and record['mapping'][0]['sha256'] == digest(original_ai)
             target = work / f"employee-{index}-result.zip"
             target.write_bytes(payload)
             downloads.append({"employee": index, "number": number, "bytes": len(payload),

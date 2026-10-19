@@ -249,7 +249,7 @@ def check_download_file(download, workbook, original_ai, numbered, expected):
         assert ai_files[0].endswith("/已编号AI/" + expected + ".ai")
         assert archive.getinfo(ai_files[0]).file_size == original_ai.stat().st_size
         assert member_digest(archive, ai_files[0]) == digest(original_ai)
-        assert any(name.endswith("/待处理清单.csv") for name in names)
+        assert len(names) == len(set(names)) == 2, 'Only one numbered AI and one Excel may be downloaded'
         assert not any("/matching/" in name or "/uploads/" in name or "settings" in name.lower() for name in names)
         expected_size = archive.getinfo(workbooks[0]).file_size
         with archive.open(workbooks[0]) as source, numbered.open("xb") as output:
@@ -370,6 +370,9 @@ def verify(args):
         summary["timings"]["download_seconds"] = round(time.monotonic() - phase, 3)
         phase = time.monotonic()
         check_download_file(download, workbook, original_ai, work / "numbered-large.xlsx", "HSD0007")
+        from acceptance_records import read_export_record
+        record = read_export_record(state, identifier)
+        assert record['mapping'][0]['sha256'] == digest(original_ai) and record['pending'] == 0
         upload_directories = list((state / "uploads").iterdir())
         assert len(upload_directories) == 1
         assert digest(upload_directories[0] / "workbook.xlsx") == original_hashes[workbook]

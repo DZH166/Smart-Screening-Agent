@@ -12,17 +12,75 @@ import numpy as np
 from functools import lru_cache
 
 
-def pixel_metrics(first: np.ndarray, second: np.ndarray, mask=None) -> dict:
-    error = np.abs(first.astype(np.float32) - second.astype(np.float32)) / 255
+def _row_major_source(array: np.ndarray) -> bool:
+    # OpenCV publishes C-order output. Match NumPy's K-order subtraction only
+    # when both source layouts are compatible with C iteration. Transposed/F
+    # inputs retain the fallback so float32 mean/RMS reduction order cannot move.
+    return (array.flags.c_contiguous or all(step >= 0 for step in array.strides)
+            and all(first >= second for first, second in zip(array.strides, array.strides[1:])))
+
+
+def _pixel_error(first: np.ndarray, second: np.ndarray, mask=None) -> np.ndarray:
+    # Select first when checking a thin edge. Subtraction/division still use
+    # exactly the same float32 operations, without two complete RGB conversions
+    # and several temporary error frames for every candidate phase.
     if mask is not None:
-        error = error[mask]
+        first, second = first[mask], second[mask]
+    if (first.dtype == np.uint8 and second.dtype == np.uint8
+            and first.shape == second.shape and first.size
+            and (first.ndim == 2 or first.ndim == 3 and first.shape[-1] == 3)
+            and _row_major_source(first) and _row_major_source(second)):
+        # Byte differences lie in [-255, 255], all exactly representable in
+        # float32. Taking the unsigned absolute difference before conversion
+        # therefore preserves every normalized value, including zero. OpenCV
+        # can collapse singleton channels/1-D shapes, so those use the fallback.
+        error = cv2.absdiff(first, second).astype(np.float32)
+    else:
+        # Keep float32-before-subtraction, broadcasting and empty-array behavior.
+        # In particular float64 subtraction followed by conversion is NOT equal.
+        error = np.subtract(first, second, dtype=np.float32)
+        np.abs(error, out=error)
+    error /= 255
+    return error
+
+
+def pixel_rms(first: np.ndarray, second: np.ndarray) -> float:
+    """Exact RMS for phase selection, where no other metric affects selection."""
+    error = _pixel_error(first, second)
+    return float(np.sqrt(np.mean(error ** 2)))
+
+
+def _channel_max(error: np.ndarray) -> np.ndarray:
+    if error.ndim and error.shape[-1] == 3:
+        pixels = np.maximum(error[..., 0], error[..., 1])
+        np.maximum(pixels, error[..., 2], out=pixels)
+        return pixels
+    return error.max(axis=-1)
+
+
+def _metrics_and_pixels(first: np.ndarray, second: np.ndarray, mask=None) -> tuple:
+    error = _pixel_error(first, second, mask)
     if not error.size:
-        return {'mae': 1., 'rms': 1., 'changed': 1., 'major_changed': 1., 'worst': 1.}
-    pixels = error.max(axis=-1)
+        return {'mae': 1., 'rms': 1., 'changed': 1., 'major_changed': 1.}, np.ones(1)
+    pixels = _channel_max(error)
     return {'mae': float(error.mean()), 'rms': float(np.sqrt(np.mean(error ** 2))),
             'changed': float((pixels > .2).mean()),
-            'major_changed': float((pixels > .45).mean()),
-            'worst': float(np.percentile(pixels, 99.5))}
+            'major_changed': float((pixels > .45).mean())}, pixels
+
+
+def pixel_metrics(first: np.ndarray, second: np.ndarray, mask=None) -> dict:
+    metrics, pixels = _metrics_and_pixels(first, second, mask)
+    return dict(metrics, worst=float(np.percentile(pixels, 99.5)))
+
+
+def _verified_texture_metrics(first: np.ndarray, second: np.ndarray) -> dict | None:
+    """Skip only a percentile whose unchanged preceding limits already fail."""
+    metrics, pixels = _metrics_and_pixels(first, second)
+    if (metrics['rms'] > .045 or metrics['changed'] > .015
+            or metrics['major_changed'] > .003):
+        return None
+    metrics['worst'] = float(np.percentile(pixels, 99.5))
+    return metrics if metrics['worst'] <= .55 else None
 
 
 def geometry_pixels_ok(metrics: dict) -> bool:
@@ -146,15 +204,12 @@ def phase_coverage(tiled: np.ndarray, query: np.ndarray, differences: np.ndarray
     order = possible[np.argsort(differences.ravel()[possible], kind='stable')]
     for index in order:
         y, x = np.unravel_index(int(index), differences.shape)
-        ys = (np.arange(qh) + y) % th
-        xs = (np.arange(qw) + x) % tw
-        target = np.ix_(np.unique(ys), np.unique(xs))
+        target = np.ix_(_phase_axis(qh, int(y), th), _phase_axis(qw, int(x), tw))
         if seen[target].all():
             continue
         patch = tiled[y:y + qh, x:x + qw]
-        metrics = pixel_metrics(query, patch)
-        if (metrics['rms'] > .045 or metrics['changed'] > .015
-                or metrics['major_changed'] > .003 or metrics['worst'] > .55):
+        metrics = _verified_texture_metrics(query, patch)
+        if metrics is None:
             continue
         if coherent_difference(query, patch) > 0:
             continue
@@ -171,6 +226,17 @@ def phase_coverage(tiled: np.ndarray, query: np.ndarray, differences: np.ndarray
     source_ink = float(seen[ink].mean()) if ink.any() else float(seen.mean())
     return {'source_coverage': float(seen.mean()), 'source_ink_coverage': source_ink,
             'residual': 1 - source_ink, 'phases': accepted}
+
+
+def _phase_axis(length: int, offset: int, period: int) -> np.ndarray:
+    """Sorted unique modular coordinates, without repeating/arbitrary tiling."""
+    if length >= period:
+        return np.arange(period)
+    start = offset % period
+    end = start + length
+    if end <= period:
+        return np.arange(start, end)
+    return np.concatenate((np.arange(end - period), np.arange(start, period)))
 
 
 def _axis_period(image: np.ndarray, axis: int) -> dict | None:
@@ -201,9 +267,8 @@ def _axis_period(image: np.ndarray, axis: int) -> dict | None:
             xs = np.broadcast_to(xs, (height, width)).copy()
             ys = np.broadcast_to(np.arange(height, dtype=np.float32)[:, None], (height, width)).copy()
             shifted = cv2.remap(array, xs, ys, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
-            values = pixel_metrics(array[:, :width], shifted)
-            if (values['rms'] <= .045 and values['changed'] <= .015
-                    and values['major_changed'] <= .003 and values['worst'] <= .55):
+            values = _verified_texture_metrics(array[:, :width], shifted)
+            if values is not None:
                 item = dict(values, period=float(period), constant=False)
                 # Prefer the smallest independently verified repeat, so a
                 # misleading large fragment cannot hide a local replacement.
@@ -234,6 +299,7 @@ def periodic_extension(query: np.ndarray, tile: np.ndarray, location: tuple[int,
     # canvas width is not a measured motif period and must not shift the phase.
     x, y = location[0] % w, location[1] % h
     best = None
+    best_model = None
     for dy in (0., -.5, .5):
         for dx in (0., -.5, .5):
             xs = ((np.arange(w, dtype=np.float32) - x + dx) % px)[None, :]
@@ -241,19 +307,15 @@ def periodic_extension(query: np.ndarray, tile: np.ndarray, location: tuple[int,
             model = cv2.remap(query, np.broadcast_to(xs, (h, w)).copy(),
                               np.broadcast_to(ys, (h, w)).copy(), cv2.INTER_LINEAR,
                               borderMode=cv2.BORDER_REPLICATE)
-            values = pixel_metrics(tile, model)
+            values, pixels = _metrics_and_pixels(tile, model)
             if best is None or values['rms'] < best['rms']:
+                values['worst'] = float(np.percentile(pixels, 99.5))
                 best = dict(values, periods={'x': periods[0], 'y': periods[1]},
                             phase_adjustment=[dx, dy])
+                best_model = model
     if (best['rms'] <= .045 and best['changed'] <= .015 and best['major_changed'] <= .003
             and best['worst'] <= .55):
-        dx, dy = best['phase_adjustment']
-        xs = ((np.arange(w, dtype=np.float32) - x + dx) % px)[None, :]
-        ys = ((np.arange(h, dtype=np.float32) - y + dy) % py)[:, None]
-        model = cv2.remap(query, np.broadcast_to(xs, (h, w)).copy(),
-                          np.broadcast_to(ys, (h, w)).copy(), cv2.INTER_LINEAR,
-                          borderMode=cv2.BORDER_REPLICATE)
-        coherent = coherent_difference(tile, model)
+        coherent = coherent_difference(tile, best_model)
         if coherent == 0:
             return dict(best, coherent_difference=coherent,
                         source_coverage=1., source_ink_coverage=1., residual=0.)

@@ -6,17 +6,20 @@ left for a person; this module never fills a missing assignment by elimination.
 """
 from __future__ import annotations
 
-from collections import Counter, defaultdict
+from collections import Counter, OrderedDict, defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass
 import errno
 import hashlib
+import copy
 import math
 import os
 from pathlib import Path, PurePosixPath
 import shutil
 import stat
 import tempfile
+import threading
 import zipfile
 
 import cv2
@@ -25,7 +28,7 @@ from PIL import Image
 import pymupdf
 
 from .matching_verification import (affine_coverage, phase_coverage, periodic_extension,
-                                    pixel_metrics, coherent_difference)
+                                    pixel_metrics, pixel_rms, coherent_difference)
 from .archive_io import member_blocks
 
 MAX_FILES = 500
@@ -286,13 +289,79 @@ def _read_image(path: str) -> np.ndarray:
     return array
 
 
+def _resized_width(array: np.ndarray, height: int) -> int:
+    return min(max(2, round(array.shape[1] * height / array.shape[0])), 4096)
+
+
 def _resize_height(array: np.ndarray, height: int) -> np.ndarray:
-    width = max(2, round(array.shape[1] * height / array.shape[0]))
+    width = _resized_width(array, height)
     # Extremely thin strips are supported as candidates, but not unbounded arrays.
-    return cv2.resize(array, (min(width, 4096), height), interpolation=cv2.INTER_AREA)
+    return cv2.resize(array, (width, height), interpolation=cv2.INTER_AREA)
 
 
-@dataclass
+class _TextureCache:
+    """Bounded scratch data owned by one matching call, never a disk cache.
+
+    Tokens contain prepared pixel SHA256, dimensions and transformation
+    parameters. They never use paths, filenames, mtimes or a prior case answer.
+    This cache dies before scan_and_match returns and cannot reuse old AI advice
+    or replace any later source-integrity check.
+    """
+    VERSION = 'texture-scratch-1'
+
+    def __init__(self, max_bytes=64 * 1024 * 1024, max_entries=512):
+        self.max_bytes, self.max_entries = max_bytes, max_entries
+        self.bytes = 0
+        self._items = OrderedDict()
+        self._lock = threading.RLock()
+
+    @staticmethod
+    def _is_coarse(key):
+        return key[1][0] == 'coarse'
+
+    def _remove(self, key):
+        _, size = self._items.pop(key)
+        self.bytes -= size
+
+    def get(self, token, factory):
+        key = (self.VERSION, token)
+        with self._lock:
+            if key in self._items:
+                value, size = self._items.pop(key)
+                self._items[key] = value, size
+                return value
+        # Independent candidates can prepare scales concurrently. A duplicate
+        # miss may compute twice, but expensive CV work never holds the LRU lock.
+        value = factory()
+        size = value.nbytes if isinstance(value, np.ndarray) else 512
+        with self._lock:
+            if key in self._items:
+                existing, existing_size = self._items.pop(key)
+                self._items[key] = existing, existing_size
+                return existing
+            if size > self.max_bytes:
+                return value
+            if self._is_coarse(key):
+                coarse_keys = [item for item in self._items if self._is_coarse(item)]
+                if len(coarse_keys) >= min(16, self.max_entries):
+                    self._remove(coarse_keys[0])
+            while self._items and (len(self._items) >= self.max_entries
+                                   or self.bytes + size > self.max_bytes):
+                # A raw coarse result is tiny and needed again for precision in
+                # the current row. Do not evict it merely to retain old scales.
+                victim = next((item for item in self._items if not self._is_coarse(item)),
+                              next(iter(self._items)))
+                self._remove(victim)
+            self._items[key] = value, size
+            self.bytes += size
+        return value
+
+    def resized(self, image, token, height):
+        return self.get(('resize', token, image.shape, height, cv2.INTER_AREA),
+                        lambda: _resize_height(image, height))
+
+
+@dataclass(frozen=True)
 class _Appearance:
     image: np.ndarray
     keypoints: list
@@ -334,8 +403,12 @@ def _appearance(array: np.ndarray, detector) -> _Appearance:
     palette = {'colours': colours[order][dominant].astype(np.float32),
                'weights': weights[dominant], 'concentration': float(weights[dominant].sum()),
                'flat_coverage': float(flat.mean()), 'observed_colours': observed_colours}
-    return _Appearance(array, keypoints, descriptors, histogram,
-                       hashlib.sha256(array.tobytes()).hexdigest(), palette)
+    digest = hashlib.sha256(array.tobytes()).hexdigest()
+    # Production inputs come from _read_image's own decoded arrays and stay
+    # private to this call. Guard accidental in-place edits after binding the
+    # pixel digest; CV receives these arrays only as read-only source images.
+    array.setflags(write=False)
+    return _Appearance(array, keypoints, descriptors, histogram, digest, palette)
 
 
 def _palette_difference(query: _Appearance, candidate: _Appearance) -> dict:
@@ -583,14 +656,14 @@ def _unexplained_content(tiled: np.ndarray, query: np.ndarray, y: int) -> float:
 
 
 def _texture_scan(query: np.ndarray, body: np.ndarray, height: int, best: dict,
-                  width_scale: float = 1., subpixel: bool = False) -> None:
+                  width_scale: float = 1., subpixel: bool = False, *, resize=None) -> None:
     """One scale of the tiled strip search; keeps the strongest pixel evidence."""
     # Two vertical repeats must fully contain the query. A shorter tile would make
     # cv2.matchTemplate assert instead of degrading to "no evidence at this scale",
     # and the coarse pass can legitimately nominate such a height for very flat art.
     if height * 2 < query.shape[0]:
         return
-    tile = _resize_height(body, height)
+    tile = resize(body, height) if resize is not None else _resize_height(body, height)
     if width_scale != 1.:
         width = max(6, int(round(tile.shape[1] * width_scale)))
         tile = cv2.resize(tile, (width, tile.shape[0]), interpolation=cv2.INTER_AREA)
@@ -606,7 +679,7 @@ def _texture_scan(query: np.ndarray, body: np.ndarray, height: int, best: dict,
         return
     location = [float(x), float(y)]
     if subpixel:
-        best_patch = pixel_metrics(query, patch)
+        best_rms = pixel_rms(query, patch)
         for dy in (0., -.5, -.25, .25, .5):
             for dx in (0., -.5, -.25, .25, .5):
                 if not (0 <= x + dx <= tiled.shape[1] - query.shape[1]
@@ -614,9 +687,9 @@ def _texture_scan(query: np.ndarray, body: np.ndarray, height: int, best: dict,
                     continue
                 candidate_patch = cv2.getRectSubPix(tiled, (query.shape[1], query.shape[0]),
                     (x + dx + (query.shape[1] - 1) / 2, y + dy + (query.shape[0] - 1) / 2))
-                measured = pixel_metrics(query, candidate_patch)
-                if measured['rms'] < best_patch['rms']:
-                    best_patch = measured
+                measured_rms = pixel_rms(query, candidate_patch)
+                if measured_rms < best_rms:
+                    best_rms = measured_rms
                     patch = candidate_patch
                     location = [x + dx, y + dy]
     error = np.abs(query.astype(np.float32) - patch.astype(np.float32)) / 255
@@ -627,10 +700,13 @@ def _texture_scan(query: np.ndarray, body: np.ndarray, height: int, best: dict,
         return
     coherent = coherent_difference(query, patch)
     proof = phase_coverage(tiled, query, differences, tile.shape[:2])
+    changed = float((pixel > .2).mean())
+    major_changed = float((pixel > .45).mean())
+    worst = float(np.percentile(pixel, 99.5))
     # The subpixel placement is a measured comparison too. Its full query window
     # covers the complete source only when it spans both source dimensions.
-    if (subpixel and rms <= .045 and float((pixel > .2).mean()) <= .015
-            and float((pixel > .45).mean()) <= .003 and float(np.percentile(pixel, 99.5)) <= .55
+    if (subpixel and rms <= .045 and changed <= .015
+            and major_changed <= .003 and worst <= .55
             and coherent == 0
             and query.shape[0] >= tile.shape[0] and query.shape[1] >= tile.shape[1]):
         proof = dict(proof, source_coverage=1., source_ink_coverage=1., residual=0., phases=[location])
@@ -641,9 +717,7 @@ def _texture_scan(query: np.ndarray, body: np.ndarray, height: int, best: dict,
             proof = dict(proof, source_coverage=periodic['source_coverage'],
                          source_ink_coverage=periodic['source_ink_coverage'], residual=periodic['residual'])
     best.update(score=score, height=height, rms=rms, width_scale=width_scale,
-                changed=float((pixel > .2).mean()),
-                major_changed=float((pixel > .45).mean()),
-                worst=float(np.percentile(pixel, 99.5)),
+                changed=changed, major_changed=major_changed, worst=worst,
                 residual=proof['residual'], source_coverage=proof['source_coverage'],
                 source_ink_coverage=proof['source_ink_coverage'], phases=proof['phases'],
                 location=location, tile_shape=list(tile.shape[:2]), coherent_difference=coherent)
@@ -651,13 +725,15 @@ def _texture_scan(query: np.ndarray, body: np.ndarray, height: int, best: dict,
         best['periodic_proof'] = periodic
 
 
-def _texture_search(query: np.ndarray, body: np.ndarray, trimmed: bool) -> dict:
+def _texture_search(query: np.ndarray, body: np.ndarray, trimmed: bool, *,
+                    resize=None, probe=None) -> dict:
     """Locate the best scale for one candidate body, then refine it."""
     outcome = {'score': 0., 'strong': False, 'method': 'texture', 'trimmed': trimmed}
-    probe = _resize_height(query, 32)
+    if probe is None:
+        probe = _resize_height(query, 32)
     coarse = {'score': 0.}
     for height in range(18, 92, 4):
-        _texture_scan(probe, body, height, coarse)
+        _texture_scan(probe, body, height, coarse, resize=resize)
     # The coarse pass only locates the neighbourhood; its own score is not reused
     # because low-detail motifs are unreliable at that resolution.
     if 'height' in coarse:
@@ -668,17 +744,18 @@ def _texture_search(query: np.ndarray, body: np.ndarray, trimmed: bool) -> dict:
     else:
         span = range(44, 124, 4)
     for height in span:
-        _texture_scan(query, body, height, outcome)
+        _texture_scan(query, body, height, outcome, resize=resize)
     if 'height' in outcome:
         # Whole-pixel heights leave a residual aspect error that shifts the motif
         # by about a pixel. A short sub-percent width sweep removes it without
         # masking real content differences.
         for scale in (.991, .994, .997, 1.003, 1.006, 1.009):
-            _texture_scan(query, body, outcome['height'], outcome, scale)
+            _texture_scan(query, body, outcome['height'], outcome, scale, resize=resize)
     return outcome
 
 
-def _texture(query: _Appearance, candidate: _Appearance, *, precision: bool = False) -> dict:
+def _texture(query: _Appearance, candidate: _Appearance, *, precision: bool = False,
+             cache: _TextureCache | None = None) -> dict:
     """Whole-strip comparison, with scale/translation and horizontal repetition.
 
     Useful for lines, dots and repeated motifs that have too few unique
@@ -692,22 +769,40 @@ def _texture(query: _Appearance, candidate: _Appearance, *, precision: bool = Fa
     cannot be aligned at all is the trimmed content box tried as a fallback -
     trimming changes the motif scale, which must not be applied blindly.
     """
-    q = _resize_height(query.image, 64)
-    crop = _content_bounds(candidate.image)
+    cache = cache if cache is not None else _TextureCache()
+    query_token = (query.digest, query.image.shape)
+    candidate_token = (candidate.digest, candidate.image.shape)
+    q = cache.resized(query.image, query_token, 64)
+    crop = cache.get(('bounds', candidate_token), lambda: _content_bounds(candidate.image))
     content = None
     if crop is not None:
         content = candidate.image[crop[1]:crop[3], crop[0]:crop[2]]
-    best = _texture_search(q, candidate.image, False)
-    if best.get('rms', 1.) > .05 and content is not None:
-        alternative = _texture_search(q, content, True)
-        if alternative.get('score', 0.) > best.get('score', 0.):
-            best = alternative
+    def resize_body(image, height):
+        # Cropped and whole-canvas coordinates cannot share a scale entry.
+        bounds = crop if content is not None and image is content else None
+        return cache.resized(image, (candidate_token, bounds), height)
+
+    def coarse_search():
+        probe = cache.resized(q, (query_token, 'height64'), 32)
+        result = _texture_search(q, candidate.image, False, resize=resize_body, probe=probe)
+        if result.get('rms', 1.) > .05 and content is not None:
+            alternative = _texture_search(q, content, True, resize=resize_body, probe=probe)
+            if alternative.get('score', 0.) > result.get('score', 0.):
+                result = alternative
+        return result
+
+    # Precision starts from the exact raw coarse result. Never undo the public
+    # .94 score factor with division or reuse a previously finalized verdict.
+    best = copy.deepcopy(cache.get(('coarse', query_token, candidate_token), coarse_search))
     # Colour spread is compared on the content only: a declared artboard margin
     # legitimately adds white that the workbook thumbnail never shows.
     colour_body = content if content is not None else candidate.image
-    lab = cv2.cvtColor(_resize_height(colour_body, 96), cv2.COLOR_BGR2LAB)
-    histogram = cv2.calcHist([lab], [0, 1, 2], None, [12, 16, 16], [0, 256] * 3)
-    cv2.normalize(histogram, histogram, norm_type=cv2.NORM_L1)
+    def content_histogram():
+        lab = cv2.cvtColor(resize_body(colour_body, 96), cv2.COLOR_BGR2LAB)
+        result = cv2.calcHist([lab], [0, 1, 2], None, [12, 16, 16], [0, 256] * 3)
+        cv2.normalize(result, result, norm_type=cv2.NORM_L1)
+        return result
+    histogram = cache.get(('content_histogram', candidate_token, crop), content_histogram)
     best['color_distance'] = float(cv2.compareHist(query.histogram, histogram,
                                                    cv2.HISTCMP_BHATTACHARYYA))
     palette = _palette_difference(query, candidate)
@@ -720,24 +815,24 @@ def _texture(query: _Appearance, candidate: _Appearance, *, precision: bool = Fa
         # dot pattern. A denser scale/phase measurement reduces that quantisation
         # error without changing the acceptance limits or the source artwork.
         comparison_height = min(256, query.image.shape[0])
-        detailed_query = _resize_height(query.image, comparison_height)
+        detailed_query = cache.resized(query.image, query_token, comparison_height)
         centre = best['height'] * comparison_height / 64
         detailed = {'score': 0., 'method': 'texture', 'strong': False,
                     'trimmed': best.get('trimmed', False)}
         base_width = best.get('width_scale', 1.)
         for height in range(max(math.ceil(comparison_height / 2), round(centre) - 2),
                             round(centre) + 3):
-            nominal_width = _resize_height(body, height).shape[1]
+            nominal_width = _resized_width(body, height)
             centre_width = round(nominal_width * base_width)
             radius = max(1, math.ceil(nominal_width * .005))
             for width in range(centre_width - radius, centre_width + radius + 1):
                 width_scale = width / nominal_width
                 if not .991 <= width_scale <= 1.009:
                     continue
-                _texture_scan(detailed_query, body, height, detailed, width_scale)
+                _texture_scan(detailed_query, body, height, detailed, width_scale, resize=resize_body)
         if 'height' in detailed:
             _texture_scan(detailed_query, body, detailed['height'], detailed,
-                          detailed.get('width_scale', 1.), subpixel=True)
+                          detailed.get('width_scale', 1.), subpixel=True, resize=resize_body)
         # A low-resolution score is never substituted for a failed detailed
         # verification. Retain it for diagnostics only.
         if 'rms' in detailed:
@@ -780,7 +875,7 @@ def _texture(query: _Appearance, candidate: _Appearance, *, precision: bool = Fa
         th, tw = best['tile_shape']
         sx, sy = tw / (right - left), th / (bottom - top)
         factor = query.image.shape[0] / comparison_height
-        qh, qw = comparison_height, _resize_height(query.image, comparison_height).shape[1]
+        qh, qw = comparison_height, _resized_width(query.image, comparison_height)
         matrices = []
         for x, y in (best.get('phases') or [best['location']]):
             for row_offset in range(math.floor(y / th), math.ceil((y + qh) / th)):
@@ -950,9 +1045,33 @@ def _ownership_supported(result: dict) -> bool:
     return bool(geometry or repeat)
 
 
+def _texture_results(query, identities, file_images, precision, cache, executor=None):
+    def evaluate(identity):
+        try:
+            return identity, _texture(query, file_images[identity], precision=precision, cache=cache)
+        except Exception:
+            return identity, None
+    # Both map variants preserve original candidate order, including failures.
+    # No worker touches geometry RNG, row ownership or another worker's best.
+    return (executor.map(evaluate, identities) if executor is not None
+            else map(evaluate, identities))
+
+
 def _match_appearances(rows: list[dict], files: list[dict], row_images: dict,
-                       file_images: dict, progress=None) -> list[dict]:
+                       file_images: dict, progress=None, *, texture_workers=2) -> list[dict]:
+    if type(texture_workers) is not int or texture_workers not in (1, 2):
+        raise ValueError('纹样验证工作线程数只能是 1 或 2。')
+    if texture_workers == 1:
+        return _match_appearances_serial(rows, files, row_images, file_images, progress)
+    # PyMuPDF rendering and SIFT/RANSAC remain on the calling thread. OpenCV's
+    # process-global thread setting is never changed inside a running job.
+    with ThreadPoolExecutor(max_workers=texture_workers, thread_name_prefix='hsd-texture') as executor:
+        return _match_appearances_serial(rows, files, row_images, file_images, progress, executor)
+
+
+def _match_appearances_serial(rows, files, row_images, file_images, progress=None, executor=None):
     results = []
+    texture_cache = _TextureCache()
     readable = [f for f in files if f['id'] in file_images]
     duplicate_previews = Counter(a.digest for a in file_images.values())
     for i, row in enumerate(rows, 1):
@@ -990,10 +1109,9 @@ def _match_appearances(rows: list[dict], files: list[dict], row_images: dict,
         if not scores[best_feature]['strong']:
             shortlist = sorted(histograms, key=histograms.get)[:6]
             shortlist += sorted(scores, key=lambda identity: scores[identity]['score'], reverse=True)[:2]
-            for identity in dict.fromkeys(shortlist):
-                try:
-                    texture = _texture(query, file_images[identity])
-                except Exception:
+            for identity, texture in _texture_results(query, list(dict.fromkeys(shortlist)),
+                    file_images, False, texture_cache, executor):
+                if texture is None:
                     # Texture evidence is optional; a failure here only means this
                     # candidate keeps its geometric/histogram evidence.
                     failures.append({'file_id': identity, 'check': 'texture_evaluation_failed'})
@@ -1006,12 +1124,21 @@ def _match_appearances(rows: list[dict], files: list[dict], row_images: dict,
         leading = coarse_ranking[:3]
         if (not scores[coarse_ranking[0]].get('auto_ok')
                 or scores[coarse_ranking[0]].get('selected_channel') == 'texture'):
+            prefetched = None
+            if executor is not None:
+                # Fine verification may raise OR lower the leading score. Keep
+                # the original sequential eligibility check when applying each
+                # result; speculative work must not add/remove evidence.
+                detailed = [identity for identity in leading if scores[identity]['score'] >= .75]
+                prefetched = dict(_texture_results(query, detailed, file_images,
+                                                   True, texture_cache, executor))
             for identity in leading:
                 if scores[identity]['score'] < max(.75, scores[coarse_ranking[0]]['score'] - .18):
                     continue
-                try:
-                    texture = _texture(query, file_images[identity], precision=True)
-                except Exception:
+                texture = (prefetched[identity] if prefetched is not None else
+                           next(_texture_results(query, [identity], file_images,
+                                                 True, texture_cache))[1])
+                if texture is None:
                     failures.append({'file_id': identity, 'check': 'detailed_texture_evaluation_failed'})
                     continue
                 scores[identity] = _combine_evidence(scores[identity], texture)
@@ -1086,7 +1213,8 @@ def _match_appearances(rows: list[dict], files: list[dict], row_images: dict,
     return results
 
 
-def scan_and_match(source_path: str, rows: list[dict], work_dir: str, progress=None) -> dict:
+def scan_and_match(source_path: str, rows: list[dict], work_dir: str, progress=None, *,
+                   texture_workers=2) -> dict:
     """Inspect originals read-only and return conservative per-row candidates."""
     work = Path(work_dir).resolve()
     work.mkdir(parents=True, exist_ok=True)
@@ -1119,7 +1247,8 @@ def scan_and_match(source_path: str, rows: list[dict], work_dir: str, progress=N
         except (OSError, ValueError, cv2.error):
             warnings.append(f"第 {row.get('row_number', row['id'])} 行图片无法读取，已留待处理。")
     cv2.setRNGSeed(42)
-    matches = _match_appearances(rows, files, row_images, file_images, progress)
+    matches = _match_appearances(rows, files, row_images, file_images, progress,
+                                texture_workers=texture_workers)
     bad_count = sum(bool(file['issue']) for file in files)
     if bad_count:
         warnings.append(f'{bad_count} 个 AI 文件预览有问题或含多个画板，请查看原文件列表。')

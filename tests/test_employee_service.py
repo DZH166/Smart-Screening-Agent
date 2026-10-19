@@ -1,5 +1,6 @@
 """LAN workers share host AI settings while keeping uploads/results per task."""
 import threading
+import json
 import time
 import zipfile
 from pathlib import Path
@@ -120,8 +121,13 @@ def test_employee_download_is_only_verified_output_and_preserves_inputs(tmp_path
             assert all(".." not in Path(name).parts for name in names)
             assert archive.read(output.name + "/已编号AI/KEEP023.ai") == Path(job["files"][0]["source_path"]).read_bytes()
             assert archive.read(output.name + "/已编号AI/HSD0001.ai") == Path(job["files"][1]["source_path"]).read_bytes()
-            pending = archive.read(output.name + "/待处理清单.csv").decode("utf-8-sig")
+            assert len(names) == 3
+            assert all(name.endswith((".ai", ".xlsx")) for name in names)
+            pending = (Path(job["_records_dir"]) / "待处理清单.csv").read_text("utf-8-sig")
             assert "已跳过" in pending
+            report = json.loads((Path(job["_records_dir"]) / "处理记录.json").read_text("utf-8"))
+            assert report["pending_rows"][0]["status"] == "skipped"
+            assert len(report["decision_records"]) == 3
             assert not any(name.endswith("source.xlsx") or "/matching/" in name or "settings" in name for name in names)
         assert sha256(job["_workbook_path"]) == workbook_before
         assert {f["id"]: sha256(f["source_path"]) for f in job["files"]} == source_before
@@ -244,8 +250,10 @@ def test_packager_rejects_output_escape_and_symbolic_links(tmp_path, monkeypatch
     manager, job = prepared(tmp_path, [""])
     output = Path(job["_output_root"]) / "result"
     output.mkdir(parents=True)
-    item = output / "result.xlsx"
+    item = output / "sample_已编号.xlsx"
     item.write_bytes(b"output")
+    (output / "已编号AI").mkdir()
+    (output / "已编号AI/HSD0001.ai").write_bytes(b"output-ai")
     outside = tmp_path / "outside"
     outside.mkdir()
     try:
@@ -297,7 +305,7 @@ def test_employee_ai_retry_queues_but_local_retry_keeps_busy_guard(tmp_path, mon
     manager, job = prepared(tmp_path, [""])
     monkeypatch.setattr(manager.ai_settings, "snapshot", lambda: {"enabled": True, "configured": True})
     calls = []
-    monkeypatch.setattr(manager.pool, "submit", lambda *args: calls.append(args))
+    monkeypatch.setattr(manager.ai_pool, "submit", lambda *args: calls.append(args))
     manager.jobs["busy"] = {"status": "matching"}
     try:
         with pytest.raises(ValueError, match="仍有任务"):
@@ -305,7 +313,108 @@ def test_employee_ai_retry_queues_but_local_retry_keeps_busy_guard(tmp_path, mon
         job["_owner_id"] = "employee"
         manager.review_ai("sample")
         assert manager.snapshot("sample")["status"] == "queued"
-        assert manager.snapshot("sample")["queue_position"] == 2
+        assert manager.snapshot("sample")["queue_position"] == 1
+        assert manager.snapshot("sample")["queue_stage"] == "ai"
         assert calls[0][0] == manager._rerun_ai
+    finally:
+        manager.close()
+
+
+def test_download_whitelist_ignores_unplanned_extra_files(tmp_path, monkeypatch):
+    manager, job = prepared(tmp_path, [""])
+    job.update(_owner_id="employee", _downloadable=True)
+    job["_ai_observation_runs"] = [{"planned_case_ids": ["synthetic"], "cases": [{"error": "synthetic-failure"}]}]
+    original = manager._package_download
+    def inject(current, directory):
+        (directory / "not-planned.ai").write_bytes(b"must never be downloaded")
+        (directory / "private.json").write_text('{"private":"not in ZIP"}')
+        original(current, directory)
+    monkeypatch.setattr(manager, "_package_download", inject)
+    try:
+        manager.export("sample")
+        assert wait_finished(manager)["status"] == "done"
+        path, _ = manager.download_asset("sample")
+        with zipfile.ZipFile(path) as archive:
+            assert set(archive.namelist()) == {
+                Path(job["output_dir"]).name + "/已编号AI/HSD0001.ai",
+                Path(job["output_dir"]).name + "/sample_已编号.xlsx"}
+        report = json.loads((Path(job["_records_dir"]) / "处理记录.json").read_text("utf-8"))
+        assert report["ai_observation_runs"] == job["_ai_observation_runs"]
+        assert len(report["decision_records"]) == 1
+    finally:
+        manager.close()
+
+
+def test_retry_rejects_modified_internal_validation_records(tmp_path, monkeypatch):
+    manager, job = prepared(tmp_path, [""])
+    job.update(_owner_id="employee", _downloadable=True)
+    original = manager._package_download
+    monkeypatch.setattr(manager, "_package_download", lambda *args: (_ for _ in ()).throw(OSError("synthetic disk error")))
+    try:
+        manager.export("sample")
+        assert wait_finished(manager)["status"] == "ready"
+        (Path(job["_records_dir"]) / "处理记录.json").write_text('{"tampered":true}')
+        monkeypatch.setattr(manager, "_package_download", original)
+        manager.export("sample")
+        result = wait_finished(manager)
+        assert result["status"] == "ready" and "验证记录发生变化" in result["error"]
+        assert not result["download_ready"]
+    finally:
+        manager.close()
+
+
+def test_private_records_survive_normal_shutdown_and_disposable_cache_cleanup(tmp_path):
+    manager, job = prepared(tmp_path, [""])
+    job.update(_owner_id="employee", _downloadable=True)
+    identifier = "a" * 32
+    cache = manager.data_dir / "jobs" / identifier
+    cache.mkdir()
+    (cache / ".hsd-job").write_text(identifier)
+    (cache / "disposable.bin").write_bytes(b"temporary")
+    persistent = manager.record_directory(identifier, "ai_runs") / "failed-run.json"
+    persistent.write_text('{"planned_case_ids":["one"],"cases":[{"error":"synthetic"}]}')
+    manager.export("sample")
+    assert wait_finished(manager)["status"] == "done"
+    report = Path(job["_records_dir"]) / "处理记录.json"
+    before = report.read_bytes()
+    assert report.is_relative_to(manager.data_dir / "task_records")
+    manager.close()
+    assert not cache.exists()
+    assert report.read_bytes() == before and persistent.is_file()
+
+
+def test_private_record_paths_reject_unsafe_ids_and_section_links(tmp_path, monkeypatch):
+    manager, _ = prepared(tmp_path, [""])
+    try:
+        for identifier in ("../outside", "a/b", "a\\b", "", ".", ".."):
+            with pytest.raises(ValueError, match="目录异常"):
+                manager.task_records_root(identifier)
+        with pytest.raises(ValueError, match="类型无效"):
+            manager.record_directory("sample", "../outside")
+        section = manager.record_directory("sample", "export_records")
+        original = Path.is_symlink
+        monkeypatch.setattr(Path, "is_symlink", lambda path: path == section or original(path))
+        with pytest.raises(ValueError, match="目录异常"):
+            manager.record_directory("sample", "export_records")
+    finally:
+        monkeypatch.undo()
+        manager.close()
+
+
+def test_record_tampering_during_packaging_cannot_become_new_timing_baseline(tmp_path, monkeypatch):
+    manager, job = prepared(tmp_path, [""])
+    job.update(_owner_id="employee", _downloadable=True)
+    original = manager._package_download
+    def tamper(current, directory):
+        original(current, directory)
+        (Path(current["_records_dir"]) / "处理记录.json").write_text('{"changed":true}')
+    monkeypatch.setattr(manager, "_package_download", tamper)
+    try:
+        manager.export("sample")
+        result = wait_finished(manager)
+        assert result["status"] == "ready" and "验证记录发生变化" in result["error"]
+        assert not result["download_ready"]
+        with pytest.raises(KeyError):
+            manager.download_asset("sample")
     finally:
         manager.close()

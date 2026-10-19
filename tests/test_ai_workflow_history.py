@@ -22,7 +22,7 @@ def test_review_checkpoints_planned_cases_before_io_and_completed_cases_between_
 
         def review(self, content):
             self.count += 1
-            paths = list(Path(job["_work_dir"]).glob("ai_observations_*.json"))
+            paths = list(Path(job["_ai_records_dir"]).glob("ai_observations_*.json"))
             assert len(paths) == 1
             observed.append(json.loads(paths[0].read_text("utf-8")))
             return model_answer(f"f{self.count:04}")
@@ -73,7 +73,7 @@ def test_retry_does_not_discard_failed_run_or_circuit_break_skips(tmp_path, monk
         assert len(job["_ai_observation_runs"]) == 2
         assert job["_ai_observation_runs"][0] == first
         assert job["_ai_observation_runs"][1]["run_id"] != first["run_id"]
-        assert len(list(Path(job["_work_dir"]).glob("ai_observations_*.json"))) == 2
+        assert len(list(Path(job["_ai_records_dir"]).glob("ai_observations_*.json"))) == 2
         assert job["ai_review"]["usage"]["requests"] == 3
         assert job["ai_review"]["usage"]["cost_incomplete"]
     finally:
@@ -102,7 +102,7 @@ def test_export_preserves_failed_run_and_successful_retry(qualified_batch, monke
     manager.export("sample", expected_revision=job["revision"])
     exported = wait_export(manager)
     assert exported["status"] == "done", exported["error"]
-    report = json.loads((Path(exported["output_dir"]) / "处理记录.json").read_text("utf-8"))
+    report = json.loads((Path(job["_records_dir"]) / "处理记录.json").read_text("utf-8"))
     runs = report["ai_observation_runs"]
     assert len(runs) == 2 and runs[0]["run_id"] != runs[1]["run_id"]
     assert runs[0]["cases"][0]["error"] == "authentication"

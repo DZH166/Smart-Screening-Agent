@@ -40,7 +40,7 @@ def main():
     result['elapsed_seconds'] = round(time.perf_counter() - start, 3)
     result['counts'] = {s: sum(m['status'] == s for m in result['matches']) for s in ('auto', 'review', 'unmatched')}
     result['source_code_sha256'] = {name: hashlib.sha256((ROOT / 'hsd_tool' / name).read_bytes()).hexdigest()
-                                     for name in ('matching.py', 'verification.py')}
+                                     for name in ('matching.py', 'matching_verification.py')}
     if args.reference:
         reference = json.loads(Path(args.reference).read_text(encoding='utf-8'))
         if 'row_to_ai_index' in reference:

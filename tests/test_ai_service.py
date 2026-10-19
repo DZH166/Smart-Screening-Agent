@@ -75,7 +75,7 @@ def test_qualified_positive_can_be_ai_auto_and_export_without_manual_confirmatio
     result = wait_export(manager)
     assert result["status"] == "done", result["error"]
     folder = Path(result["output_dir"])
-    report = json.loads((folder / "处理记录.json").read_text("utf-8"))
+    report = json.loads((Path(job["_records_dir"]) / "处理记录.json").read_text("utf-8"))
     assert report["stats"]["ai_auto"] == 1 and report["exported"] == 2 and report["new_numbers"] == 1
     assert report["mapping"][0]["confirmation"] == "AI复核通过"
     assert sorted(path.name for path in (folder / "已编号AI").iterdir()) == ["HSD0017.ai", "KEEP0023.ai"]
@@ -106,7 +106,7 @@ def test_qualification_revocation_downgrades_ai_auto_during_plan_and_export(qual
     assert result["status"] == "done", result["error"]
     folder = Path(result["output_dir"])
     assert [path.name for path in (folder / "已编号AI").iterdir()] == ["KEEP0023.ai"]
-    report = json.loads((folder / "处理记录.json").read_text("utf-8"))
+    report = json.loads((Path(job["_records_dir"]) / "处理记录.json").read_text("utf-8"))
     assert report["pending"] == 1 and report["new_numbers"] == 0
     assert report["pending_rows"][0]["status"] == "review"
 

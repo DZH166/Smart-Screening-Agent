@@ -14,7 +14,9 @@ import threading
 import time
 import uuid
 import zipfile
+import zlib
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -22,6 +24,34 @@ from . import __version__
 
 ACCEPTED = {"auto", "confirmed"}
 BUSY = {"queued", "importing", "matching", "ai_review", "exporting"}
+COMPRESSION_SAMPLE_BYTES = 64 * 1024
+COMPRESSION_SAMPLE_BUDGET = 3 * COMPRESSION_SAMPLE_BYTES
+
+
+def _download_compression(path):
+    """Choose compression only; sampled bytes never establish file identity.
+
+    Highly compressed artwork should avoid another full DEFLATE pass. Retain
+    level 1 when every bounded head/middle/tail sample saves at least ten
+    percent independently. Text headers cannot mask an already encoded body
+    or borrow repeated bytes from another sample to inflate estimated savings.
+    Every actual member still receives its complete manifest SHA256 check.
+    """
+    size = path.stat().st_size
+    if not size:
+        return zipfile.ZIP_STORED
+    with path.open("rb") as stream:
+        if size <= COMPRESSION_SAMPLE_BUDGET:
+            samples = [stream.read(COMPRESSION_SAMPLE_BUDGET)]
+        else:
+            samples = []
+            for position in (0, (size-COMPRESSION_SAMPLE_BYTES)//2, size-COMPRESSION_SAMPLE_BYTES):
+                stream.seek(position)
+                samples.append(stream.read(COMPRESSION_SAMPLE_BYTES))
+    for sample in samples:
+        if not sample or len(zlib.compress(sample, 1))*10 > len(sample)*9:
+            return zipfile.ZIP_STORED
+    return zipfile.ZIP_DEFLATED
 INVALID_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 RESERVED_NAME = re.compile(r"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)", re.I)
 
@@ -56,7 +86,17 @@ class JobManager:
         self.lock = threading.RLock()
         self.jobs = {}
         self._queue_sequence = 0
-        self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="hsd")
+        self._job_locks = {}
+        self._active_operations = 0
+        self._operation_condition = threading.Condition(self.lock)
+        self._closing = False
+        # Different resources have different queues. CPU work stays bounded;
+        # provider waiting and one output writer cannot monopolize that worker.
+        self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="hsd-cpu")
+        self.ai_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="hsd-ai-batch")
+        self.ai_case_workers = 2
+        self.ai_case_pool = ThreadPoolExecutor(max_workers=self.ai_case_workers, thread_name_prefix="hsd-ai-case")
+        self.export_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="hsd-export")
         self.settings_path = self.data_dir / "settings.json"
         from .ai_settings import AiSettings
         shared_settings = Path(settings_dir) if settings_dir is not None else self.data_dir
@@ -66,6 +106,10 @@ class JobManager:
         from .ai_registry import ValidationRegistry
         self.ai_usage = UsageLedger(shared_settings)
         self.ai_validation = ValidationRegistry(shared_settings)
+        from .ai_admin import AiDebugTrace
+        self.ai_debug = AiDebugTrace()
+        from .ai_key_pool import ApiKeyPool
+        self.ai_key_pool = ApiKeyPool(self.ai_settings)
         self.cleanup_cache()
 
     def cleanup_cache(self):
@@ -86,9 +130,48 @@ class JobManager:
                 pass
 
     def close(self):
+        with self._operation_condition:
+            self._closing = True
+            # An accepted API operation may still be planning before its pool
+            # submission. Let it finish while every executor remains open;
+            # new external operations are rejected by job_operation above.
+            while self._active_operations:
+                self._operation_condition.wait()
+        # CPU jobs may hand off to AI, and AI coordinators may submit cases.
+        # Drain in that order instead of rejecting already accepted work.
         self.pool.shutdown(wait=True)
-        self.jobs.clear()
+        self.ai_pool.shutdown(wait=True)
+        self.ai_case_pool.shutdown(wait=True)
+        self.export_pool.shutdown(wait=True)
+        with self._operation_condition:
+            while self._active_operations:
+                self._operation_condition.wait()
+            self.jobs.clear()
+            self._job_locks.clear()
         self.cleanup_cache()
+
+    @contextmanager
+    def job_operation(self, identifier, *, internal=False):
+        """Serialize this task's edits without holding the global map lock."""
+        with self.lock:
+            if self._closing and not internal:
+                raise ValueError("工具正在退出，不能再修改任务。")
+            self._get(identifier)
+            operation_lock = self._job_locks.setdefault(identifier, threading.RLock())
+            # Count operations waiting for this task's lock as well. Shutdown
+            # cannot miss a user action which already passed its entry check.
+            self._active_operations += 1
+        try:
+            with operation_lock:
+                yield
+        finally:
+            with self._operation_condition:
+                self._active_operations -= 1
+                self._operation_condition.notify_all()
+
+    def has_active_operations(self):
+        with self.lock:
+            return bool(self._active_operations or any(job["status"] in BUSY for job in self.jobs.values()))
 
     def config(self):
         result = {"prefix": "HSD", "digits": 4, "last_start": 1,
@@ -146,6 +229,8 @@ class JobManager:
         if source.is_dir() and output.is_relative_to(source):
             raise ValueError("结果保存位置不能在 AI 源文件夹内部，请选择旁边的文件夹，避免下次把历史结果重复导入。")
         with self.lock:
+            if self._closing:
+                raise ValueError("工具正在退出，不能再导入新任务。")
             if owner_id is None and any(j["status"] in BUSY for j in self.jobs.values()):
                 raise ValueError("当前任务仍在处理，请完成后再导入。")
             identifier = uuid.uuid4().hex
@@ -161,6 +246,7 @@ class JobManager:
                    "_reserved": [], "_input_digest": None, "_upload_digests": upload_digests, "revision": 0,
                    "timings": {}, "_history": [], "_image_assets": {}, "_started_perf": time.perf_counter(),
                    "_owner_id": owner_id, "_downloadable": bool(downloadable)}
+            job["_batch_started_perf"] = job["_started_perf"]
             self.jobs[identifier] = job
             try:
                 if owner_id is None:
@@ -172,20 +258,44 @@ class JobManager:
         return identifier
 
     def _submit(self, job, operation):
-        """Called under the manager lock; one worker serializes expensive jobs."""
+        """Called under the map lock; retain a separate FIFO per resource."""
+        stage = "cpu" if operation == self._process else "export" if operation == self._export else "ai"
+        executor = {"cpu": self.pool, "ai": self.ai_pool, "export": self.export_pool}[stage]
         self._queue_sequence += 1
         job["_queue_order"] = self._queue_sequence
+        job["_queue_stage"] = stage
+        job.pop("_active_stage", None)
         job["_queued_perf"] = time.perf_counter()
-        self.pool.submit(operation, job["id"])
+        operation_token = uuid.uuid4().hex
+        job["_pending_operation_token"] = operation_token
+        job["_operation_token"] = operation_token
+        future = executor.submit(operation, job["id"])
+        if hasattr(future, "add_done_callback"):
+            def completed(result):
+                try:
+                    error = result.exception()
+                except BaseException as exc:
+                    error = exc
+                if error is not None:
+                    with self.lock:
+                        if (self.jobs.get(job["id"]) is job and job.get("_operation_token") == operation_token
+                                and job.get("status") in BUSY):
+                            self._fail(job["id"], error)
+            future.add_done_callback(completed)
 
     def _start_operation(self, identifier, status, message):
-        with self.lock:
+        with self.job_operation(identifier, internal=True), self.lock:
             job = self.jobs[identifier]
             queued_at = job.pop("_queued_perf", None)
             job.pop("_queue_order", None)
+            stage = job.pop("_queue_stage", self._stage_for(job))
+            job["_active_stage"] = stage
+            job["_operation_token"] = job.pop("_pending_operation_token", None) or uuid.uuid4().hex
             if queued_at is not None:
-                job.setdefault("timings", {})["queue_seconds"] = round(
-                    job.get("timings", {}).get("queue_seconds", 0) + time.perf_counter() - queued_at, 3)
+                waited = time.perf_counter() - queued_at
+                timings = job.setdefault("timings", {})
+                for name in ("queue_seconds", f"queue_{stage}_seconds"):
+                    timings[name] = round(timings.get(name, 0) + waited, 3)
             job["status"] = status
             job["progress"] = {"message": message, "current": 0, "total": 1}
             return job
@@ -210,7 +320,7 @@ class JobManager:
             sheet = inspect_workbook(str(snapshot_path), str(Path(job["_work_dir"]) / "workbook"))
             if not sheet["rows"]:
                 raise ValueError("当前工作表的 B 列没有可读取的图片，请使用约定的表格模板。")
-            with self.lock:
+            with self.job_operation(identifier, internal=True), self.lock:
                 job["sheet_name"] = sheet["sheet_name"]
                 job["rows"] = sheet["rows"]
                 job["_reserved"] = sheet.get("reserved_numbers", [])
@@ -225,7 +335,7 @@ class JobManager:
             if job.get("_source_archive_digest") and sha256(source_path) != job["_source_archive_digest"]:
                 raise ValueError("读取时源压缩包发生了变化，请重新导入。")
             matches = {m["row_id"]: m for m in result["matches"]}
-            with self.lock:
+            with self.job_operation(identifier, internal=True):
                 job["files"] = result["files"]
                 job["warnings"].extend(result.get("warnings", []))
                 for row in job["rows"]:
@@ -261,12 +371,56 @@ class JobManager:
                 job["timings"]["matching_seconds"] = round(time.perf_counter() - matching_started, 3)
                 job["timings"]["processing_seconds"] = round(time.perf_counter() - job["_started_perf"], 3)
                 job["progress"] = {"message": "自动验证完成", "current": len(job["rows"]), "total": len(job["rows"])}
-            self._review_ai(identifier)
-            with self.lock:
-                job["status"] = "ready"
-                job["timings"]["processing_seconds"] = round(time.perf_counter() - job["_started_perf"], 3)
+            runtime = self.ai_settings.runtime()
+            if not runtime["enabled"] or not runtime["api_key"] or not job["stats"]["review"]:
+                # No possible network request: do not queue a fully local
+                # result behind other employees' slow provider responses.
+                self._after_match_ai(identifier)
+            else:
+                with self.job_operation(identifier, internal=True), self.lock:
+                    job["status"] = "queued"
+                    job["progress"] = {"message": "本机匹配完成，正在等待 AI 复核阶段…", "current": 0, "total": 1}
+                    self._submit(job, self._after_match_ai)
         except Exception as exc:
             self._fail(identifier, exc)
+
+    def _after_match_ai(self, identifier):
+        job = self._start_operation(identifier, "ai_review", "正在检查 AI 复核条件…")
+        token = job["_operation_token"]
+        try:
+            self._review_ai(identifier)
+        except Exception as error:
+            self._end_ai_operation(identifier, job, token, error)
+            return
+        self._end_ai_operation(identifier, job, token)
+
+    def _end_ai_operation(self, identifier, expected_job, token, error=None):
+        """A late phase must not restore ready over replacement/error/cancel."""
+        with self.lock:
+            if self.jobs.get(identifier) is not expected_job:
+                return
+        try:
+            with self.job_operation(identifier, internal=True), self.lock:
+                job = self.jobs.get(identifier)
+                if (job is not expected_job or job.get("_operation_token") != token
+                        or job.get("status") != "ai_review"):
+                    return
+                if error is not None:
+                    job.update(status="error", error=str(error) or type(error).__name__)
+                else:
+                    job["status"] = "ready"
+                if job.get("_started_perf"):
+                    job["timings"]["processing_seconds"] = round(time.perf_counter() - job["_started_perf"], 3)
+        except KeyError:
+            # The task may have been removed between the identity precheck and
+            # acquiring its lock. There is no current task to update.
+            return
+
+    @staticmethod
+    def _stage_for(job):
+        if job.get("_queue_stage"):
+            return job["_queue_stage"]
+        return {"ai_review": "ai", "exporting": "export"}.get(job.get("status"), "cpu")
 
     def _plan(self, job):
         rows = job["rows"]
@@ -343,14 +497,21 @@ class JobManager:
         try:
             review_job(self, identifier)
         except Exception:
-            with self.lock:
+            with self.job_operation(identifier, internal=True):
                 job = self.jobs[identifier]
+                # A workflow-wide failure cannot retain AI acceptance whose
+                # final proof was not committed. Local/human decisions remain.
+                # Downgrade first so planning has no AI proof IO to repeat.
+                for row in job["rows"]:
+                    if row.get("_accepted_by") == "ai" and row.get("_status") == "auto":
+                        row.update(_status="review", _file_id=None,
+                                   _reason="AI复核未完整结束，请人工核对。", _reason_code="review_unavailable")
                 self._plan(job)
                 job.setdefault("ai_review", {})["message"] = "AI复核暂未完成，本批保留原有匹配结果。"
                 job["warnings"].append("AI复核未完成，疑难项仍需人工处理。")
 
     def review_ai(self, identifier):
-        with self.lock:
+        with self.job_operation(identifier):
             job = self._get(identifier)
             if job["status"] != "ready":
                 raise ValueError("当前任务不能重新运行AI复核。")
@@ -363,18 +524,21 @@ class JobManager:
                 raise ValueError("当前仍有任务正在处理。")
             job["status"] = "queued" if job.get("_owner_id") is not None else "ai_review"
             job["progress"] = {"message": "正在排队等待 AI 复核…", "current": 0, "total": 1}
-            self._submit(job, self._rerun_ai)
+            with self.lock:
+                self._submit(job, self._rerun_ai)
 
     def _rerun_ai(self, identifier):
+        job = self._start_operation(identifier, "ai_review", "正在进行 AI 复核…")
+        token = job["_operation_token"]
         try:
-            self._start_operation(identifier, "ai_review", "正在进行 AI 复核…")
             self._review_ai(identifier)
-        finally:
-            with self.lock:
-                self.jobs[identifier]["status"] = "ready"
+        except Exception as error:
+            self._end_ai_operation(identifier, job, token, error)
+            return
+        self._end_ai_operation(identifier, job, token)
 
     def resolve(self, identifier, row_id, file_id, revert=False):
-        with self.lock:
+        with self.job_operation(identifier):
             job = self._get(identifier)
             if job["status"] != "ready":
                 raise ValueError("当前任务不能修改匹配结果。")
@@ -411,7 +575,7 @@ class JobManager:
             return self.snapshot(identifier)
 
     def undo(self, identifier):
-        with self.lock:
+        with self.job_operation(identifier):
             job = self._get(identifier)
             if job["status"] != "ready":
                 raise ValueError("当前任务不能撤销操作。")
@@ -428,7 +592,7 @@ class JobManager:
             return result
 
     def export(self, identifier, expected_revision=None):
-        with self.lock:
+        with self.job_operation(identifier):
             job = self._get(identifier)
             if job["status"] != "ready":
                 raise ValueError("当前任务不能导出；已完成的结果可直接打开输出文件夹。")
@@ -442,7 +606,8 @@ class JobManager:
             job["progress"] = {"message": "正在排队等待导出…", "current": 0, "total": 1}
             job["error"] = None
             job["_export_started_perf"] = time.perf_counter()
-            self._submit(job, self._export)
+            with self.lock:
+                self._submit(job, self._export)
 
     def _export(self, identifier):
         job = self._start_operation(identifier, "exporting", "正在导出结果…")
@@ -531,6 +696,9 @@ class JobManager:
                                 "confirmation": "人工确认" if row["status"] == "confirmed" else "AI复核通过" if row.get("_accepted_by") == "ai" else "自动匹配", "sha256": copied_digest})
             workbook_out = staging / (Path(job["_workbook_path"]).stem + "_已编号.xlsx")
             write_numbered_workbook(job["_snapshot_workbook"], str(workbook_out), job["sheet_name"], assignments)
+            # The plan, rather than files discovered in an output directory,
+            # defines every allowed download member.
+            job["_export_members"] = [*(f"已编号AI/{entry['output']}" for entry in mapping), workbook_out.name]
             if sha256(job["_workbook_path"]) != job["_input_digest"]:
                 raise ValueError("导出期间源表格发生了变化，请重新导入后再处理。")
             if job.get("_source_archive_digest") and sha256(job["_source_path"]) != job["_source_archive_digest"]:
@@ -541,12 +709,15 @@ class JobManager:
                        for r in job["rows"] if r["status"] not in ACCEPTED]
             used = {r["file_id"] for r in rows}
             unused = [{"name": f["relative_path"], "reason": f.get("issue") or "未用于本批导出"} for f in job["files"] if f["id"] not in used]
-            with (staging / "对应关系.csv").open("w", encoding="utf-8-sig", newline="") as stream:
+            records_root = self.record_directory(identifier, "export_records")
+            records = records_root / uuid.uuid4().hex
+            records.mkdir()
+            with (records / "对应关系.csv").open("w", encoding="utf-8-sig", newline="") as stream:
                 writer = csv.writer(stream)
                 writer.writerow(["表格行号", "原编号", "输出编号", "原文件", "输出文件", "确认方式", "SHA256"])
                 for entry in mapping:
                     writer.writerow([csv_safe(entry[k]) for k in ("row", "old_number", "number", "source", "output", "confirmation", "sha256")])
-            with (staging / "待处理清单.csv").open("w", encoding="utf-8-sig", newline="") as stream:
+            with (records / "待处理清单.csv").open("w", encoding="utf-8-sig", newline="") as stream:
                 writer = csv.writer(stream)
                 writer.writerow(["类型", "表格行号", "已有编号或文件名", "说明", "处理状态"])
                 for item in pending:
@@ -556,25 +727,31 @@ class JobManager:
                     writer.writerow(["未使用文件", "", csv_safe(item["name"]), csv_safe(item["reason"]), "未使用"])
             timings = dict(job.get("timings", {}))
             timings["export_seconds"] = round(time.perf_counter() - job["_export_started_perf"], 3)
-            if job.get("_started_perf"):
-                timings["batch_elapsed_seconds"] = round(time.perf_counter() - job["_started_perf"], 3)
+            batch_started = job.get("_batch_started_perf", job.get("_started_perf"))
+            if batch_started:
+                timings["batch_elapsed_seconds"] = round(time.perf_counter() - batch_started, 3)
             report = {"exported": len(mapping), "new_numbers": len(assignments), "preserved_numbers": len(mapping) - len(assignments),
                       "pending": len(pending), "unused_files": len(unused), "workbook": workbook_out.name,
                       "input_sha256": job["_input_digest"], "sheet": job["sheet_name"], "version": __version__,
                       "stats": dict(job["stats"]), "timings": timings, "ai_review": job.get("ai_review")}
             decisions = [{key: row.get(key) for key in ("row_number", "status", "file_id", "reason", "reason_code", "diagnostics", "evidence", "ai_review")}
                          for row in job["rows"]]
-            (staging / "处理记录.json").write_text(json.dumps({**report, "mapping": mapping, "pending_rows": pending,
+            (records / "处理记录.json").write_text(json.dumps({**report, "mapping": mapping, "pending_rows": pending,
                     "unused": unused, "decision_records": decisions,
                     "ai_observations": job.get("_ai_observation_artifact"),
                     "ai_observation_runs": job.get("_ai_observation_runs", [])}, ensure_ascii=False, indent=2, allow_nan=False), "utf-8")
             if final.exists():
                 raise ValueError("输出文件夹已存在，请重新导入后重试。")
             staging.rename(final)
-            if job.get("_downloadable"):
-                job["_completed_export"] = {"path": str(final), "report": report, "timings": timings,
-                    "revision": job.get("revision", 0), "plan": self._export_plan(job),
-                    "manifest": self._output_manifest(job, final, verified_outputs)}
+            job["_records_dir"] = str(records)
+            job["_record_manifest"] = {name: sha256(records / name) for name in
+                                      ("处理记录.json", "对应关系.csv", "待处理清单.csv")}
+            job["_completed_export"] = {"path": str(final), "report": report, "timings": timings,
+                "revision": job.get("revision", 0), "plan": self._export_plan(job),
+                "members": list(job["_export_members"]),
+                "records_dir": str(records),
+                "record_manifest": job["_record_manifest"],
+                "manifest": self._output_manifest(job, final, verified_outputs)}
             self._finish_export(job, final, report, timings)
         except Exception as exc:
             # Only remove the exact staging directory created by this invocation.
@@ -583,7 +760,7 @@ class JobManager:
                     shutil.rmtree(staging)
                 except OSError:
                     logging.exception("Could not clean partial export %s", staging)
-            with self.lock:
+            with self.job_operation(identifier, internal=True), self.lock:
                 job["status"] = "ready"
                 job["error"] = str(exc)
                 if staging_created and staging and staging.exists():
@@ -596,22 +773,26 @@ class JobManager:
                 for r in job["rows"]]
 
     def _output_members(self, job, directory):
-        """Only walk the exact output tree; reject links and escaping entries."""
+        """Resolve only the final server plan's AI names and one workbook."""
         directory = Path(directory)
         root = directory.resolve(strict=True)
         if _is_link_or_reparse(directory) or _is_link_or_reparse(directory.parent) or root.parent != Path(job["_output_root"]).resolve():
             raise ValueError("结果目录位置异常，不能打包。")
+        expected = [*(f"已编号AI/{row['planned_number']}.ai" for row in job["rows"] if row["status"] in ACCEPTED),
+                    Path(job["_workbook_path"]).stem + "_已编号.xlsx"]
+        declared = job.get("_export_members", expected)
+        if (len(declared) != len(set(item.casefold() for item in declared))
+                or set(declared) != set(expected)):
+            raise ValueError("导出计划文件发生变化，不能生成下载包。")
         result = []
-        for current, directories, files in os.walk(directory, followlinks=False):
-            for name in directories + files:
-                entry = Path(current) / name
-                if _is_link_or_reparse(entry) or not entry.resolve(strict=True).is_relative_to(root):
+        for relative in declared:
+            entry = directory / relative
+            for part in (entry, entry.parent):
+                if part.exists() and (_is_link_or_reparse(part) or not part.resolve(strict=True).is_relative_to(root)):
                     raise ValueError("结果包含链接或目录之外的文件，不能打包。")
-            for name in files:
-                entry = Path(current) / name
-                if not entry.is_file():
-                    raise ValueError("结果包含不能读取的文件，不能打包。")
-                result.append(entry)
+            if not entry.is_file():
+                raise ValueError("导出结果文件发生变化，不能生成下载包。")
+            result.append(entry)
         return sorted(result)
 
     def _output_manifest(self, job, directory, verified_outputs=None):
@@ -638,6 +819,30 @@ class JobManager:
             raise ValueError("任务下载目录异常。")
         return expected
 
+    def task_records_root(self, identifier):
+        """Persistent private records, separate from disposable task caches."""
+        if not isinstance(identifier, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", identifier):
+            raise ValueError("任务记录目录异常。")
+        root = self.data_dir.absolute() / "task_records"
+        root.mkdir(exist_ok=True)
+        if _is_link_or_reparse(root) or root.resolve().parent != self.data_dir.resolve():
+            raise ValueError("任务记录目录异常。")
+        expected = root / identifier
+        expected.mkdir(exist_ok=True)
+        if _is_link_or_reparse(expected) or expected.resolve().parent != root.resolve():
+            raise ValueError("任务记录目录异常。")
+        return expected
+
+    def record_directory(self, identifier, section):
+        if section not in {"ai_runs", "export_records"}:
+            raise ValueError("任务记录类型无效。")
+        root = self.task_records_root(identifier)
+        path = root / section
+        path.mkdir(exist_ok=True)
+        if _is_link_or_reparse(path) or path.resolve().parent != root.resolve():
+            raise ValueError("任务记录目录异常。")
+        return path
+
     def _package_download(self, job, directory):
         """Create an atomic, task-private archive of verified output copies only."""
         directory = Path(directory)
@@ -645,6 +850,9 @@ class JobManager:
         members = self._output_members(job, directory)
         if {p.relative_to(directory).as_posix() for p in members} != set(manifest):
             raise ValueError("导出结果文件发生变化，不能生成下载包。")
+        if set(job["_completed_export"].get("members", [])) != set(manifest):
+            raise ValueError("已完成导出计划发生变化，不能生成下载包。")
+        self._verify_export_records(job)
         work_root = self._task_work_root(job)
         target = work_root / "HSD编号结果.zip"
         if target.is_symlink() or (target.exists() and _is_link_or_reparse(target)):
@@ -653,11 +861,16 @@ class JobManager:
         self._progress(job["id"], "正在打包下载结果…", 0, len(members))
         try:
             with temporary.open("xb") as stream:
-                with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=1) as archive:
+                with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_STORED) as archive:
                     for index, path in enumerate(members, 1):
                         relative = path.relative_to(directory).as_posix()
                         digest = hashlib.sha256()
-                        with path.open("rb") as source, archive.open(directory.name + "/" + relative, "w", force_zip64=True) as destination:
+                        member = zipfile.ZipInfo(directory.name + "/" + relative)
+                        member.compress_type = _download_compression(path)
+                        # Python 3.12 exposes per-member level through this
+                        # ZipInfo slot; retain the previously measured level 1.
+                        member._compresslevel = 1 if member.compress_type == zipfile.ZIP_DEFLATED else None
+                        with path.open("rb") as source, archive.open(member, "w", force_zip64=True) as destination:
                             for chunk in iter(lambda: source.read(4 * 1024 * 1024), b""):
                                 digest.update(chunk)
                                 destination.write(chunk)
@@ -675,13 +888,65 @@ class JobManager:
 
     def _finish_export(self, job, directory, report, timings):
         if job.get("_downloadable"):
+            started = time.perf_counter()
             self._package_download(job, directory)
-        with self.lock:
+            timings["packaging_seconds"] = round(time.perf_counter() - started, 3)
+        timings["export_total_seconds"] = round(time.perf_counter() - job["_export_started_perf"], 3)
+        batch_started = job.get("_batch_started_perf", job.get("_started_perf"))
+        if batch_started:
+            timings["batch_elapsed_seconds"] = round(time.perf_counter() - batch_started, 3)
+        self._record_export_timings(job, timings)
+        with self.job_operation(job["id"], internal=True), self.lock:
             job["output_dir"], job["report"], job["status"] = str(directory), report, "done"
             job["timings"] = timings
             job["error"] = None
             job["progress"] = {"message": "结果已打包，可直接下载" if job.get("_downloadable") else "导出完成，原文件已保留",
                 "current": report["exported"] + 1, "total": report["exported"] + 1}
+
+    def _verify_export_records(self, job):
+        completed = job.get("_completed_export") or {
+            "records_dir": job.get("_records_dir"), "record_manifest": job.get("_record_manifest")}
+        if not isinstance(completed.get("records_dir"), str) or not isinstance(completed.get("record_manifest"), dict):
+            raise ValueError("导出验证记录发生变化，不能重用此前结果。")
+        records = Path(completed["records_dir"])
+        root = self.record_directory(job["id"], "export_records")
+        manifest = completed.get("record_manifest", {})
+        if (not records.is_dir() or records.parent != root or _is_link_or_reparse(records)
+                or _is_link_or_reparse(root) or set(manifest) != {"处理记录.json", "对应关系.csv", "待处理清单.csv"}):
+            raise ValueError("导出验证记录发生变化，不能重用此前结果。")
+        for name, expected in manifest.items():
+            path = records / name
+            if not path.is_file() or _is_link_or_reparse(path) or sha256(path) != expected:
+                raise ValueError("导出验证记录发生变化，不能重用此前结果。")
+
+    def _record_export_timings(self, job, timings):
+        """Append measured packaging timings only to the verified private log.
+
+        Never re-baseline arbitrary changed record bytes: the previous manifest
+        must match both the bytes read and the file immediately before replace.
+        """
+        self._verify_export_records(job)
+        path = Path(job["_records_dir"]) / "处理记录.json"
+        manifest = job["_record_manifest"]
+        original = path.read_bytes()
+        if hashlib.sha256(original).hexdigest() != manifest[path.name]:
+            raise ValueError("导出验证记录发生变化，不能更新计时。")
+        payload = json.loads(original)
+        payload["timings"] = dict(timings)
+        encoded = json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False).encode("utf-8")
+        temporary = path.with_name(".timings-" + uuid.uuid4().hex + ".tmp")
+        try:
+            with temporary.open("xb") as stream:
+                stream.write(encoded)
+                stream.flush()
+                os.fsync(stream.fileno())
+            expected = hashlib.sha256(encoded).hexdigest()
+            if sha256(temporary) != expected or sha256(path) != manifest[path.name] or _is_link_or_reparse(path):
+                raise ValueError("导出验证记录发生变化，不能更新计时。")
+            os.replace(temporary, path)
+            manifest[path.name] = expected
+        finally:
+            temporary.unlink(missing_ok=True)
 
     def download_asset(self, identifier):
         with self.lock:
@@ -708,7 +973,7 @@ class JobManager:
             self.jobs[identifier]["error"] = str(exc) or type(exc).__name__
 
     def snapshot(self, identifier):
-        with self.lock:
+        with self.job_operation(identifier):
             job = self._get(identifier)
             result = {k: copy.deepcopy(v) for k, v in job.items() if not k.startswith("_")}
             result["output_root"] = job["_output_root"]
@@ -716,10 +981,15 @@ class JobManager:
             result["revision"] = job.get("revision", 0)
             if job["status"] == "queued":
                 order = job.get("_queue_order", float("inf"))
-                ahead = sum(j is not job and (j.get("_queue_order", float("inf")) < order
-                    or ("_queue_order" not in j and j["status"] in BUSY and j["status"] != "queued"))
-                    for j in self.jobs.values())
+                stage = self._stage_for(job)
+                with self.lock:
+                    queued_jobs = list(self.jobs.values())
+                ahead = sum(j is not job and self._stage_for(j) == stage
+                    and j["status"] in BUSY and (j.get("_queue_order", float("inf")) < order
+                    or ("_queue_order" not in j and j["status"] != "queued"))
+                    for j in queued_jobs)
                 result["queue_position"] = ahead + 1
+                result["queue_stage"] = stage
             else:
                 result["queue_position"] = 0
             result["download_ready"] = bool(job["status"] == "done" and job.get("_downloadable")
@@ -750,7 +1020,7 @@ class JobManager:
 
     def image_asset(self, identifier, kind, item_id, thumbnail=False):
         """Generate each task-scoped thumbnail/hash once; previews never change in a job."""
-        with self.lock:
+        with self.job_operation(identifier):
             job = self._get(identifier)
             source = self.image_path(identifier, kind, item_id)
             key = (kind, item_id, thumbnail)

@@ -14,11 +14,12 @@ import xml.etree.ElementTree as ET
 
 from acceptance_client import Client
 from build_manifest import digest, inputs
+from acceptance_records import read_export_record
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def verify(base, work, bundle, expected_counts=None):
+def verify(base, work, bundle, expected_counts=None, *, data_dir):
     work.mkdir(parents=True, exist_ok=True)
     original = ROOT / "测试样本" / "10月表格.xlsx"
     ai_zip = ROOT / "测试样本" / "10.10.zip"
@@ -77,7 +78,9 @@ def verify(base, work, bundle, expected_counts=None):
     result = client.wait(identifier, timeout=180)
     assert result["status"] == "done"
     output = Path(result["output_dir"])
-    report = json.loads((output / "处理记录.json").read_text("utf-8"))
+    report = read_export_record(data_dir, identifier)
+    assert {p.relative_to(output).as_posix() for p in output.rglob('*') if p.is_file()} == {
+        report['workbook'], *("已编号AI/" + item['output'] for item in report['mapping'])}
     assert report["new_numbers"] == 2
     assert report["exported"] == job["stats"]["exportable"]
     assert report["pending"] == 60 - report["exported"]
@@ -136,10 +139,11 @@ if __name__ == "__main__":
     parser.add_argument("--work", type=Path)
     parser.add_argument("--expected-counts", type=Path)
     parser.add_argument("--bundle", type=Path, required=True)
+    parser.add_argument("--data-dir", type=Path, required=True, help="Isolated test instance data directory (private records stay on host)")
     args = parser.parse_args()
     expected = json.loads(args.expected_counts.read_text("utf-8"))["counts"] if args.expected_counts else None
     import sys
     sys.path.insert(0, str(ROOT))
     bundle = args.bundle.resolve()
     work = args.work or ROOT / "tmp" / (bundle.parent.name + "_packaged_validation")
-    verify(args.base, work, bundle, expected)
+    verify(args.base, work, bundle, expected, data_dir=args.data_dir.resolve())
