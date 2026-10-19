@@ -107,12 +107,45 @@
   function applySettings(settings) {
     state.settings = settings;
     if (!state.enableDirty) $('ai-enabled').checked = settings.enabled === true;
-    $('model-label').textContent = `模型：${settings.model || 'DeepSeek'} · ${settings.enabled ? '已启用复核' : '复核已关闭'}`;
-    $('settings-state').textContent = settings.configured ? '已有 Key 配置，员工使用主机设置；保存配置不代表接口已验证。' : '尚无启用的 Key；添加并启用 Key 后可进行复核。';
-    $('qualification-state').textContent = settings.mode === 'validated' ? '已进入经验证模式：仅符合全部条件的结果可自动通过，其余仍需人工确认。' : '尚未取得自动通过资格。AI 建议仍需人工确认，不会因增加 Key 自动放行。';
-    $('persistence-state').textContent = settings.key_persistence === 'windows_dpapi' ? '主机使用当前 Windows 用户的 DPAPI 加密保存密钥。' : '当前环境只在本次服务运行期间保留密钥，重启后需重新填写。';
+    $('model-label').textContent = `模型：${settings.model || 'DeepSeek'} · ${settings.enabled ? '已启用' : '已关闭'}`;
+    $('settings-state').textContent = settings.configured ? '已配置 Key。' : '尚未配置 Key。';
     $('storage-warning').textContent = settings.storage_warning || '';
     $('storage-warning').classList.toggle('hidden', !settings.storage_warning);
+  }
+
+  function ledgerHtml(key) {
+    return `<div class="ledger-row" data-ledger-id="${escapeHtml(key.id)}"><span class="ledger-label">${escapeHtml(key.label || '未命名')}</span><code class="ledger-key">${escapeHtml(key.api_key || '')}</code><span class="badge">${isEnvironment(key) ? '环境变量' : '主机保存'}</span><button type="button" class="button quiet" data-copy>复制</button></div>`;
+  }
+
+  async function loadLedger() {
+    const stateLine = $('ledger-state'), list = $('ledger-list');
+    try {
+      const response = await fetch('/api/admin/ledger', {headers:{'X-HSD-Token':window.HSD_TOKEN}});
+      if (!response.ok) {
+        stateLine.textContent = response.status === 401 ? '登录已失效，请重新登录。' : '读取失败。';
+        return;
+      }
+      const payload = await response.json();
+      const keys = Array.isArray(payload.keys) ? payload.keys : [];
+      list.innerHTML = keys.length ? keys.map(ledgerHtml).join('') : '<p class="empty">暂未添加 Key。</p>';
+      stateLine.textContent = keys.length ? `${keys.length} 个` : '';
+    } catch (error) {
+      stateLine.textContent = '读取失败。';
+    }
+  }
+
+  async function copyLedgerKey(event) {
+    const button = event.target.closest('[data-copy]');
+    if (!button) return;
+    const code = button.closest('[data-ledger-id]')?.querySelector('.ledger-key');
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(code.textContent || '');
+      button.textContent = '已复制';
+    } catch (error) {
+      button.textContent = '复制失败';
+    }
+    setTimeout(() => { button.textContent = '复制'; }, 1200);
   }
 
   function eventKeyLabel(event) {
@@ -189,7 +222,8 @@
     try {
       const result = await request('/api/admin/keys',payload);
       applySettings(result.settings); state.pool = result.pool || {keys:[]}; renderKeys();
-      message('密钥配置已保存。密钥不会回显。');
+      message('密钥配置已保存。');
+      loadLedger();
     } catch (error) {
       if (error.status === 409) { state.conflict = true; message('其他页面已修改密钥配置。请点击“重新读取”，核对最新配置后再修改；本次未保存。',true); }
       else message(error.message || '配置未保存，请稍后重试。',true);
@@ -268,7 +302,8 @@
   }
 
   async function boot() {
-    $('admin-refresh').addEventListener('click',()=>refreshOverview(true));
+    $('admin-refresh').addEventListener('click',()=>{refreshOverview(true);loadLedger();});
+    $('ledger-list').addEventListener('click',copyLedgerKey);
     $('key-add-form').addEventListener('submit',addKeys);
     $('enable-form').addEventListener('submit',saveEnabled);
     $('ai-enabled').addEventListener('change',()=>{state.enableDirty = true;});
@@ -283,6 +318,7 @@
     window.addEventListener('pageshow',()=>{ if (state.stopped) { state.stopped = false; schedulePoll(0); } });
     window.addEventListener('beforeunload',()=>{ $('key-batch').value = ''; stopPolling(); });
     await refreshOverview(false);
+    loadLedger();
     schedulePoll();
   }
   boot().catch(()=>message('管理页面加载失败，请刷新后重试。',true));

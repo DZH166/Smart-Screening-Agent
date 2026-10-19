@@ -48,7 +48,7 @@ def test_correct_credentials_open_the_console(app):
     client = app.test_client()
     assert post_login(client).status_code == 200
     page = client.get("/admin").get_data(as_text=True)
-    assert "API Key 管理" in page and "退出登录" in page
+    assert "API Key" in page and "退出登录" in page and "Key 账本" in page
     assert client.get("/api/admin/overview").status_code == 200
 
 

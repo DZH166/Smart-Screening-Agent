@@ -254,7 +254,7 @@ def test_employee_settings_stay_minimal_and_cumulative_usage_stays_forbidden(adm
     assert "not-this-employees-job" not in json.dumps(settings.json)
 
 
-def test_host_can_add_multiple_keys_without_credentials_in_any_admin_response(admin_app):
+def test_host_can_add_multiple_keys_without_credentials_in_settings_or_pool(admin_app):
     client = admin_app.test_client()
     first = call(client, "/api/admin/overview")
     assert first.status_code == 200
@@ -276,6 +276,22 @@ def test_host_can_add_multiple_keys_without_credentials_in_any_admin_response(ad
         assert "fingerprint" not in text
     private_runtime = admin_app.config["HSD_MANAGER"].ai_settings.runtime()
     assert {row["api_key"] for row in private_runtime["keys"]} == {SECRET, other_secret}
+
+
+def test_admin_ledger_returns_full_keys_only_for_the_logged_in_host(admin_app):
+    client = admin_app.test_client()
+    revision = call(client, "/api/admin/overview").json["settings"]["key_revision"]
+    call(client, "/api/admin/keys", method="POST", payload={
+        "expected_revision": revision, "add": [{"label": "账本", "api_key": SECRET}]})
+    anonymous = admin_app.test_client().get(
+        "/api/admin/ledger", base_url=ORIGIN, environ_overrides={"REMOTE_ADDR": HOST})
+    assert anonymous.status_code == 401
+    assert SECRET not in anonymous.get_data(as_text=True)
+    authorized = call(client, "/api/admin/ledger")
+    assert authorized.status_code == 200
+    assert authorized.headers["Cache-Control"] == "no-store"
+    assert [row["api_key"] for row in authorized.json["keys"]] == [SECRET]
+    assert authorized.json["keys"][0]["label"] == "账本"
 
 
 def test_stale_admin_write_is_rejected_and_does_not_mutate_key_pool(admin_app):

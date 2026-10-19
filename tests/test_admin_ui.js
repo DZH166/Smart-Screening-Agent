@@ -25,7 +25,7 @@ const sandbox = {document:{hidden:false,getElementById:element,addEventListener(
   setTimeout(fn,delay){const id=nextTimer++;timers.set(id,{fn,delay});return id;},clearTimeout(id){timers.delete(id);},
   fetch:async(url,options)=>{calls.push({url,options});if(onFetch)onFetch(url,options);return {ok:response.status>=200&&response.status<300,status:response.status,json:async()=>response.body};},
 };
-vm.runInNewContext(source.replace("  boot().catch(()=>message('管理页面加载失败，请刷新后重试。',true));",'  window.testAdmin={state,usageText,keyStats,keyHtml,eventHtml,processDebug,renderKeys,applySettings,refreshOverview,addKeys,saveEnabled,mutateKeys,schedulePoll,poll,boot};'),sandbox);
+vm.runInNewContext(source.replace("  boot().catch(()=>message('管理页面加载失败，请刷新后重试。',true));",'  window.testAdmin={state,usageText,keyStats,keyHtml,ledgerHtml,loadLedger,eventHtml,processDebug,renderKeys,applySettings,refreshOverview,addKeys,saveEnabled,mutateKeys,schedulePoll,poll,boot};'),sandbox);
 const ui=sandbox.window.testAdmin;
 const initial={enabled:true,configured:true,model:'synthetic-model',mode:'evaluation',key_revision:4,key_persistence:'windows_dpapi',keys:[{id:'key-a',label:'主密钥',enabled:true,source:'saved'}]};
 const stopEvent={preventDefault(){}};
@@ -56,7 +56,11 @@ async function main(){
   assert.ok(ui.eventHtml({seq:10,stage:'returned',key_id:'removed-opaque'}).includes('已移除 Key removed-opaque'));
 
   ui.applySettings(json(initial));ui.state.pool={keys:[]};ui.renderKeys();
-  assert.ok(element('qualification-state').textContent.includes('仍需人工确认'));
+  assert.equal(element('settings-state').textContent,'已配置 Key。');
+  const ledgerRow=ui.ledgerHtml({id:'ledger-a',label:'主密钥',api_key:'sk-ledger-visible-value'});
+  assert.ok(ledgerRow.includes('sk-ledger-visible-value'));
+  assert.ok(ledgerRow.includes('data-copy')&&ledgerRow.includes('data-ledger-id'));
+  assert.ok(!ledgerRow.includes('<script>'));
   element('debug-follow').checked=true;
   assert.equal(ui.processDebug({instance:'first',events:[{seq:1,stage:'requesting',message:'正在调用'}],cursor:1,last_seq:9,oldest_seq:1,dropped:0,active:[]}),true);
   assert.equal(ui.state.cursor,1,'do not skip backlog by jumping to last_seq');
@@ -74,7 +78,7 @@ async function main(){
   element('key-batch').value=synthetic+'\n'+synthetic+'-second';
   onFetch=(url,options)=>{assert.equal(element('key-batch').value,'','clear secrets before sending');assert.equal(url,'/api/admin/keys');assert.equal(options.headers['X-HSD-Token'],'synthetic-csrf');};
   await ui.addKeys(stopEvent);onFetch=null;
-  const payload=JSON.parse(calls.at(-1).options.body);
+  const payload=JSON.parse(calls.filter((call)=>call.url==='/api/admin/keys').at(-1).options.body);
   assert.equal(payload.expected_revision,4);assert.equal(payload.add.length,2);assert.equal(payload.add[0].label,'密钥 1');
   assert.equal(element('key-batch').value,'');assert.equal(ui.state.settings.key_revision,5);
   assert.ok(element('admin-message').textContent.includes('已保存'));
@@ -109,6 +113,8 @@ async function main(){
   assert.ok(!/localStorage|sessionStorage|console\./.test(source),'keys and debug are not persisted or logged by the UI');
   const html=fs.readFileSync(path.join(__dirname,'../hsd_tool/static/admin.html'),'utf8');
   assert.ok(html.includes('window.HSD_TOKEN = __HSD_TOKEN__'));assert.ok(html.includes('href="/"'));
+  assert.ok(html.includes('id="ledger-list"')&&html.includes('id="ledger-state"'),'the key ledger is present');
+  assert.ok(!html.includes('usage-panel')&&!html.includes('qualification-state'),'noisy panels stay removed');
   const css=fs.readFileSync(path.join(__dirname,'../hsd_tool/static/admin.css'),'utf8');
   assert.ok(css.includes('#key-batch{-webkit-text-security:disc}'),'batch credentials default to masked input');
   console.log('Admin UI synthetic assertions passed');

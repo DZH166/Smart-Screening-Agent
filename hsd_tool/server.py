@@ -301,6 +301,21 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
             raise ValueError("调试记录游标或条数无效。") from None
         return jsonify(manager.ai_debug.snapshot(after, limit))
 
+    @app.get("/api/admin/ledger")
+    def admin_ledger():
+        """Full key values for the host operator's own reuse, explicitly requested.
+
+        This is the one place credentials are returned to a page. It is limited
+        to the password-protected, host-only admin area, responses are marked
+        no-store by the global header policy, and nothing here is logged.
+        """
+        runtime = manager.ai_settings.runtime()
+        return jsonify(keys=[{"id": row["id"], "label": row["label"],
+                              "enabled": row["enabled"],
+                              "source": row.get("source", "saved"),
+                              "api_key": row["api_key"]}
+                             for row in runtime.get("keys", []) if row.get("api_key")])
+
     @app.post("/api/admin/keys")
     def admin_keys():
         with manager.lock:
