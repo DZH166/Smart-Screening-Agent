@@ -17,6 +17,7 @@ from werkzeug.exceptions import BadRequest, Conflict, RequestEntityTooLarge
 from .service import JobManager
 from .uploads import EmployeeUploads, DiskBudget, UploadWriteError, MAX_UPLOAD_BYTES, MAX_WORKBOOK_BYTES, MAX_SOURCE_BYTES, disk_full
 from . import __version__
+from . import admin_auth
 
 
 class EmployeeUploadRequest(Request):
@@ -68,11 +69,13 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
     static = Path(__file__).resolve().parent / "static"
     app = Flask(__name__, static_folder=str(static), static_url_path="/static")
     app.request_class = EmployeeUploadRequest
-    app.config.update(MAX_CONTENT_LENGTH=64 * 1024, JSON_AS_ASCII=False)
+    app.config.update(MAX_CONTENT_LENGTH=64 * 1024, JSON_AS_ASCII=False,
+                      SECRET_KEY=secrets.token_bytes(32))
     if lan:
-        app.config.update(SECRET_KEY=secrets.token_bytes(32), SESSION_COOKIE_HTTPONLY=True,
+        app.config.update(SESSION_COOKIE_HTTPONLY=True,
                           SESSION_COOKIE_SAMESITE="Strict", SESSION_COOKIE_NAME="hsd_lan_" + secrets.token_hex(6),
                           PERMANENT_SESSION_LIFETIME=timedelta(hours=8), SESSION_REFRESH_EACH_REQUEST=False)
+    admin_limiter = admin_auth.LoginLimiter()
     manager = JobManager(data_dir, settings_dir=settings_dir)
     uploads = EmployeeUploads(data_dir) if lan else None
     app.config["HSD_UPLOADS"] = uploads
@@ -159,6 +162,12 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
             in {"admin.html", "admin.js", "admin.css"})
         if remote and (request.path == "/admin" or request.path.startswith("/api/admin/") or protected_static):
             return jsonify(error="管理员分区只能在主机上打开。"), 403
+        if request.path == "/admin" or request.path.startswith("/api/admin/"):
+            # A password gate on top of the existing host-only and token checks.
+            if not admin_auth.authenticated(session):
+                if request.path.startswith("/api/admin/"):
+                    return jsonify(error="请先登录管理员分区。"), 401
+                return (static / "admin-login.html").read_text("utf-8")
         if lan:
             employee_id()
         if lan and (request.view_args or {}).get("identifier"):
@@ -171,7 +180,7 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
                 else:
                     lan.validate_paths({"workbook_path": job["_workbook_path"], "source_path": job["_source_path"],
                                         "output_root": job["_output_root"]})
-        if request.method == "POST":
+        if request.method == "POST" and request.endpoint != "admin_login":
             provided = request.headers.get("X-HSD-Token", "")
             if not secrets.compare_digest(provided.encode(), token.encode()):
                 return jsonify(error="会话已失效，请重新打开工具页面。"), 403
@@ -246,6 +255,34 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
     @app.get("/admin")
     def admin_page():
         return (static / "admin.html").read_text("utf-8").replace("__HSD_TOKEN__", json.dumps(token))
+
+    @app.get("/admin/login")
+    def admin_login_page():
+        return (static / "admin-login.html").read_text("utf-8")
+
+    @app.post("/admin/login")
+    def admin_login():
+        """Single operator account; failures are throttled, nothing is logged."""
+        address = request.remote_addr or ""
+        if admin_limiter.blocked(address):
+            return jsonify(error="尝试次数过多，请一分钟后重试。"), 429
+        origin = request.headers.get("Origin")
+        if origin and origin != request.host_url.rstrip("/"):
+            return jsonify(error="请求来源不匹配。"), 403
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return jsonify(error="登录请求格式不正确。"), 400
+        if not admin_auth.verify_credentials(payload.get("username"), payload.get("password")):
+            admin_limiter.fail(address)
+            return jsonify(error="账号或密码不正确。"), 401
+        admin_limiter.reset(address)
+        admin_auth.grant_session(session)
+        return jsonify(ok=True)
+
+    @app.post("/admin/logout")
+    def admin_logout():
+        admin_auth.revoke_session(session)
+        return jsonify(ok=True)
 
     @app.get("/api/admin/overview")
     def admin_overview():

@@ -11,7 +11,7 @@
 </head>
 <body>
   <div class="admin-shell">
-    <header class="admin-header"><div><a class="back-link" href="/">← 返回图片编号</a><h1>DeepSeek 管理</h1></div><button id="admin-refresh" class="button secondary" type="button">重新读取</button></header>
+    <header class="admin-header"><div><a class="back-link" href="/">← 返回图片编号</a><h1>DeepSeek 管理</h1></div><div class="header-actions"><button id="admin-refresh" class="button secondary" type="button">重新读取</button><button id="admin-logout" class="button secondary" type="button">退出登录</button></div></header>
     <div id="admin-message" class="notice hidden" role="status" aria-live="polite"></div>
     <main>
       <section class="panel settings-panel" aria-labelledby="settings-heading">
@@ -35,7 +35,6 @@
         <div id="debug-active" class="active-list" aria-live="polite"></div>
         <div id="debug-log" class="debug-log" tabindex="0" aria-label="DeepSeek 调试记录"><p id="debug-empty" class="empty">暂时没有调试记录。</p><ol id="debug-events" class="events"></ol></div>
       </section>
-      <section class="panel usage-panel" aria-labelledby="usage-heading"><div class="section-heading"><div><h2 id="usage-heading">累计用量与费用估算</h2><p id="usage-counts">正在读取用量…</p></div><strong id="usage-cost">费用估算暂不可用</strong></div><p id="usage-unknown" class="warning-text hidden"></p><p class="muted">按已知用量与峰值单价估算，单位 USD；实际费用以 DeepSeek 账单为准。未知用量不计为零。</p></section>
     </main>
   </div>
 </body>

@@ -115,14 +115,6 @@
     $('storage-warning').classList.toggle('hidden', !settings.storage_warning);
   }
 
-  function applyUsage(usage) {
-    const text = usageText(usage);
-    $('usage-counts').textContent = text.counts;
-    $('usage-cost').textContent = text.cost;
-    $('usage-unknown').textContent = text.unknown;
-    $('usage-unknown').classList.toggle('hidden', !text.unknown);
-  }
-
   function eventKeyLabel(event) {
     if (event.key_id) {
       const key = (state.pool.keys || []).find((item)=>item.id === event.key_id);
@@ -184,7 +176,7 @@
         message('密钥配置已在其他页面更新。请点击“重新读取”，核对最新配置后再修改。',true);
       }
       state.pool = result.pool || {keys:[]}; renderKeys();
-      applyUsage(result.usage); processDebug(result.debug);
+      processDebug(result.debug);
       if (manual) message('已重新读取最新设置。');
     } catch (error) { message(error.status === 403 ? '此分区仅限主机管理员在本机访问。' : error.message,true); }
     finally { state.loading = false; controls(); }
@@ -282,6 +274,10 @@
     $('ai-enabled').addEventListener('change',()=>{state.enableDirty = true;});
     $('key-list').addEventListener('click',keyAction);
     $('key-list').addEventListener('submit',renameKey);
+    $('admin-logout').addEventListener('click',async()=>{
+      try { await fetch('/admin/logout',{method:'POST',headers:{'Content-Type':'application/json','X-HSD-Token':window.HSD_TOKEN},body:'{}'}); } catch (error) {}
+      window.location.replace('/admin/login');
+    });
     document.addEventListener('visibilitychange',()=>{ if (document.hidden) { stopPolling(); $('debug-connection').textContent = '页面已隐藏，暂停刷新；返回后继续读取。'; } else schedulePoll(0); });
     window.addEventListener('pagehide',()=>{ state.stopped = true; stopPolling(); $('key-batch').value = ''; });
     window.addEventListener('pageshow',()=>{ if (state.stopped) { state.stopped = false; schedulePoll(0); } });

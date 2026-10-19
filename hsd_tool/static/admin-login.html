@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>管理员登录 · 智筛 Agent</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center;
+         font-family: system-ui, "Microsoft YaHei", "PingFang SC", sans-serif;
+         background: #f4f5f7; color: #1f2329; }
+  main { width: min(380px, calc(100vw - 32px)); background: #fff; border-radius: 14px;
+         padding: 30px 28px 26px; box-shadow: 0 10px 30px rgba(15, 23, 42, .10); }
+  h1 { font-size: 19px; margin: 0 0 6px; }
+  p.hint { margin: 0 0 22px; font-size: 13px; color: #6b7280; line-height: 1.6; }
+  label { display: block; font-size: 13px; color: #4b5563; margin: 0 0 6px; }
+  input { width: 100%; height: 40px; padding: 0 12px; margin-bottom: 16px;
+          border: 1px solid #d1d5db; border-radius: 8px; font-size: 15px; background: #fff; }
+  input:focus { outline: 2px solid #2563eb33; border-color: #2563eb; }
+  button { width: 100%; height: 42px; border: 0; border-radius: 8px; cursor: pointer;
+           background: #1f6feb; color: #fff; font-size: 15px; }
+  button:disabled { opacity: .6; cursor: default; }
+  #message { min-height: 20px; margin: 12px 0 0; font-size: 13px; color: #b91c1c; }
+</style>
+</head>
+<body>
+<main>
+  <h1>管理员登录</h1>
+  <p class="hint">该分区仅用于主机管理员，登录后可管理 DeepSeek Key 与查看实时调试记录。</p>
+  <form id="login">
+    <label for="account">账号</label>
+    <input id="account" name="account" autocomplete="username" inputmode="numeric" autofocus>
+    <label for="password">密码</label>
+    <input id="password" name="password" type="password" autocomplete="current-password">
+    <button id="submit" type="submit">登录</button>
+    <p id="message" role="alert"></p>
+  </form>
+</main>
+<script>
+(function () {
+  var form = document.getElementById('login');
+  var message = document.getElementById('message');
+  var submit = document.getElementById('submit');
+  form.addEventListener('submit', async function (event) {
+    event.preventDefault();
+    message.textContent = '';
+    submit.disabled = true;
+    try {
+      var response = await fetch('/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: document.getElementById('account').value,
+          password: document.getElementById('password').value
+        })
+      });
+      var payload = await response.json().catch(function () { return {}; });
+      if (response.ok) {
+        window.location.replace('/admin');
+        return;
+      }
+      message.textContent = payload.error || '登录失败，请重试。';
+    } catch (error) {
+      message.textContent = '无法连接本机服务，请确认程序仍在运行。';
+    } finally {
+      document.getElementById('password').value = '';
+      submit.disabled = false;
+    }
+  });
+})();
+</script>
+</body>
+</html>

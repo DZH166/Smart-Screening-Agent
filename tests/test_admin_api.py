@@ -11,6 +11,7 @@ import pytest
 from hsd_tool.ai_admin import AiDebugTrace
 from hsd_tool.lan import LanAccess
 from hsd_tool.server import create_app
+from hsd_tool import admin_auth
 
 
 HOST = "192.168.0.160"
@@ -32,6 +33,11 @@ def call(client, path, *, address=HOST, method="GET", token=TOKEN,
     if origin is not None:
         headers["Origin"] = origin
     options = {"json": payload} if payload is not None else {}
+    if path == "/admin" or path.startswith("/api/admin/"):
+        # The console password is covered by test_admin_login; these tests cover
+        # the key-management boundaries behind it.
+        with client.session_transaction() as stored:
+            admin_auth.grant_session(stored)
     return client.open(path, method=method, base_url=ORIGIN, headers=headers,
                        environ_overrides={"REMOTE_ADDR": address}, **options)
 
@@ -50,7 +56,7 @@ def admin_app(tmp_path, monkeypatch):
     lan = LanAccess(f"{HOST}/24", inputs, tmp_path / "host-outputs", code=CODE)
     application = create_app(tmp_path / "data", token=TOKEN, lan=lan,
                              settings_dir=tmp_path / "shared-settings")
-    application.config.update(TESTING=True, HSD_PORT=8817)
+    application.config.update(TESTING=True, HSD_PORT=8817, SERVER_NAME=f"{HOST}:8817")
     yield application
     application.config["HSD_MANAGER"].close()
 
