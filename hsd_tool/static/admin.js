@@ -3,15 +3,11 @@
 (() => {
   const $ = (id) => document.getElementById(id);
   const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const state = {settings:null, pool:{keys:[]}, loading:false, saving:false, conflict:false,
-    keysSignature:'', activeSignature:'', cursor:0, instance:null, timer:null, polling:false, stopped:false, polls:0, events:[], enableDirty:false};
-  const stages = {run_started:'开始复核',run_finished:'本批复核结束',disabled:'复核未启用',no_cases:'没有待复核项',
-    ineligible:'不满足复核条件',preparing:'准备图片',requesting:'正在调用',retrying:'等待重试',returned:'已返回',
-    verifying:'校验结果',manual:'转人工确认',auto:'条件自动通过',failed:'复核失败',skipped:'未进行复核',pool_unavailable:'密钥暂不可用'};
-  const verdicts = {same:'建议相同',different:'发现差异',uncertain:'无法确定',inconclusive:'无法确定',unknown:'无法确定'};
+  const state = {settings:null, pool:{keys:[]}, loading:false, saving:false, refreshing:false, conflict:false,
+    keysSignature:'', timer:null, polling:false, stopped:false, enableDirty:false};
   const statuses = {ready:['可用','ok'],available:['可用','ok'],active:['调用中','ok'],busy:['调用中','ok'],
     cooldown:['冷却中','warning'],rate_limited:['限流冷却中','warning'],disabled:['已停用',''],invalid:['密钥不可用','error'],
-    service_disabled:['复核已关闭',''],paused_authentication:['认证失败，已暂停','error'],paused_insufficient_balance:['余额不足，已暂停','error'],
+    service_disabled:['AI 已关闭',''],paused_authentication:['认证失败，已暂停','error'],paused_insufficient_balance:['余额不足，已暂停','error'],
     unauthorized:['密钥不可用','error'],unavailable:['暂不可用','warning'],failed:['调用失败','error'],idle:['待调用','']};
 
   function message(text, error = false) {
@@ -35,35 +31,25 @@
       }
       return result;
     } catch (error) {
-      if (error.name === 'AbortError') throw new Error('读取超时，请确认主机工具仍在运行。');
+      if (error.name === 'AbortError') throw new Error('请求超时，请刷新设置确认结果。');
       if (error instanceof TypeError) throw new Error('暂时无法连接主机工具，请稍后重试。');
       throw error;
     } finally { clearTimeout(timeout); }
   }
 
-  function usageText(usage) {
-    if (!usage) return {counts:'用量记录暂不可用',cost:'费用估算暂不可用',unknown:''};
-    const unknown = Math.max(0, Number(usage.unknown_usage_requests || 0));
-    const amount = usage.estimated_usd ?? usage.estimated_usd_upper_bound;
-    const known = typeof amount === 'number' && Number.isFinite(amount);
-    const incomplete = unknown > 0 || !!usage.cost_incomplete || usage.estimated_usd_upper_bound === null;
-    return {counts:`累计 ${Number(usage.requests || 0)} 次请求 · 成功 ${Number(usage.successes || 0)} 次 · 未成功 ${Number(usage.failures || 0)} 次`,
-      cost:known ? `${incomplete ? '已知用量费用估算' : '费用估算'} US$ ${amount.toFixed(amount < 0.01 ? 6 : 4)}` : '费用估算暂不可用',
-      unknown:unknown > 0 ? `另有 ${unknown} 次用量未知，费用统计不完整。` : incomplete ? '部分用量尚未返回，费用统计不完整。' : ''};
-  }
-
   function isEnvironment(key) { return /^(environment|env)$/i.test(String(key.source || '')); }
   function keyStats(key) {
-    const status = key.enabled === false ? ['已停用',''] : key.status === 'available' && !Number(key.requests) ? ['待调用',''] : statuses[key.status] || ['等待调用',''];
+    const status = key.enabled === false ? ['已停用',''] : key.status === 'available' && !Number(key.requests) ? ['待验证',''] : statuses[key.status] || ['待验证',''];
     const cooldown = Number(key.cooldown_seconds || 0);
-    const usage = usageText(key);
-    return {status,detail:`${Number(key.requests || 0)} 次请求 · 成功 ${Number(key.successes || 0)} · 未成功 ${Number(key.failures || 0)}`,
-      cost:usage.cost,unknown:usage.unknown,cooldown:cooldown > 0 ? `冷却剩余约 ${Math.ceil(cooldown)} 秒` : ''};
+    const note = cooldown > 0 ? `冷却剩余约 ${Math.ceil(cooldown)} 秒` :
+      key.status === 'paused_authentication' ? '请检查 Key，修复后先停用再启用。' :
+      key.status === 'paused_insufficient_balance' ? '请在 DeepSeek 补充余额后，先停用再启用。' : '';
+    return {status,note};
   }
 
   function keyHtml(key) {
     const stats = keyStats(key), environment = isEnvironment(key);
-    return `<article class="key-card" data-key-id="${escapeHtml(key.id)}"><div class="key-heading"><div class="key-name"><span>${escapeHtml(key.label || '未命名密钥')}</span><span class="badge ${stats.status[1]}" data-key-status>${stats.status[0]}</span><span class="badge">${environment ? '环境变量' : '主机保存'}</span></div><div class="key-actions">${environment ? '' : '<button type="button" class="button quiet" data-action="rename">改标签</button>'}<button type="button" class="button secondary" data-action="toggle">${key.enabled === false ? '启用' : '停用'}</button>${environment ? '' : '<button type="button" class="button quiet" data-action="remove">删除</button>'}</div></div><div class="key-meta"><span data-key-counts>${escapeHtml(stats.detail)}</span><span data-key-cost>${escapeHtml(stats.cost)}</span><span data-key-cooldown>${escapeHtml(stats.cooldown)}</span></div><p class="warning-text${stats.unknown ? '' : ' hidden'}" data-key-unknown>${escapeHtml(stats.unknown)}</p>${environment ? '<p class="key-meta">来自主机环境变量，可启停；修改或删除请在主机环境变量中操作。</p>' : ''}<form class="key-edit hidden" data-rename-form><label>密钥标签</label><input type="text" maxlength="64" autocomplete="off" aria-label="密钥标签" value="${escapeHtml(key.label || '')}"><button type="submit" class="button secondary">保存标签</button><button type="button" class="button quiet" data-action="cancel-rename">取消</button></form><div class="key-delete hidden" data-delete-prompt><p>确认删除此 Key？之后的新请求将不再使用它。</p><button type="button" class="button danger" data-action="confirm-remove">确认删除</button><button type="button" class="button quiet" data-action="cancel-remove">取消</button></div></article>`;
+    return `<article class="key-card" data-key-id="${escapeHtml(key.id)}"><div class="key-heading"><div class="key-name"><span>${escapeHtml(key.label || '未命名密钥')}</span><span class="badge ${stats.status[1]}" data-key-status>${stats.status[0]}</span>${environment ? '<span class="badge">环境变量</span>' : ''}</div><div class="key-actions">${environment ? '' : '<button type="button" class="button quiet" data-action="rename">改标签</button>'}<button type="button" class="button secondary" data-action="toggle">${key.enabled === false ? '启用' : '停用'}</button>${environment ? '' : '<button type="button" class="button quiet" data-action="remove">删除</button>'}</div></div><p class="key-note${stats.note ? '' : ' hidden'}" data-key-note>${escapeHtml(stats.note)}</p>${environment ? '<p class="muted">来自主机环境变量；修改或删除请在主机操作。</p>' : ''}<form class="key-edit hidden" data-rename-form><label>密钥标签</label><input type="text" maxlength="64" autocomplete="off" aria-label="密钥标签" value="${escapeHtml(key.label || '')}"><button type="submit" class="button secondary">保存标签</button><button type="button" class="button quiet" data-action="cancel-rename">取消</button></form><div class="key-delete hidden" data-delete-prompt><p>确认删除此 Key？新请求将不再使用它。</p><button type="button" class="button danger" data-action="confirm-remove">确认删除</button><button type="button" class="button quiet" data-action="cancel-remove">取消</button></div></article>`;
   }
 
   function currentKeys() {
@@ -74,7 +60,8 @@
   function controls() {
     const locked = state.loading || state.saving || !state.settings || state.conflict;
     ['ai-enabled','enable-save','key-batch','key-add'].forEach((id) => $(id).disabled = locked);
-    $('admin-refresh').disabled = state.loading || state.saving;
+    $('admin-refresh').disabled = state.loading || state.saving || state.refreshing;
+    $('admin-refresh').textContent = state.refreshing ? '刷新中…' : '刷新设置';
     $('key-add').textContent = state.saving ? '正在保存…' : '添加 Key';
     $('key-list').querySelectorAll('button,input').forEach((node) => node.disabled = locked);
   }
@@ -87,18 +74,15 @@
       state.keysSignature = signature;
       $('key-list').innerHTML = keys.length ? keys.map(keyHtml).join('') : '<p class="empty">尚未配置 Key，可在上方批量添加。</p>';
     } else {
-      // Live usage updates do not replace label inputs, focus or open confirmations.
+      // Status refreshes preserve label inputs, focus and open confirmations.
       const byId = new Map(keys.map((key) => [key.id,key]));
       $('key-list').querySelectorAll('[data-key-id]').forEach((card) => {
         const key = byId.get(card.dataset.keyId);
         if (!key) return;
         const stats = keyStats(key), status = card.querySelector('[data-key-status]');
         status.textContent = stats.status[0]; status.className = `badge ${stats.status[1]}`;
-        card.querySelector('[data-key-counts]').textContent = stats.detail;
-        card.querySelector('[data-key-cost]').textContent = stats.cost;
-        card.querySelector('[data-key-cooldown]').textContent = stats.cooldown;
-        const unknown = card.querySelector('[data-key-unknown]');
-        unknown.textContent = stats.unknown; unknown.classList.toggle('hidden', !stats.unknown);
+        const note = card.querySelector('[data-key-note]');
+        note.textContent = stats.note; note.classList.toggle('hidden', !stats.note);
       });
     }
     controls();
@@ -107,87 +91,35 @@
   function applySettings(settings) {
     state.settings = settings;
     if (!state.enableDirty) $('ai-enabled').checked = settings.enabled === true;
-    $('model-label').textContent = `模型：${settings.model || 'DeepSeek'} · ${settings.enabled ? '已启用 AI 查找与复核' : 'AI 已关闭，使用本机匹配'}`;
-    $('settings-state').textContent = settings.configured ? '已有 Key 配置，员工使用主机设置；保存配置不代表接口已验证。' : '尚无启用的 Key；添加并启用 Key 后可进行 AI 查找与复核。';
+    $('settings-state').textContent = !settings.enabled ? '已关闭 AI，使用本机匹配。' : settings.configured ? '员工共用主机配置，无需填写 Key。' : '请添加并启用 Key，才能使用 AI。';
     $('qualification-state').textContent = settings.mode === 'validated' ? 'AI 二次复核已进入经验证模式：仅符合全部条件的结果可自动通过，其余仍需人工确认。' : 'AI 二次复核尚未取得条件自动通过资格，复核建议仍需人工确认。AI 查找到的候选只有通过本机独立核验，才能按本机规则自动通过；增加 Key 不会放宽判定。';
     $('persistence-state').textContent = settings.key_persistence === 'windows_dpapi' ? '主机使用当前 Windows 用户的 DPAPI 加密保存密钥。' : '当前环境只在本次服务运行期间保留密钥，重启后需重新填写。';
     $('storage-warning').textContent = settings.storage_warning || '';
     $('storage-warning').classList.toggle('hidden', !settings.storage_warning);
   }
 
-  function applyUsage(usage) {
-    const text = usageText(usage);
-    $('usage-counts').textContent = text.counts;
-    $('usage-cost').textContent = text.cost;
-    $('usage-unknown').textContent = text.unknown;
-    $('usage-unknown').classList.toggle('hidden', !text.unknown);
-  }
-
-  function eventKeyLabel(event) {
-    if (event.key_id) {
-      const key = (state.pool.keys || []).find((item)=>item.id === event.key_id);
-      return key?.label || `已移除 Key ${event.key_id}`;
-    }
-    return event.key_label || '';
-  }
-
-  function eventHtml(event) {
-    const stage = stages[event.stage] || '复核记录';
-    const keyLabel = eventKeyLabel(event);
-    const metadata = [event.job_id ? `任务 ${event.job_id}` : '',event.row_id !== undefined && event.row_id !== null ? `图片 ${event.row_id}` : '',keyLabel ? `Key：${keyLabel}` : '',Number(event.attempt) > 0 ? `第 ${event.attempt} 次尝试` : ''].filter(Boolean).join(' · ');
-    const fields = [['模型',event.model],['Key 标识',event.key_id],['候选标识',event.candidate_id],['判定类型',event.reason_code],['错误类型',event.error_code],['耗时',typeof event.elapsed_ms === 'number' ? `${(event.elapsed_ms / 1000).toFixed(2)} 秒` : '']].filter(([,value]) => value !== undefined && value !== null && value !== '');
-    const usage = event.usage ? usageText(event.usage) : null;
-    const details = fields.length || usage ? `<details><summary>调用详情</summary><dl>${fields.map(([label,value])=>`<dt>${label}</dt><dd>${escapeHtml(value)}</dd>`).join('')}</dl>${usage ? `<p>${escapeHtml(usage.cost)}</p>${usage.unknown ? `<p>${escapeHtml(usage.unknown)}</p>` : ''}` : ''}</details>` : '';
-    return `<li class="event" data-event-seq="${Number(event.seq) || 0}"><div class="event-heading"><span class="event-stage">${stage}</span><time>${escapeHtml(event.time || '')}</time>${verdicts[event.verdict] ? `<span class="badge">${verdicts[event.verdict]}</span>` : ''}</div><p>${escapeHtml(event.message || stage)}</p>${event.gate_reason ? `<p>判定依据：${escapeHtml(event.gate_reason)}</p>` : ''}${metadata ? `<p class="event-meta">${escapeHtml(metadata)}</p>` : ''}${details}</li>`;
-  }
-
-  function processDebug(debug) {
-    if (!debug) return;
-    const instanceChanged = state.instance && debug.instance && state.instance !== debug.instance;
-    if (instanceChanged || debug.reset) {
-      state.cursor = 0; state.events = []; $('debug-events').replaceChildren();
-      $('debug-gap').textContent = '服务已重新启动，以下为当前服务可用记录。';
-      $('debug-gap').classList.remove('hidden');
-    }
-    if (debug.instance) state.instance = debug.instance;
-    if (Number(debug.oldest_seq) > state.cursor + 1 && Number(debug.dropped) > 0) {
-      $('debug-gap').textContent = '较早记录已省略，当前只显示服务缓冲区中仍可读取的调试记录。';
-      $('debug-gap').classList.remove('hidden');
-    }
-    const log = $('debug-log'), follow = $('debug-follow').checked;
-    const fresh = (Array.isArray(debug.events) ? debug.events : []).filter((event) => Number.isInteger(event.seq) && event.seq > state.cursor);
-    if (fresh.length) {
-      $('debug-events').insertAdjacentHTML('beforeend', fresh.map(eventHtml).join(''));
-      state.events.push(...fresh.map((event)=>event.seq));
-      // Bound DOM growth independently from the server's ring buffer.
-      while (state.events.length > 500) { state.events.shift(); $('debug-events').firstElementChild?.remove(); }
-      $('debug-empty').classList.add('hidden');
-      if (follow) log.scrollTop = log.scrollHeight;
-    }
-    // cursor is the last returned event, never last_seq while a backlog remains.
-    if (Number.isInteger(debug.cursor)) state.cursor = Math.max(state.cursor, debug.cursor);
-    const activeHtml = (Array.isArray(debug.active) ? debug.active : []).map((event) => `<div class="active-task"><strong>${escapeHtml(stages[event.stage] || '复核中')}</strong> · ${escapeHtml(event.message || '')}${event.job_id ? ` · 任务 ${escapeHtml(event.job_id)}` : ''}${event.row_id !== undefined && event.row_id !== null ? ` · 图片 ${escapeHtml(event.row_id)}` : ''}${eventKeyLabel(event) ? ` · Key：${escapeHtml(eventKeyLabel(event))}` : ''}${typeof event.elapsed_ms === 'number' ? ` · 已等待 ${(event.elapsed_ms / 1000).toFixed(1)} 秒` : ''}</div>`).join('');
-    if (activeHtml !== state.activeSignature) { $('debug-active').innerHTML = activeHtml; state.activeSignature = activeHtml; }
-    $('debug-connection').textContent = document.hidden ? '页面已隐藏，暂停刷新；返回后继续读取。' : '实时连接中 · 每 2 秒更新';
-    return Number(debug.last_seq) > state.cursor;
-  }
-
   async function refreshOverview(manual = false) {
-    if (state.loading || state.saving) return;
-    state.loading = true; controls();
+    if (state.refreshing || state.loading || state.saving) return;
+    const revision = state.settings?.key_revision;
+    const blocking = manual || !state.settings;
+    state.refreshing = true; if (blocking) state.loading = true; controls();
     try {
-      const result = await request('/api/admin/overview');
+      const result = await request('/api/admin/keys');
+      // A background read must not replace a mutation that started or finished meanwhile.
+      if (state.saving || (!manual && state.settings?.key_revision !== revision)) return;
       if (manual || !state.settings) {
         state.conflict = false; state.enableDirty = false; applySettings(result.settings);
       } else if (result.settings?.key_revision !== state.settings.key_revision) {
         state.conflict = true;
-        message('密钥配置已在其他页面更新。请点击“重新读取”，核对最新配置后再修改。',true);
+        message('配置已在其他页面更新。请刷新设置，核对后再修改。',true);
+        return;
       }
       state.pool = result.pool || {keys:[]}; renderKeys();
-      applyUsage(result.usage); processDebug(result.debug);
-      if (manual) message('已重新读取最新设置。');
-    } catch (error) { message(error.status === 403 ? '此分区仅限主机管理员在本机访问。' : error.message,true); }
-    finally { state.loading = false; controls(); }
+      if (manual) { state.stopped = false; message('已读取最新设置。'); }
+    } catch (error) {
+      if (error.status === 403) { state.stopped = true; state.conflict = true; }
+      message(error.status === 403 ? '仅限主机管理员在本机访问。' : error.message,true);
+    } finally { state.refreshing = false; if (blocking) state.loading = false; controls(); }
   }
 
   async function mutateKeys(change) {
@@ -197,9 +129,9 @@
     try {
       const result = await request('/api/admin/keys',payload);
       applySettings(result.settings); state.pool = result.pool || {keys:[]}; renderKeys();
-      message('密钥配置已保存。密钥不会回显。');
+      message('已保存 Key，接口将在处理任务时验证。');
     } catch (error) {
-      if (error.status === 409) { state.conflict = true; message('其他页面已修改密钥配置。请点击“重新读取”，核对最新配置后再修改；本次未保存。',true); }
+      if (error.status === 409) { state.conflict = true; message('其他页面已修改密钥配置。请刷新设置，核对后再修改；本次未保存。',true); }
       else message(error.message || '配置未保存，请稍后重试。',true);
     } finally {
       for (const key of payload.add || []) delete key.api_key;
@@ -229,10 +161,19 @@
     event.preventDefault();
     if (state.saving || state.loading || !state.settings || state.conflict) return;
     const enabled = $('ai-enabled').checked;
+    let saved = false;
     state.saving = true; controls(); message('');
-    try { state.enableDirty = false; applySettings(await request('/api/ai/settings',{enabled})); $('ai-enabled').checked = state.settings.enabled === true; message('AI 开关已保存。'); }
+    try {
+      state.enableDirty = false;
+      applySettings(await request('/api/ai/settings',{enabled}));
+      $('ai-enabled').checked = state.settings.enabled === true;
+      // Pool health was measured before this switch changed. Do not present it as current.
+      state.pool = {keys:[]}; renderKeys();
+      saved = true; message('AI 开关已保存。');
+    }
     catch (error) { $('ai-enabled').checked = state.settings.enabled === true; message(error.message || '设置未保存，请稍后重试。',true); }
     finally { state.saving = false; controls(); }
+    if (saved) await refreshOverview(false);
   }
 
   function keyAction(event) {
@@ -258,21 +199,15 @@
   }
 
   function stopPolling() { clearTimeout(state.timer); state.timer = null; }
-  function schedulePoll(delay = 2000) {
+  function schedulePoll(delay = 30000) {
     stopPolling();
     if (!state.stopped && !document.hidden) state.timer = setTimeout(poll,delay);
   }
   async function poll() {
     if (state.polling || state.stopped || document.hidden) return;
     state.polling = true;
-    let backlog = false;
-    try {
-      const result = await request(`/api/admin/debug?after=${state.cursor}&limit=100`);
-      if (state.stopped) return;
-      backlog = processDebug(result);
-      if (++state.polls % 5 === 0 && !state.loading && !state.saving && !state.conflict) await refreshOverview(false);
-    } catch (error) { $('debug-connection').textContent = error.status === 403 ? '无权访问，调试刷新已停止。' : '暂时无法读取调试记录，将自动重试。'; if (error.status === 403) state.stopped = true; }
-    finally { state.polling = false; schedulePoll(backlog ? 100 : 2000); }
+    try { await refreshOverview(false); }
+    finally { state.polling = false; schedulePoll(); }
   }
 
   async function boot() {
@@ -282,7 +217,7 @@
     $('ai-enabled').addEventListener('change',()=>{state.enableDirty = true;});
     $('key-list').addEventListener('click',keyAction);
     $('key-list').addEventListener('submit',renameKey);
-    document.addEventListener('visibilitychange',()=>{ if (document.hidden) { stopPolling(); $('debug-connection').textContent = '页面已隐藏，暂停刷新；返回后继续读取。'; } else schedulePoll(0); });
+    document.addEventListener('visibilitychange',()=>{ if (document.hidden) stopPolling(); else schedulePoll(0); });
     window.addEventListener('pagehide',()=>{ state.stopped = true; stopPolling(); $('key-batch').value = ''; });
     window.addEventListener('pageshow',()=>{ if (state.stopped) { state.stopped = false; schedulePoll(0); } });
     window.addEventListener('beforeunload',()=>{ $('key-batch').value = ''; stopPolling(); });

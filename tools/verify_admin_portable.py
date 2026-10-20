@@ -29,7 +29,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 from verify_employee_portable import Browser, check_download, digest, generated_inputs, wait_job
 
 SYNTHETIC_KEYS = tuple(f"sk-admin-portable-synthetic-{index}-never-valid" for index in range(3))
-ADMIN_PATHS = ("/admin", "/api/admin/overview", "/api/admin/debug",
+ADMIN_PATHS = ("/admin", "/api/admin/keys", "/api/admin/overview", "/api/admin/debug",
                "/static/admin.html", "/static/admin.js", "/static/admin.css",
                "/static/Admin.js", "/static/./admin.js", "/static/admin.js.",
                "/static/admin.js%20", "/static/admin.js::$DATA")
@@ -155,7 +155,21 @@ def verify(args):
         assert runtime["executable_sha256"] == digest(executable)
         assert runtime["build_manifest_sha256"] == digest(manifest_path)
         host.bootstrap()
-        assert b"DeepSeek" in host.raw("/admin")
+        admin_html = host.raw("/admin").decode("utf-8")
+        admin_js = host.raw("/static/admin.js").decode("utf-8")
+        assert "DeepSeek" in admin_html
+        # The simplified screen must omit diagnostics, rather than hide a panel
+        # while its script still downloads cumulative usage and debug records.
+        assert not re.search(r'id=[\"\'][^\"\']*(?:usage|debug)[^\"\']*[\"\']', admin_html, re.I)
+        assert "/api/admin/debug" not in admin_js and "/api/admin/overview" not in admin_js
+        assert "/api/admin/keys" in admin_js
+        key_settings = host.request("/api/admin/keys")
+        assert set(key_settings) == {"settings", "pool"}
+        assert_sanitized(key_settings)
+        assert key_settings["settings"]["enabled"] is False
+        assert key_settings["settings"]["configured"] is True
+        assert key_settings["pool"]["key_count"] == 1
+        assert key_settings["pool"]["keys"][0]["id"] == "legacy"
         overview = host.request("/api/admin/overview")
         assert_sanitized(overview)
         assert overview["settings"]["enabled"] is False and overview["settings"]["configured"] is True
@@ -257,12 +271,19 @@ def verify(args):
         assert_sanitized(final)
         assert final["usage"]["requests"] == final["pool"]["usage"]["requests"] == 0
         assert final["settings"]["validation"]["qualified"] is False
+        final_keys = host.request("/api/admin/keys")
+        assert set(final_keys) == {"settings", "pool"}
+        assert_sanitized(final_keys)
+        assert final_keys["settings"]["key_revision"] == final["settings"]["key_revision"]
+        assert final_keys["pool"]["key_count"] == final["pool"]["key_count"] == 2
         assert all(digest(path) == value for path, value in original_hashes.items())
         assert not any(key in (state / "运行日志.log").read_text("utf-8") for key in SYNTHETIC_KEYS)
         report.update(ok=True, runtime=runtime, legacy_dpapi_migration=True,
             bulk_add_count=2, renamed_disabled_enabled_removed=True,
             stale_write_409=True, invalid_write_400=True, missing_token_403=True,
             credentials_not_returned=True, dpapi_no_plaintext=True,
+            minimal_key_settings_get=True, admin_no_usage_or_debug_panels=True,
+            admin_no_overview_or_debug_requests=True, compatible_debug_api_retained=True,
             remote_http_denials=permission_checks, ownership_denials=ownership_checks,
             debug_events=len(events), debug_incremental_pagination=True,
             debug_stages=["run_started", "disabled", "run_finished"],
