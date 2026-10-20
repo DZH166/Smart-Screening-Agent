@@ -96,10 +96,10 @@ function harness(){
     fetch:async(url,options={})=>{requests.push({url,options});return fetchHandler(url,options);},console,
   };
   const source=fs.readFileSync(path.join(staticDir,'app.js'),'utf8');
-  const exposure='  window.testUI={state,init,renderJob,renderTable,renderPanel,selectRow,counts,filteredRows,resolveRow,undoLast,pollJob,schedulePoll,acceptJob,renderSummary,configureAccess,preloadImage,preloadNeighbours,cacheSnapshot:()=>({preloaded:[...preloaded],aspects:imageAspects.size,rowViews:rowViewState.size})};';
+  const exposure='  window.testUI={state,init,renderJob,renderTable,renderPanel,renderCandidateView,selectRow,counts,filteredRows,resolveRow,undoLast,pollJob,schedulePoll,acceptJob,renderSummary,configureAccess,preloadImage,preloadNeighbours,cacheSnapshot:()=>({preloaded:[...preloaded],aspects:imageAspects.size,rowViews:rowViewState.size})};';
   assert.match(source,/  init\(\)\.catch\([^\n]+\);/,'test seam must replace only bootstrap');
   vm.runInNewContext(source.replace(/  init\(\)\.catch\([^\n]+\);/,exposure),sandbox);
-  return {ui:window.testUI,document,window,requests,timers,preload,advance,setFetch(handler){fetchHandler=handler;},node:id=>document.getElementById(id)};
+  return {ui:window.testUI,document,window,requests,timers,preload,advance,setFetch(handler){fetchHandler=handler;},loadAI(){vm.runInNewContext(fs.readFileSync(path.join(staticDir,'ai-settings.js'),'utf8'),sandbox);},node:id=>document.getElementById(id)};
 }
 const response=(data,status=200)=>({ok:status<400,status,json:async()=>data});
 const job=(count=4)=>({id:'synthetic-job',status:'ready',revision:1,can_undo:false,rows:Array.from({length:count},(_,i)=>({id:'r'+i,row_number:i+2,status:'review',number:'',file_id:null,reason:'两个文件图案接近',candidates:[{file_id:'f'+i,score:.9},{file_id:'g'+i,score:.8}]})),files:Array.from({length:count},(_,i)=>[{id:'f'+i,name:'原稿'+i+'.ai'},{id:'g'+i,name:'候选'+i+'.ai'}]).flat()});
@@ -131,6 +131,25 @@ async function main(){
   assert.ok(h.node('summary-processing-details').contains(h.node('summary-ai-overview')));
   assert.ok(!h.node('summary-processing-details').open,'technical breakdown stays available on demand');
   assert.ok(h.node('done-details').contains(h.node('done-ai-overview')));
+  // AI retrieval chooses candidates; only the server's verified final status
+  // contributes an accepted row. Its usage and failures remain in details.
+  const aiFirst=clone(automatic);aiFirst.matching_mode='ai_first';aiFirst.ai_retrieval={message:'AI 查找已完成，本机核验已完成。'};
+  ui.acceptJob(aiFirst);ui.renderJob();
+  assert.ok(!h.node('summary-view').classList.contains('hidden'));
+  assert.match(h.node('summary-breakdown').textContent,/AI 查找对应图片 \+ 本机核验/);
+  assert.match(h.node('summary-ai-overview').textContent,/AI 查找已完成/);
+  assert.equal(ui.counts().localAuto,1);assert.equal(ui.counts().aiAuto,0,'retrieval is not conditional AI acceptance');
+  const unresolved=clone(aiFirst);unresolved.rows[0].status='review';unresolved.rows[0].file_id=null;
+  unresolved.ai_retrieval.message='AI 返回多个接近候选，需人工确认。';
+  ui.acceptJob(unresolved);ui.state.showSummary=false;ui.state.forceReview=false;ui.renderJob();
+  assert.ok(!h.node('review-view').classList.contains('hidden'));assert.equal(ui.counts().matched,0);
+  assert.match(h.node('job-ai-overview').textContent,/需人工确认/);
+  const fallback=clone(aiFirst);fallback.ai_retrieval.message='AI 请求失败，已由本机匹配继续处理。';
+  ui.acceptJob(fallback);ui.renderJob();assert.match(h.node('summary-ai-overview').textContent,/请求失败.*本机匹配/);
+  // Removing one task's details and restoring the same text on a later task
+  // must not leave a stale dataset cache with an empty overview.
+  ui.acceptJob(automatic);ui.renderJob();assert.ok(h.node('summary-ai-overview').classList.contains('hidden'));
+  ui.acceptJob(fallback);ui.renderJob();assert.match(h.node('summary-ai-overview').textContent,/请求失败/);
   ui.configureAccess({lan:true,remote:true});assert.ok(h.node('host-management').classList.contains('hidden'));
   assert.ok(h.node('ai-settings-button').classList.contains('hidden'));assert.ok(h.node('shutdown-button').classList.contains('hidden'));
   ui.configureAccess({lan:false,remote:false});assert.ok(!h.node('host-management').classList.contains('hidden'));
@@ -157,6 +176,25 @@ async function main(){
   const otherTask=job();otherTask.id='isolated-task';cache.ui.acceptJob(otherTask);
   assert.equal(cache.ui.cacheSnapshot().preloaded.length,0);assert.equal(cache.ui.cacheSnapshot().aspects,0);assert.equal(cache.ui.cacheSnapshot().rowViews,0);
   cache.ui.preloadNeighbours(otherTask.rows[1]);assert.ok(cache.preload.slice(preloadCount).every(url=>url.startsWith('/api/jobs/isolated-task/')));
+
+  // Retrieval and later pair review keep separate explanations and expanded
+  // state when only the selected candidate changes. Neither changes status.
+  const advice=harness();advice.loadAI();const dual=job(1);
+  dual.matching_mode='ai_first';dual.rows[0].ai_retrieval={candidate_id:'f0',verdict:'same',outcome:'suggestion',reason:'AI 查找到接近的原稿。'};
+  dual.rows[0].ai_review={candidate_id:'f0',verdict:'uncertain',outcome:'manual_review',reason:'局部颜色仍需判断。'};
+  advice.ui.acceptJob(dual);advice.ui.selectRow('r0',null,false);advice.ui.renderJob();
+  const adviceSlot=advice.node('ai-row-advice');
+  assert.match(adviceSlot.textContent,/AI 查找建议 · 需人工确认/);
+  assert.match(adviceSlot.textContent,/AI 无法确定 · 需人工确认/);
+  adviceSlot.querySelectorAll('details[data-detail-key]').forEach((item)=>item.open=true);
+  const tableImage=advice.node('review-panel').querySelector('.compare-grid img');
+  advice.ui.state.selectedFileId='g0';advice.ui.renderCandidateView();
+  assert.ok(adviceSlot.querySelectorAll('details[data-detail-key]').every((item)=>item.open));
+  assert.equal(adviceSlot.querySelectorAll('details[data-detail-key]').length,2);
+  assert.match(adviceSlot.textContent,/AI 建议与当前候选不同/);
+  assert.match(adviceSlot.textContent,/AI 复核对象.*与当前选择不同/);
+  assert.ok(advice.node('review-panel').querySelector('.compare-grid img')===tableImage);
+  assert.equal(advice.ui.counts().matched,0);assert.equal(advice.ui.state.job.rows[0].status,'review');
 
   // One in-flight request, visible saving feedback, no optimistic success, stable failed choice.
   const a=harness();a.ui.acceptJob(job());a.ui.selectRow('r0','g0',false);a.ui.renderJob();

@@ -233,17 +233,19 @@
     const job=state.job;
     const exporting=job.status==='exporting';
     const queued=job.status==='queued';
-    const queueStage={cpu:'本机处理',ai:'AI 复核',export:'导出'}[job.queue_stage]||'处理';
+    const phase=job.progress?.phase;
+    const retrieving=phase==='ai_retrieval',verifying=phase==='local_verification',parallel=phase==='parallel_verification';
+    const queueStage={cpu:'本机处理',ai:job.matching_mode==='ai_first'?'AI 查找':'AI 复核',export:'导出'}[job.queue_stage]||'处理';
     showView('processing-view',exporting||(queued&&job.queue_stage==='export')?3:2);
-    $('processing-eyebrow').textContent=queued?'排队中':exporting?'导出结果':job.status==='ai_review'?'复核疑难项':job.status==='matching'?'匹配图片':'读取文件';
-    $('processing-title').textContent=queued?`等待${queueStage}…`:exporting?'正在整理并导出…':job.status==='ai_review'?'正在复核有疑问的图片…':job.status==='matching'?'正在比对图片…':'正在读取文件…';
-    $('processing-message').textContent=queued?(job.queue_position?`${queueStage}队列第 ${job.queue_position} 位，轮到后会自动开始。`:`正在等待${queueStage}，轮到后会自动开始。`):job.status==='ai_review'?'正在复核可处理的疑难图片，完成后会自动进入下一步。':job.progress?.message||'完成后会自动进入下一步。';
-    const current=queued?0:Math.max(0,Number(job.progress?.current)||0),total=queued?0:Math.max(0,Number(job.progress?.total)||0);
+    $('processing-eyebrow').textContent=queued?'排队中':exporting?'导出结果':parallel?'同时处理':retrieving?'AI 查找':verifying?'本机核验':job.status==='ai_review'?'复核疑难项':job.status==='matching'?'匹配图片':'读取文件';
+    $('processing-title').textContent=queued?`等待${queueStage}…`:exporting?'正在整理并导出…':parallel?'AI 查找与本机核验进行中…':retrieving?'AI 正在查找对应图片…':verifying?'正在核验图案与文件…':job.status==='ai_review'?'正在复核有疑问的图片…':job.status==='matching'?'正在比对图片…':'正在读取文件…';
+    $('processing-message').textContent=queued?(job.queue_position?`${queueStage}队列第 ${job.queue_position} 位，轮到后会自动开始。`:`正在等待${queueStage}，轮到后会自动开始。`):job.progress?.message||(parallel?'AI 查找候选与本机核验同时进行，完成后自动汇总结果。':retrieving?'正在查找候选，完成后自动汇总本机核验结果。':verifying?'正在核验图案、颜色和文件归属，只有验证可靠的匹配才会通过。':job.status==='ai_review'?'正在复核可处理的疑难图片，完成后会自动进入下一步。':'完成后会自动进入下一步。');
+    const current=queued||parallel?0:Math.max(0,Number(job.progress?.current)||0),total=queued||parallel?0:Math.max(0,Number(job.progress?.total)||0);
     const percent=total?Math.min(100,Math.round(current/total*100)):0;
     $('progress-fill').style.width=total?`${percent}%`:'';
     $('progress-fill').classList.toggle('indeterminate',!total);
     $('progress-percent').textContent=total?`${percent}%`:'';
-    $('progress-detail').textContent=total?`当前阶段 ${current} / ${total}`:queued?'等待开始':'准备中…';
+    $('progress-detail').textContent=total?`当前阶段 ${current} / ${total}`:queued?'等待开始':parallel?'两项进度分别计数':'准备中…';
   }
   function counts() {
     if(countedJob===state.job&&countedValue)return countedValue;
@@ -268,7 +270,7 @@
     $('summary-subtitle').textContent=pending?'未处理和跳过的项目不计入可导出文件。':'没有需要人工判断的项目。';
     $('summary-stats').innerHTML=`<div class="done-stat"><strong>${c.matched}</strong><span>可导出</span></div><div class="done-stat"><strong>${c.newNumbers}</strong><span>新增编号</span></div><div class="done-stat"><strong>${pending}</strong><span>未处理 / 跳过</span></div>`;
     const breakdown=$('summary-breakdown');
-    if(breakdown)breakdown.innerHTML=`<dl class="processing-breakdown"><div><dt>本批图片</dt><dd>${c.total}</dd></div><div><dt>本机自动通过</dt><dd>${c.localAuto}</dd></div><div><dt>AI 条件通过</dt><dd>${c.aiAuto}</dd></div><div><dt>员工确认</dt><dd>${c.confirmed}</dd></div><div><dt>待审核 / 无法处理 / 已跳过</dt><dd>${c.review} / ${c.unmatched} / ${c.skipped}</dd></div></dl>`;
+    if(breakdown)breakdown.innerHTML=`<dl class="processing-breakdown"><div><dt>处理方式</dt><dd>${job.matching_mode==='ai_first'?'AI 查找对应图片 + 本机核验':'本机匹配'}</dd></div><div><dt>本批图片</dt><dd>${c.total}</dd></div><div><dt>本机自动通过</dt><dd>${c.localAuto}</dd></div><div><dt>AI 条件通过</dt><dd>${c.aiAuto}</dd></div><div><dt>员工确认</dt><dd>${c.confirmed}</dd></div><div><dt>待审核 / 无法处理 / 已跳过</dt><dd>${c.review} / ${c.unmatched} / ${c.skipped}</dd></div></dl>`;
     $('summary-output').textContent=isLan()?'导出完成后下载 ZIP 到你的电脑':job.output_target||job.output_root||job.output_dir||'导入时选择的位置';
     $('summary-detail').textContent=pending?`待审核 ${c.review} 项、无法处理 ${c.unmatched} 项、已跳过 ${c.skipped} 项，原始行保持原状，不填写新号。`:'';
     $('summary-detail').classList.toggle('hidden',!pending);
@@ -282,18 +284,26 @@
   }
   function renderAiOverview() {
     const info=state.job?.ai_review;
+    const retrieval=state.job?.ai_retrieval;
+    const aiFirst=state.job?.matching_mode==='ai_first';
     const targets=['job-ai-overview','summary-ai-overview','done-ai-overview'];
     for(const id of targets){
       const element=$(id);
-      if(!info){element.classList.add('hidden');element.replaceChildren();continue;}
+      if(!info&&!aiFirst){element.classList.add('hidden');element.replaceChildren();delete element.dataset.content;continue;}
       element.classList.remove('hidden');
+      let retrievalHtml='';
+      if(aiFirst){
+        const usage=window.HSDAI?.usageText(retrieval?.usage);
+        retrievalHtml=`<div><strong>DeepSeek 查找对应图片</strong><p>${escapeHtml(retrieval?.message||'由 AI 查找候选，本机核验图案、颜色和文件归属后决定是否通过。')}</p>${usage?`<p class="ai-job-cost">${escapeHtml(usage.cost)}${usage.unknown?` · ${escapeHtml(usage.unknown)}`:''}</p>`:''}</div>`;
+      }
+      if(!info){if(element.dataset.content!==retrievalHtml){element.innerHTML=retrievalHtml;element.dataset.content=retrievalHtml;}continue;}
       const evaluation=info.mode!=='validated';
       const reviewed=Number(info.reviewed||0),same=Number(info.suggested_same||0),passed=Number(info.auto_passed||0);
       const title=evaluation?'DeepSeek 二次复核 · 评估运行':'DeepSeek 二次复核 · 经验证模式';
       const summary=reviewed?(evaluation?`已复核 ${reviewed} 项，建议相同 ${same} 项；建议仍需人工确认。`:`已复核 ${reviewed} 项，${passed} 项满足条件自动通过，其余由人工处理。`):(info.message||'本批尚未调用 AI 复核。');
       const usage=window.HSDAI?.usageText(info.usage);
       const cost=usage?`<p class="ai-job-cost">${escapeHtml(usage.cost)}${usage.unknown?` · ${escapeHtml(usage.unknown)}`:''}</p>`:'';
-      const html=`<div><strong>${escapeHtml(title)}</strong><p>${escapeHtml(summary)}</p>${cost}</div>${state.job.status==='ready'&&info.can_retry===true?`<button type="button" class="button button-secondary" data-ai-retry ${state.resolving?'disabled':''}>对此批运行 AI 复核</button>`:''}`;
+      const html=`${retrievalHtml}<div><strong>${escapeHtml(title)}</strong><p>${escapeHtml(summary)}</p>${cost}</div>${state.job.status==='ready'&&info.can_retry===true?`<button type="button" class="button button-secondary" data-ai-retry ${state.resolving?'disabled':''}>对此批运行 AI 复核</button>`:''}`;
       if(element.dataset.content!==html){element.innerHTML=html;element.dataset.content=html;}
     }
   }
@@ -472,8 +482,9 @@
     const evidenceOpen=$('candidate-comparison').querySelector('details')?.open;
     $('candidate-comparison').innerHTML=`<div class="compare-label"><span>候选：<b class="compare-filename">${escapeHtml(selected?.name||'请选择对应文件')}</b> · 点图放大</span><details class="score-note" data-detail-key="evidence" ${evidenceOpen?'open':''}><summary>依据</summary><p>${candidate?`相似度 ${(candidate.score*100).toFixed(1)}%`:'手动选择的文件'}</p><p>${escapeHtml(selected?.relative_path||'尚未选择文件')}</p></details></div><div class="preview-frame">${selected?imageTag('file',selected.id,'',selected.name):'<span class="preview-placeholder">尚未选择文件，请在下方查找</span>'}</div>`;
     $('candidate-issue').innerHTML=selected?.issue?`<p class="panel-note attention">文件提示：${escapeHtml(selected.issue)}</p>`:'';
-    const aiSlot=$('ai-row-advice'),aiHtml=window.HSDAI?.rowHtml(row,fileById(row.ai_review?.candidate_id)?.name,state.selectedFileId)||'';
-    if(aiSlot.dataset.content!==aiHtml){const open=aiSlot.querySelector('details')?.open;aiSlot.innerHTML=aiHtml;aiSlot.dataset.content=aiHtml;if(open&&aiSlot.querySelector('details'))aiSlot.querySelector('details').open=true;}
+    const retrievalHtml=window.HSDAI?.retrievalHtml?.(row,fileById(row.ai_retrieval?.candidate_id)?.name,state.selectedFileId)||'';
+    const aiSlot=$('ai-row-advice'),aiHtml=retrievalHtml+(window.HSDAI?.rowHtml(row,fileById(row.ai_review?.candidate_id)?.name,state.selectedFileId)||'');
+    if(aiSlot.dataset.content!==aiHtml){const openKeys=new Set([...aiSlot.querySelectorAll('details[data-detail-key]')].filter((item)=>item.open).map((item)=>item.dataset.detailKey));aiSlot.innerHTML=aiHtml;aiSlot.dataset.content=aiHtml;aiSlot.querySelectorAll('details[data-detail-key]').forEach((item)=>item.open=openKeys.has(item.dataset.detailKey));}
     renderOtherCandidates();setReviewBusy();bindPreviewFrames($('candidate-comparison'));
     $('manual-results')?.querySelectorAll('[data-candidate-id]').forEach((item)=>item.classList.toggle('selected',item.dataset.candidateId===state.selectedFileId));
     uiMeasure('candidate_updates',started);
@@ -590,7 +601,7 @@
   async function exportJob() {
     if(state.resolving||state.job?.status!=='ready'||counts().matched===0)return;
     const revision=state.job.revision;
-    clearNotice();state.job.status='exporting';state.job.progress={message:'正在生成编号表格、AI 文件和待处理清单',current:0,total:0};state.showDone=true;renderJob();
+    clearNotice();state.job.status='exporting';state.job.progress={message:'正在生成编号表格与 AI 文件',current:0,total:0};state.showDone=true;renderJob();
     try{await api(`/api/jobs/${encodeURIComponent(state.job.id)}/export`,{method:'POST',body:revision===undefined?{}:{expected_revision:revision}});schedulePoll(100);}
     catch(error){state.job.status='ready';try{acceptJob(await api(`/api/jobs/${encodeURIComponent(state.job.id)}`));}catch(_){}state.showSummary=true;notice(error.message);renderJob();if(isBusy())schedulePoll();}
   }
@@ -600,10 +611,10 @@
     $('done-stats').innerHTML=`<div class="done-stat"><strong>${c.matched}</strong><span>已导出</span></div><div class="done-stat"><strong>${c.newNumbers}</strong><span>新增编号</span></div><div class="done-stat"><strong>${c.awaiting+c.skipped}</strong><span>未处理或跳过</span></div><p>本机自动 ${c.localAuto} · AI 条件通过 ${c.aiAuto} · 员工确认 ${c.confirmed}</p>`;
     if (isLan()) {
       $('output-directory').previousElementSibling.textContent='结果下载';
-      $('output-directory').textContent=state.job.download_ready?'结果压缩包已准备好，包含表格、AI 文件和处理清单。':'结果压缩包尚未就绪，请稍后刷新。';
+      $('output-directory').textContent=state.job.download_ready?'结果压缩包已准备好，仅包含编号表格与 AI 文件。':'结果压缩包尚未就绪，请稍后刷新。';
       $('open-output-button').textContent='下载结果 ZIP ↓';
     } else $('output-directory').textContent=state.job.output_dir||'保存位置尚未返回';
-    $('done-summary').textContent=(c.awaiting+c.skipped)?`${c.awaiting+c.skipped} 项未处理或已跳过，原始行保持原状，详情见待处理清单。`:'';
+    $('done-summary').textContent=(c.awaiting+c.skipped)?`${c.awaiting+c.skipped} 项未处理或已跳过，原始行保持原状，可查看本批匹配记录。`:'';
     $('done-summary').classList.toggle('hidden',!(c.awaiting+c.skipped));
     $('open-output-button').disabled=isLan()?!state.job.download_ready:!state.job.output_dir;renderAiOverview();
   }

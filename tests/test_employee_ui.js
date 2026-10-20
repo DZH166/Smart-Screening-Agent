@@ -164,8 +164,51 @@ async function main(){
     assert.equal(element('progress-detail').textContent,'准备中…');
     assert.ok(element('progress-fill').classList.contains('indeterminate'));
   }
+  // AI-first phases describe the current stage, never claim local matching has
+  // finished while the model is still searching the complete preview library.
+  for(const status of ['matching','ai_review']){
+    ui.state.job={id:'ai-first-job',status,matching_mode:'ai_first',progress:{phase:'ai_retrieval',current:2,total:5,message:'正在查找第 2 组图片'}};
+    ui.renderProgress();
+    assert.equal(element('processing-eyebrow').textContent,'AI 查找');
+    assert.equal(element('processing-title').textContent,'AI 正在查找对应图片…');
+    assert.equal(element('processing-message').textContent,'正在查找第 2 组图片');
+    assert.equal(element('progress-detail').textContent,'当前阶段 2 / 5');
+    assert.equal(element('progress-percent').textContent,'40%');assertStep(2);
+    ui.state.job.progress={phase:'local_verification',current:4,total:5,message:'AI 暂时无法连接，正在使用本机匹配继续处理。'};
+    ui.renderProgress();
+    assert.equal(element('processing-eyebrow').textContent,'本机核验');
+    assert.equal(element('processing-title').textContent,'正在核验图案与文件…');
+    assert.match(element('processing-message').textContent,/无法连接.*本机匹配/);
+    assert.equal(element('progress-percent').textContent,'80%');
+  }
+  ui.state.job={id:'ai-first-queued',status:'queued',matching_mode:'ai_first',queue_stage:'ai',queue_position:3};
+  ui.renderProgress();assert.equal(element('processing-title').textContent,'等待AI 查找…');
+  assert.equal(element('processing-message').textContent,'AI 查找队列第 3 位，轮到后会自动开始。');
+  assert.equal(element('progress-percent').textContent,'');
+  ui.state.job={id:'ai-first-unmeasured',status:'ai_review',matching_mode:'ai_first',progress:{phase:'ai_retrieval'}};
+  ui.renderProgress();assert.match(element('processing-message').textContent,/查找候选.*汇总本机核验/);
+  assert.equal(element('progress-percent').textContent,'','unknown AI work must not imply a whole-batch percentage');
+  ui.state.job={id:'parallel-job',status:'ai_review',matching_mode:'ai_first',progress:{phase:'parallel_verification',current:8,total:10,message:'AI 查找 2 / 6 组；本机已核验 12 / 60 张。'}};
+  ui.renderProgress();
+  assert.equal(element('processing-eyebrow').textContent,'同时处理');
+  assert.equal(element('processing-title').textContent,'AI 查找与本机核验进行中…');
+  assert.equal(element('processing-message').textContent,'AI 查找 2 / 6 组；本机已核验 12 / 60 张。');
+  assert.equal(element('progress-detail').textContent,'两项进度分别计数');
+  assert.equal(element('progress-percent').textContent,'','independent denominators must never create a summed batch percentage');
+  assert.equal(element('progress-fill').style.width,'');assertStep(2);
+  ui.state.job.progress={phase:'local_verification',current:36,total:60,message:'AI 查找已结束，本机正在核验图案与文件…'};
+  ui.renderProgress();
+  assert.equal(element('progress-percent').textContent,'60%');
+  assert.equal(element('processing-eyebrow').textContent,'本机核验');
+  assert.equal(element('progress-detail').textContent,'当前阶段 36 / 60');
+  ui.state.job.progress={phase:'ai_retrieval',current:5,total:6,message:'本机核验完成，正在等待 AI 查找结果…'};
+  ui.renderProgress();assert.equal(element('progress-percent').textContent,'83%');
+  assert.equal(element('processing-eyebrow').textContent,'AI 查找');
+  assert.equal(element('progress-detail').textContent,'当前阶段 5 / 6');
   ui.state.job={id:'my/job',status:'done',rows:[],download_ready:true};
   ui.renderDone();
+  assert.match(element('output-directory').textContent,/仅包含编号表格与 AI 文件/);
+  assert.ok(!element('output-directory').textContent.includes('清单'),'employee ZIP does not contain host-only audit records');
   assert.equal(element('open-output-button').textContent,'下载结果 ZIP ↓');
   assert.ok(!element('open-output-button').disabled);
   await ui.openOutput();

@@ -107,9 +107,9 @@
   function applySettings(settings) {
     state.settings = settings;
     if (!state.enableDirty) $('ai-enabled').checked = settings.enabled === true;
-    $('model-label').textContent = `模型：${settings.model || 'DeepSeek'} · ${settings.enabled ? '已启用复核' : '复核已关闭'}`;
-    $('settings-state').textContent = settings.configured ? '已有 Key 配置，员工使用主机设置；保存配置不代表接口已验证。' : '尚无启用的 Key；添加并启用 Key 后可进行复核。';
-    $('qualification-state').textContent = settings.mode === 'validated' ? '已进入经验证模式：仅符合全部条件的结果可自动通过，其余仍需人工确认。' : '尚未取得自动通过资格。AI 建议仍需人工确认，不会因增加 Key 自动放行。';
+    $('model-label').textContent = `模型：${settings.model || 'DeepSeek'} · ${settings.enabled ? '已启用 AI 查找与复核' : 'AI 已关闭，使用本机匹配'}`;
+    $('settings-state').textContent = settings.configured ? '已有 Key 配置，员工使用主机设置；保存配置不代表接口已验证。' : '尚无启用的 Key；添加并启用 Key 后可进行 AI 查找与复核。';
+    $('qualification-state').textContent = settings.mode === 'validated' ? 'AI 二次复核已进入经验证模式：仅符合全部条件的结果可自动通过，其余仍需人工确认。' : 'AI 二次复核尚未取得条件自动通过资格，复核建议仍需人工确认。AI 查找到的候选只有通过本机独立核验，才能按本机规则自动通过；增加 Key 不会放宽判定。';
     $('persistence-state').textContent = settings.key_persistence === 'windows_dpapi' ? '主机使用当前 Windows 用户的 DPAPI 加密保存密钥。' : '当前环境只在本次服务运行期间保留密钥，重启后需重新填写。';
     $('storage-warning').textContent = settings.storage_warning || '';
     $('storage-warning').classList.toggle('hidden', !settings.storage_warning);
@@ -230,7 +230,7 @@
     if (state.saving || state.loading || !state.settings || state.conflict) return;
     const enabled = $('ai-enabled').checked;
     state.saving = true; controls(); message('');
-    try { state.enableDirty = false; applySettings(await request('/api/ai/settings',{enabled})); $('ai-enabled').checked = state.settings.enabled === true; message('复核开关已保存。'); }
+    try { state.enableDirty = false; applySettings(await request('/api/ai/settings',{enabled})); $('ai-enabled').checked = state.settings.enabled === true; message('AI 开关已保存。'); }
     catch (error) { $('ai-enabled').checked = state.settings.enabled === true; message(error.message || '设置未保存，请稍后重试。',true); }
     finally { state.saving = false; controls(); }
   }

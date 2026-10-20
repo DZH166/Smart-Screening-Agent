@@ -15,10 +15,10 @@
     <div id="admin-message" class="notice hidden" role="status" aria-live="polite"></div>
     <main>
       <section class="panel settings-panel" aria-labelledby="settings-heading">
-        <div class="section-heading"><div><h2 id="settings-heading">复核设置</h2><p id="model-label">正在读取设置…</p></div><form id="enable-form"><label class="enable-control"><input id="ai-enabled" type="checkbox" disabled><span>启用 DeepSeek 复核</span></label><button id="enable-save" class="button secondary" type="submit" disabled>保存开关</button></form></div>
+        <div class="section-heading"><div><h2 id="settings-heading">AI 处理设置</h2><p id="model-label">正在读取设置…</p></div><form id="enable-form"><label class="enable-control"><input id="ai-enabled" type="checkbox" disabled><span>启用 DeepSeek 查找与复核</span></label><button id="enable-save" class="button secondary" type="submit" disabled>保存开关</button></form></div>
         <p id="settings-state" class="state-line">正在读取密钥状态…</p>
         <div id="storage-warning" class="notice warning hidden" role="alert"></div>
-        <details class="details"><summary>发送范围与自动通过资格</summary><div class="detail-body"><p>仅对符合现有规则的疑难项发送表格图片、候选预览及完整分段。原始 XLSX、ZIP、AI 文件和本机路径不会发送。</p><p id="qualification-state">正在读取资格状态…</p><p>多个 Key 用于管理与可用性，不会增加官方账号限流额度。限流时按服务端冷却等待。</p><p id="persistence-state"></p></div></details>
+        <details class="details"><summary>发送范围与自动通过资格</summary><div class="detail-body"><p>启用后，发送可处理的表格图片和 AI 预览查找对应；同时由本机独立核验图案、颜色和文件归属。疑难项可继续按现有规则复核；模型建议不能解除文件硬异常。原始 XLSX、ZIP、AI 文件和本机路径不会发送。</p><p id="qualification-state">正在读取资格状态…</p><p>多个 Key 用于管理与可用性，不会增加官方账号限流额度。限流时按服务端冷却等待。</p><p id="persistence-state"></p></div></details>
       </section>
       <section class="panel keys-panel" aria-labelledby="keys-heading">
         <div class="section-heading"><div><h2 id="keys-heading">API Key 管理 <span id="key-count" class="count"></span></h2><p>密钥保存在主机，员工继续共用，无需重新配置。</p></div></div>

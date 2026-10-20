@@ -208,6 +208,7 @@ class AiSettings:
             keys = self._effective_keys()
             key = next((row["api_key"] for row in keys if row["enabled"]), "")
             return {"enabled": self._enabled, "api_key": key, "model": MODEL,
+                    "matching_workflow": "ai_first",
                     "keys": keys, "key_revision": self._revision,
                     "prices": dict(PRICES), "price_date": PRICE_DATE}
 

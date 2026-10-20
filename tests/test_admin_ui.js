@@ -56,6 +56,9 @@ async function main(){
   assert.ok(ui.eventHtml({seq:10,stage:'returned',key_id:'removed-opaque'}).includes('已移除 Key removed-opaque'));
 
   ui.applySettings(json(initial));ui.state.pool={keys:[]};ui.renderKeys();
+  assert.match(element('model-label').textContent,/已启用 AI 查找与复核/);
+  ui.applySettings({...json(initial),enabled:false});assert.match(element('model-label').textContent,/AI 已关闭，使用本机匹配/);
+  ui.applySettings(json(initial));
   assert.ok(element('qualification-state').textContent.includes('仍需人工确认'));
   element('debug-follow').checked=true;
   assert.equal(ui.processDebug({instance:'first',events:[{seq:1,stage:'requesting',message:'正在调用'}],cursor:1,last_seq:9,oldest_seq:1,dropped:0,active:[]}),true);
@@ -109,6 +112,9 @@ async function main(){
   assert.ok(!/localStorage|sessionStorage|console\./.test(source),'keys and debug are not persisted or logged by the UI');
   const html=fs.readFileSync(path.join(__dirname,'../hsd_tool/static/admin.html'),'utf8');
   assert.ok(html.includes('window.HSD_TOKEN = __HSD_TOKEN__'));assert.ok(html.includes('href="/"'));
+  assert.ok(html.includes('发送可处理的表格图片和 AI 预览查找对应；同时由本机独立核验'));
+  assert.ok(html.includes('模型建议不能解除文件硬异常'));
+  assert.ok(!html.includes('仅对符合现有规则的疑难项发送'));
   const css=fs.readFileSync(path.join(__dirname,'../hsd_tool/static/admin.css'),'utf8');
   assert.ok(css.includes('#key-batch{-webkit-text-security:disc}'),'batch credentials default to masked input');
   console.log('Admin UI synthetic assertions passed');

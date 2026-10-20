@@ -16,8 +16,8 @@
       if (!response.ok) return settings;
       settings = await response.json();
       const active = !!settings.enabled && !!settings.configured;
-      $('processing-mode-label').textContent = active ? '本机匹配 + AI 复核' : '本机匹配';
-      $('import-processing-note').textContent = active ? '已启用 DeepSeek 预览复核' : '本机匹配，原文件保留';
+      $('processing-mode-label').textContent = active ? 'AI 查找对应图片 + 本机核验' : '本机匹配';
+      $('import-processing-note').textContent = active ? 'DeepSeek 查找候选与本机核验同时进行，只有本机验证可靠的匹配才会通过；原文件保留。' : '本机匹配，原文件保留';
       document.dispatchEvent(new CustomEvent('hsd-ai-settings-updated', {detail:settings}));
     } catch (_) { /* Keep employee workflow usable when settings cannot be read. */ }
     finally { clearTimeout(timer); loading = false; }
@@ -39,6 +39,24 @@
       unknown: unknown > 0 ? `另有 ${unknown} 次用量未知，费用统计不完整。` : incomplete ? '部分用量尚未返回，费用统计不完整。' : '',
       counts: `累计 ${requests} 次请求 · 成功 ${Number(usage.successes || 0)} 次 · 未成功 ${Number(usage.failures || 0)} 次`,
     };
+  }
+
+  function retrievalHtml(row, candidateName, selectedId) {
+    const retrieval=row?.ai_retrieval;
+    if(!retrieval)return '';
+    const title=retrieval.outcome==='error'?'AI 查找未完成':retrieval.outcome==='skipped'?'本项未进行 AI 查找':'AI 查找建议';
+    const action=row.status==='auto'?'本机核验已通过':row.status==='confirmed'?'本项已由员工确认':row.status==='skipped'?'本项已跳过':'需人工确认';
+    const reason=String(retrieval.reason||'').trim();
+    const differentSelection=!!retrieval.candidate_id&&retrieval.candidate_id!==selectedId;
+    const objectName=candidateName||retrieval.candidate_id||'';
+    const warning=differentSelection?`<p class="ai-candidate-label ai-selection-warning">AI 建议与当前候选不同，以本机核验或员工选择为准。建议文件：${escapeHtml(objectName)}</p><button type="button" class="text-button" data-candidate-id="${escapeHtml(retrieval.candidate_id)}">查看 AI 建议的文件</button>`:'';
+    // The native pending reason stays above the images. Do not repeat it as a
+    // model explanation or invent comparison checks from retrieval's verdict.
+    const distinctReason=reason&&reason!==String(row.reason||'').trim();
+    const sentence=reason.match(/^[^。！？\n]+[。！？]?/u)?.[0]||reason;
+    const brief=distinctReason?(Array.from(reason).length<=100?reason:Array.from(sentence).length<=100?sentence:'完整查找理由请展开下方说明。'):'';
+    const details=objectName||distinctReason?`<details class="ai-check-details" data-detail-key="ai-retrieval"><summary>AI 查找说明</summary>${objectName?`<p>建议文件：${escapeHtml(objectName)}</p>`:''}${distinctReason&&reason!==brief?`<p>${escapeHtml(reason)}</p>`:''}<p>查找建议不代表匹配通过，最终状态以本机核验或员工确认结果为准。</p></details>`:'';
+    return `<section class="ai-row-note"><strong>${escapeHtml(title)} · ${escapeHtml(action)}</strong>${warning}${brief?`<p class="ai-row-summary">${escapeHtml(brief)}</p>`:''}${details}</section>`;
   }
 
   function rowHtml(row, candidateName, selectedId) {
@@ -81,7 +99,7 @@
     return `<section class="ai-row-note${resolved?' ai-resolved-note':''}"><strong>${escapeHtml(title)}${action ? ` · ${escapeHtml(action)}` : ''}</strong>${candidate}${brief ? `<p class="ai-row-summary">${differences ? '差异：' : ''}${escapeHtml(brief)}</p>` : ''}${warningHtml}${details}</section>`;
   }
 
-  window.HSDAI = Object.freeze({open, refresh, usageText, rowHtml, getSettings:()=>settings});
+  window.HSDAI = Object.freeze({open, refresh, usageText, retrievalHtml, rowHtml, getSettings:()=>settings});
   if (window.HSD_ACCESS?.remote) $('ai-settings-button').classList.add('hidden');
   else $('ai-settings-button').addEventListener('click', open);
   // A return from the separate admin page refreshes the employee-mode hint.
