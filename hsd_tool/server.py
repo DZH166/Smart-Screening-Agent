@@ -292,6 +292,10 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
         return jsonify(settings=manager.ai_config(), pool=manager.ai_key_pool.snapshot(),
                        usage=manager.ai_usage.snapshot(), debug=manager.ai_debug.snapshot())
 
+    @app.get("/api/admin/keys")
+    def admin_key_settings():
+        return jsonify(settings=manager.ai_config(), pool=manager.ai_key_pool.snapshot())
+
     @app.get("/api/admin/debug")
     def admin_debug():
         if set(request.args) - {"after", "limit"}:

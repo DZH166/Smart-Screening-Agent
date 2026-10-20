@@ -21,7 +21,7 @@ TOKEN = "admin-test-token-not-real"
 CODE = "admin-test-access-code"
 SECRET = "sk-admin-synthetic-credential-must-never-return"
 PRIVATE_PATH = r"C:\private-admin-data\employee\sensitive.ai"
-ADMIN_GETS = ["/api/admin/overview", "/api/admin/debug", "/admin",
+ADMIN_GETS = ["/api/admin/keys", "/api/admin/overview", "/api/admin/debug", "/admin",
               "/static/admin.html", "/static/admin.js", "/static/admin.css"]
 
 
@@ -111,10 +111,11 @@ def test_admin_static_aliases_never_expose_a_token(admin_app, path):
     {"X-Forwarded-For": HOST}, {"X-Real-IP": "127.0.0.1"},
     {"Forwarded": "for=127.0.0.1;host=localhost"},
 ])
-def test_forwarding_headers_do_not_make_employee_an_admin(admin_app, headers):
+@pytest.mark.parametrize("path", ["/api/admin/keys", "/api/admin/overview"])
+def test_forwarding_headers_do_not_make_employee_an_admin(admin_app, headers, path):
     client = admin_app.test_client()
     login(client)
-    assert call(client, "/api/admin/overview", address=REMOTE, admin=False,
+    assert call(client, path, address=REMOTE, admin=False,
                 headers=headers).status_code == 401
 
 
@@ -272,6 +273,34 @@ def test_employee_settings_stay_minimal_and_cumulative_usage_stays_forbidden(adm
     assert "not-this-employees-job" not in json.dumps(settings.json)
 
 
+def test_key_settings_read_is_minimal_read_only_and_does_not_load_diagnostics(admin_app, monkeypatch):
+    client = admin_app.test_client()
+    manager = admin_app.config["HSD_MANAGER"]
+    saved = call(client, "/api/admin/keys", method="POST", payload={
+        "expected_revision": 0, "add": [{"label": "已保存", "api_key": SECRET}]}).json
+    before = copy.deepcopy(manager.ai_settings.runtime())
+
+    def forbidden_snapshot():
+        raise AssertionError("Key settings must not read the cumulative ledger or debug trace")
+
+    monkeypatch.setattr(manager.ai_usage, "snapshot", forbidden_snapshot)
+    monkeypatch.setattr(manager.ai_debug, "snapshot", forbidden_snapshot)
+    response = call(client, "/api/admin/keys", token=None, origin=None)
+
+    assert response.status_code == 200
+    assert set(response.json) == {"settings", "pool"}
+    assert response.json["settings"] == saved["settings"]
+    assert response.json["pool"]["key_count"] == 1
+    assert response.json["pool"]["keys"][0]["label"] == "已保存"
+    assert response.json["pool"]["scope"] == "current_process"
+    assert response.headers["Cache-Control"] == "no-store"
+    assert manager.ai_settings.runtime() == before
+    text = response.get_data(as_text=True)
+    assert SECRET not in text and '"api_key"' not in text
+    assert "encrypted_api_key" not in text and "fingerprint" not in text
+    assert "debug" not in response.json and "usage" not in response.json
+
+
 def test_host_can_add_multiple_keys_without_credentials_in_settings_or_pool(admin_app):
     client = admin_app.test_client()
     first = call(client, "/api/admin/overview")
@@ -287,7 +316,8 @@ def test_host_can_add_multiple_keys_without_credentials_in_settings_or_pool(admi
     assert response.json["pool"]["key_count"] == 2
     assert response.json["settings"]["key_revision"] > revision
     assert {row["label"] for row in response.json["pool"]["keys"]} == {"测试一", "测试二"}
-    for result in (response, call(client, "/api/admin/overview"), call(client, "/api/ai/settings")):
+    for result in (response, call(client, "/api/admin/keys"),
+                   call(client, "/api/admin/overview"), call(client, "/api/ai/settings")):
         text = result.get_data(as_text=True)
         assert SECRET not in text and other_secret not in text
         assert "encrypted_api_key" not in text and '"api_key"' not in text

@@ -14,7 +14,7 @@
     <header class="admin-header">
       <div><a class="back-link" href="/">← 返回图片编号</a><h1>DeepSeek 管理</h1></div>
       <div class="header-actions">
-        <button id="admin-refresh" class="button secondary" type="button">重新读取</button>
+        <button id="admin-refresh" class="button secondary" type="button">刷新设置</button>
         <button id="admin-logout" class="button secondary" type="button">退出登录</button>
       </div>
     </header>
@@ -22,38 +22,32 @@
     <main>
       <section class="panel settings-panel" aria-labelledby="settings-heading">
         <div class="section-heading">
-          <div><h2 id="settings-heading">AI 处理设置</h2><p id="model-label">正在读取设置…</p></div>
+          <h2 id="settings-heading">AI 开关</h2>
           <form id="enable-form">
-            <label class="enable-control"><input id="ai-enabled" type="checkbox" disabled><span>启用 DeepSeek 查找与复核</span></label>
+            <label class="enable-control"><input id="ai-enabled" type="checkbox" disabled><span>启用 DeepSeek</span></label>
             <button id="enable-save" class="button secondary" type="submit" disabled>保存</button>
           </form>
         </div>
         <p id="settings-state" class="state-line">正在读取设置…</p>
         <div id="storage-warning" class="notice warning hidden" role="alert"></div>
+        <details class="details"><summary>使用说明</summary><div class="detail-body">
+          <p>员工共用主机 Key，无需重复配置。保存成功不代表接口已验证。认证或余额异常修复后，可先停用再启用对应 Key；多个 Key 不增加官方账号额度。</p>
+          <p>启用后发送可处理的表格图片和 AI 预览查找对应，同时由本机独立核验。模型建议不能解除文件硬异常。原始 XLSX、ZIP、AI 文件和本机路径不会发送。</p>
+          <p id="qualification-state"></p><p id="persistence-state"></p>
+        </div></details>
       </section>
-
       <section class="panel keys-panel" aria-labelledby="keys-heading">
-        <div class="section-heading"><div><h2 id="keys-heading">API Key <span id="key-count" class="count"></span></h2></div></div>
+        <div class="section-heading"><h2 id="keys-heading">API Key <span id="key-count" class="count"></span></h2></div>
         <form id="key-add-form" class="add-form" autocomplete="off">
-          <textarea id="key-batch" rows="3" autocomplete="off" spellcheck="false" autocapitalize="off" placeholder="每行一个 API Key" disabled></textarea>
-          <div class="add-actions"><button id="key-add" class="button primary" type="submit" disabled>添加 Key</button></div>
+          <label for="key-batch">添加 Key</label>
+          <div class="add-input"><textarea id="key-batch" rows="2" autocomplete="off" spellcheck="false" autocapitalize="off" aria-describedby="batch-help" placeholder="每行粘贴一个 API Key" disabled></textarea><button id="key-add" class="button primary" type="submit" disabled>添加 Key</button></div>
+          <p id="batch-help" class="muted">每行一个，最多 100 个；提交即清空，不回显密钥。</p>
         </form>
-        <div id="key-list" class="key-list" aria-live="polite"><p class="empty">正在读取…</p></div>
+        <div id="key-list" class="key-list" aria-live="polite"><p class="empty">正在读取 Key…</p></div>
       </section>
-
-      <section class="panel debug-panel" aria-labelledby="debug-heading">
-        <div class="section-heading">
-          <div><h2 id="debug-heading">实时调试</h2><p id="debug-connection" role="status">正在连接…</p></div>
-          <label class="check-control"><input id="debug-follow" type="checkbox" checked>跟随最新</label>
-        </div>
-        <div id="debug-gap" class="notice warning hidden" role="status"></div>
-        <div id="debug-active" class="active-list" aria-live="polite"></div>
-        <div id="debug-log" class="debug-log" tabindex="0" aria-label="DeepSeek 调试记录"><p id="debug-empty" class="empty">暂无记录。</p><ol id="debug-events" class="events"></ol></div>
-      </section>
-
       <section class="panel ledger-panel" aria-labelledby="ledger-heading">
-        <div class="section-heading"><div><h2 id="ledger-heading">Key 账本</h2><p id="ledger-state">正在读取…</p></div></div>
-        <p class="ledger-warning">明文仅在本机管理员分区显示，截图或录屏会暴露密钥。</p>
+        <div class="section-heading"><h2 id="ledger-heading">Key 账本</h2><p id="ledger-state">正在读取…</p></div>
+        <p class="ledger-warning">默认遮罩，点“显示”才展开；截图或录屏会暴露密钥。</p>
         <div id="ledger-list" class="ledger-list"><p class="empty">暂未添加 Key。</p></div>
       </section>
     </main>
