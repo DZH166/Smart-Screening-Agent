@@ -2055,3 +2055,185 @@ diagnostics are expandable. */
     transition:none!important
   }
 }
+
+/* --- 导入页：更紧凑、任务导向 --- */
+#import-view {
+  display: flex;
+  flex-direction: column
+}
+.import-layout {
+  width: 100%;
+  max-width: 1120px;
+  margin: 10px auto 0
+}
+.import-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: 30px;
+  row-gap: 0;
+  padding: 22px 26px 20px
+}
+.import-heading {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 4px
+}
+.import-heading h1 {
+  font-size: 21px
+}
+.import-heading::after {
+  content: "固定模板：A 列编号 · B 列图片";
+  font-size: 13px;
+  color: var(--muted)
+}
+#import-view .field {
+  margin-top: 14px
+}
+#import-view #local-workbook-field {
+  grid-column: 1
+}
+#import-view #local-source-field {
+  grid-column: 2
+}
+#import-view #upload-fields {
+  grid-column: 1 / -1;
+  gap: 18px
+}
+#import-view .number-settings {
+  grid-column: 1 / -1;
+  margin-top: 16px;
+  padding-top: 14px
+}
+#import-view #local-output-field,
+#import-view #upload-progress {
+  grid-column: 1 / -1
+}
+#import-view .form-actions {
+  grid-column: 1 / -1;
+  margin-top: 16px;
+  padding-top: 14px;
+  align-items: center
+}
+#import-view .form-actions .button-primary {
+  min-width: 168px
+}
+#import-view .upload-field {
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  background: #fbfcff;
+  padding: 14px 14px 12px;
+  transition: border-color .15s ease, background .15s ease
+}
+#import-view .upload-field.dragover {
+  border-color: var(--blue);
+  background: var(--blue-light)
+}
+#import-view .upload-field input[type=file] {
+  width: 100%
+}
+#import-view .upload-file-name {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--muted)
+}
+.import-hints {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px
+}
+.import-hints .hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface)
+}
+.import-hints .hint-index {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--blue-light);
+  color: var(--blue);
+  font-size: 12px;
+  font-weight: 700;
+  display: grid;
+  place-items: center
+}
+.import-hints strong {
+  display: block;
+  font-size: 14px
+}
+.import-hints p {
+  margin: 2px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted)
+}
+@media (max-width: 900px) {
+  .import-card {
+    grid-template-columns: 1fr
+  }
+  #import-view #local-workbook-field,
+  #import-view #local-source-field {
+    grid-column: 1 / -1
+  }
+  .import-hints {
+    grid-template-columns: 1fr
+  }
+}
+
+/* 导入页第二版：左侧表单 + 右侧任务清单 */
+.import-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 296px;
+  align-items: start;
+  gap: 16px;
+  max-width: 1120px
+}
+.import-hints {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 0
+}
+.import-hints .hint {
+  align-items: center;
+  padding: 15px 16px
+}
+.import-hints .hint-index {
+  width: 26px;
+  height: 26px;
+  font-size: 13px
+}
+.import-hints strong {
+  font-size: 14px
+}
+.import-hints p {
+  margin-top: 3px
+}
+@media (max-width: 1100px) {
+  .import-layout {
+    grid-template-columns: 1fr
+  }
+  .import-hints {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin-top: 2px
+  }
+  .import-hints .hint {
+    align-items: flex-start;
+    padding: 12px 14px
+  }
+}
+@media (max-width: 760px) {
+  .import-hints {
+    grid-template-columns: 1fr
+  }
+}

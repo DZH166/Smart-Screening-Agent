@@ -59,6 +59,11 @@
             <div id="upload-progress" class="upload-progress hidden" role="status" aria-live="polite"><div class="upload-progress-caption"><strong id="upload-progress-label">正在上传文件…</strong><span id="upload-progress-percent"></span></div><div class="progress-track"><div id="upload-progress-fill"></div></div><p id="upload-progress-detail">请保持页面打开，上传完成后自动处理。</p></div>
             <div class="form-actions"><details id="import-help" class="inline-details"><summary>文件要求与帮助</summary><div class="help-content"><p>使用当前固定模板：图片在 B 列，编号在 A 列。</p><p>选择 .xlsx 表格，并将 AI 文件夹压缩成 .zip 上传。本工具不设上传大小上限，实际可处理容量受主机磁盘、内存和网络影响；文件数量、格式及归档安全仍由主机检查。</p><p>原件与已有编号保留；只为成功匹配的缺号行生成新编号。未处理行保持原状。</p><p>员工上传到主机处理，完成后下载结果；每人任务分开。DeepSeek 沿用主机配置，无需填写密钥。</p><p id="import-processing-note">本机匹配，原文件保留</p></div></details><button id="start-button" type="submit" class="button button-primary">开始处理</button></div>
           </form>
+          <div class="import-hints" aria-label="操作提示">
+            <div class="hint"><span class="hint-index">1</span><div><strong>选表格</strong><p>固定模板：A 列编号、B 列图片。</p></div></div>
+            <div class="hint"><span class="hint-index">2</span><div><strong>选压缩包</strong><p>AI 原稿打包上传，原件不改动。</p></div></div>
+            <div class="hint"><span class="hint-index">3</span><div><strong>自动处理</strong><p>可靠匹配直接通过，只审疑难项。</p></div></div>
+          </div>
         </div>
       </section>
       <section id="processing-view" class="view hidden" aria-live="polite">

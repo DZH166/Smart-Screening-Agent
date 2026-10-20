@@ -725,5 +725,33 @@
     $('summary-output').previousElementSibling.textContent='结果获取方式';
     $('open-output-button').textContent='下载结果 ZIP ↓';
   }
+  function enhanceDropZones() {
+    // Browsers only: the synthetic UI sandbox has no DataTransfer.
+    if (typeof DataTransfer !== 'function' || typeof document.querySelectorAll !== 'function') return;
+    document.querySelectorAll('.upload-field').forEach((field) => {
+      const input = field.querySelector('input[type=file]');
+      if (!input) return;
+      const mark = () => field.classList.add('dragover');
+      const clear = () => field.classList.remove('dragover');
+      field.addEventListener('dragenter', (event) => { event.preventDefault(); mark(); });
+      field.addEventListener('dragover', (event) => { event.preventDefault(); mark(); });
+      field.addEventListener('dragleave', (event) => { if (!field.contains(event.relatedTarget)) clear(); });
+      field.addEventListener('drop', (event) => {
+        event.preventDefault();
+        clear();
+        const files = event.dataTransfer?.files;
+        if (!files || !files.length) return;
+        try {
+          const transfer = new DataTransfer();
+          transfer.items.add(files[0]);
+          input.files = transfer.files;
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+        } catch (error) {
+          // Fall back to the native picker; never block the upload flow.
+        }
+      });
+    });
+  }
+  enhanceDropZones();
   init().catch((error)=>notice(error.message||'界面加载遇到问题，请刷新页面重试。'));
 })();

@@ -2,7 +2,7 @@
 
 Windows 图片与 AI 设计文件对应编号工具，默认在本机使用，也可显式开启局域网员工上传、独立处理与结果下载。用户确认的范围：固定 XLSX 模板 A 列编号/B 列图片；HSD + 四位新流水号；保留已有编号；只对成功匹配的空白编号行填号；疑难项人工复核；非破坏性输出副本。
 
-当前版本：`v1.10.1`（2026-10-20）。同时提供 Windows 安装包与便携程序，见 [GitHub Releases](https://github.com/DZH166/Smart-Screening-Agent/releases/latest)：安装包双击 `HSD图号助手-Setup-1.10.1.exe` 按向导安装，不需要管理员权限；便携版解压整个文件夹后双击 `HSD图号助手.exe`。两者都不需要安装 Python。操作步骤见 [使用说明](使用说明.txt)，多台电脑共用同一份 DeepSeek Key 的部署方式见 [安装与内网网关部署](docs/安装与内网网关部署.md)，版本记录见 [CHANGELOG.md](CHANGELOG.md)。
+当前版本：`v1.11.0`（2026-10-20）。同时提供 Windows 安装包与便携程序，见 [GitHub Releases](https://github.com/DZH166/Smart-Screening-Agent/releases/latest)：安装包双击 `HSD图号助手-Setup-1.11.0.exe` 按向导安装，不需要管理员权限；便携版解压整个文件夹后双击 `HSD图号助手.exe`。两者都不需要安装 Python。操作步骤见 [使用说明](使用说明.txt)，多台电脑共用同一份 DeepSeek Key 的部署方式见 [安装与内网网关部署](docs/安装与内网网关部署.md)，版本记录见 [CHANGELOG.md](CHANGELOG.md)。
 
 流程为“导入 → 自动查找与核验 → 仅处理剩余疑难项 → 摘要确认并导出”。主机已启用 AI 且有可用 Key 时，DeepSeek 从完整的安全预览库查找对应图片，**同时由本机独立匹配并核验**；AI 关闭或无可用 Key 时沿用完整本机流程。可靠匹配由服务端按本机证据直接通过，不要求员工逐张查看；没有疑问项时直接进入摘要。**模型的相同建议不等于自动通过**，发布包不预置 AI 业务自动通过资格。v1.6.0 起不设表格、ZIP、HTTP 上传、单个 AI 与展开总量的固定字节上限及压缩比限制；实际容量仍受磁盘、内存和网络影响，保留文件数量、图像像素及归档有效性检查。
 
@@ -34,7 +34,7 @@ CPU 匹配、AI 等待和导出使用独立调度：CPU 1 个 worker、AI 批次
 
 ## 员工界面
 
-- 导入页保留表格、AI 文件、每批起始号和开始按钮；本机模式另有文件夹与保存位置。模板、文件要求和原件保护说明集中在“文件要求与帮助”。
+- 导入页为「左侧表单 + 右侧三步清单」布局：宽屏双列、窄屏自动堆叠；上传模式的表格与压缩包是拖放区，可拖入文件也可点击选择。本机模式另有文件夹与保存位置；模板、文件要求和原件保护说明集中在“文件要求与帮助”。
 - 上传显示实际上传进度，后台显示当前阶段及该阶段进度；排队显示位置，不把单阶段百分比当作整批百分比。
 - 有疑问时默认只列出需要处理的项目，状态行突出剩余数量。主区域用于图片对照和确认、换候选、跳过；长条图上下排列，可放大。全部结果、已完成及已跳过可按需查看。
 - AI 建议保留“需人工确认”标记；具体差异、文件异常及复核对象与当前选择不同的提示保持可见，完整复核说明与技术依据展开查看。
@@ -55,24 +55,24 @@ py -3.12 -m venv .venv
 .\build.ps1
 ```
 
-v1.10.1 便携构建输出位于 `dist/v1.10.1/`，解压发布包后双击其中的 exe。默认只监听 `127.0.0.1`，随机本地端口，界面资源均离线加载。局域网员工入口需要下文的显式启动参数。本机匹配无需联网；启用 DeepSeek 查找与复核时需要联网并产生 API 费用。无需安装 Illustrator 来读取已有 PDF 兼容预览；不能渲染的 AI 会明确列为异常。
+v1.11.0 便携构建输出位于 `dist/v1.11.0/`，解压发布包后双击其中的 exe。默认只监听 `127.0.0.1`，随机本地端口，界面资源均离线加载。局域网员工入口需要下文的显式启动参数。本机匹配无需联网；启用 DeepSeek 查找与复核时需要联网并产生 API 费用。无需安装 Illustrator 来读取已有 PDF 兼容预览；不能渲染的 AI 会明确列为异常。
 
 便携包验收需要本机已有 `测试样本/10月表格.xlsx` 和 `测试样本/10.10.zip`，不会把它们加入发布包。先启动刚构建的 exe，使用独立数据目录并保持 AI 复核关闭；在另一 PowerShell 窗口运行验收：
 
 ```powershell
-& '.\dist\v1.10.1\HSD图号助手\HSD图号助手.exe' --no-browser --port 8804 --data-dir '.\tmp\v191_portable_data'
+& '.\dist\v1.11.0\HSD图号助手\HSD图号助手.exe' --no-browser --port 8804 --data-dir '.\tmp\v191_portable_data'
 ```
 
 ```powershell
-.\.venv\Scripts\python.exe tools\verify_portable.py http://127.0.0.1:8804 --bundle 'dist\v1.10.1\HSD图号助手' --data-dir tmp\v191_portable_data --work tmp\v191_packaged_validation
+.\.venv\Scripts\python.exe tools\verify_portable.py http://127.0.0.1:8804 --bundle 'dist\v1.11.0\HSD图号助手' --data-dir tmp\v191_portable_data --work tmp\v191_packaged_validation
 .\.venv\Scripts\python.exe tools\prepare_delivery.py --result 'tmp\v191_packaged_validation\验收结果.json' --notes 'tmp\v191_packaged_validation\验收说明.txt'
 ```
 
-`verify_portable.py` 核对实际运行的冻结程序及构建指纹，用缺号副本验证编号、表格局部更新、原稿不变和导出 AI 的原始字节。`prepare_delivery.py` 需验收成功后运行；先根据真实验收结果编写 `--notes` 指定的说明文件。它会再次校验构建一致性，生成 `交付/v1.10.1/` 下的 ZIP 和 SHA256。验收后若改动构建输入，应重新构建并验收。这组命令验证本机匹配与打包导出；新并行流程、真实接口与员工隔离须另行验收，不自动取得 AI 业务放行资格，不将合成结果冒充60张业务回归。
+`verify_portable.py` 核对实际运行的冻结程序及构建指纹，用缺号副本验证编号、表格局部更新、原稿不变和导出 AI 的原始字节。`prepare_delivery.py` 需验收成功后运行；先根据真实验收结果编写 `--notes` 指定的说明文件。它会再次校验构建一致性，生成 `交付/v1.11.0/` 下的 ZIP 和 SHA256。验收后若改动构建输入，应重新构建并验收。这组命令验证本机匹配与打包导出；新并行流程、真实接口与员工隔离须另行验收，不自动取得 AI 业务放行资格，不将合成结果冒充60张业务回归。
 
 ## 安装包与内网 AI 网关
 
-v1.10.1 同时提供安装包和绿色版。安装包用 Inno Setup 制作，默认按当前用户安装到 `%LOCALAPPDATA%\Programs\HSD图号助手`，不需要管理员权限，包含开始菜单项、可选桌面快捷方式和标准卸载入口；静默安装参数为 `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART`。制作方式：
+v1.11.0 同时提供安装包和绿色版。安装包用 Inno Setup 制作，默认按当前用户安装到 `%LOCALAPPDATA%\Programs\HSD图号助手`，不需要管理员权限，包含开始菜单项、可选桌面快捷方式和标准卸载入口；静默安装参数为 `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART`。制作方式：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
@@ -98,7 +98,7 @@ v1.9.1 已在原地址 [192.168.0.156:8819](http://192.168.0.156:8819/) 上线�
 当前地址对应的员工服务参数模板（先填写实际输入、输出及原 AI 配置目录，不可原样执行；服务已运行时不要重复启动）：
 
 ```powershell
-& '.\dist\v1.10.1\HSD图号助手\HSD图号助手.exe' --lan '192.168.0.156/24' --lan-input-root 'D:/主机测试素材' --lan-output-root 'D:/主机测试结果' --port 8819 --data-dir "$env:LOCALAPPDATA/HSD图片编号工具-员工服务-v191" --settings-dir 'D:/主机实际AI配置目录'
+& '.\dist\v1.11.0\HSD图号助手\HSD图号助手.exe' --lan '192.168.0.156/24' --lan-input-root 'D:/主机测试素材' --lan-output-root 'D:/主机测试结果' --port 8819 --data-dir "$env:LOCALAPPDATA/HSD图片编号工具-员工服务-v191" --settings-dir 'D:/主机实际AI配置目录'
 ```
 
 `--settings-dir` 必须指向原工具实际保存 DPAPI 配置的目录，并使用原 Windows 用户运行；不要新建同名空目录。Codex 与普通终端的 `%LOCALAPPDATA%` 可能映射不同位置，设置看似丢失时先核对实际目录，无需复制密钥。`--data-dir` 保存隔离的 uploads、jobs、employee_outputs 与持久私有 task_records，不进入 Git。两个主机兼容路径根须分开，输入根预先存在；员工不填写主机路径。
@@ -110,7 +110,7 @@ v1.9.1 已在原地址 [192.168.0.156:8819](http://192.168.0.156:8819/) 上线�
 Windows 防火墙仅允许本版程序、指定接口/端口和来源子网：
 
 ```powershell
-New-NetFirewallRule -DisplayName 'HSD-Agent-v191-8819' -Direction Inbound -Action Allow -Protocol TCP -LocalAddress '192.168.0.156' -LocalPort 8819 -RemoteAddress '192.168.0.0/24' -Profile Any -Program 'D:\智筛Agent\dist\v1.10.1\HSD图号助手\HSD图号助手.exe'
+New-NetFirewallRule -DisplayName 'HSD-Agent-v191-8819' -Direction Inbound -Action Allow -Protocol TCP -LocalAddress '192.168.0.156' -LocalPort 8819 -RemoteAddress '192.168.0.0/24' -Profile Any -Program 'D:\智筛Agent\dist\v1.11.0\HSD图号助手\HSD图号助手.exe'
 ```
 
 防火墙规则只允许实际新版 exe、指定接口/端口及员工子网，不关闭防火墙、不映射公网。实际启动、防火墙与异机连通状态应分别核对，不能用本机 HTTP 检查代替第二台实体电脑验证。停止服务前先确认所有任务与下载完成。原始资料只上传到这台局域网主机，DeepSeek只接收已授权的查找/复核预览，不接收XLSX/ZIP/AI原件。
@@ -220,7 +220,7 @@ v1.4.0 员工上传下载升级：全套507项测试通过，最后调整LAN图�
 当前版本可用以下命令重复员工便携程序验收；`--work` 指定新的空目录，并先填写当前实际主机地址与空闲端口；工具只生成合成图和专用关闭AI的设置，不使用主机密钥：
 
 ```powershell
-.\.venv\Scripts\python.exe tools\verify_employee_portable.py --exe 'dist/v1.10.1/HSD图号助手/HSD图号助手.exe' --host '<主机当前IPv4>' --prefix 24 --port 8808 --work tmp/employee_portable_new
+.\.venv\Scripts\python.exe tools\verify_employee_portable.py --exe 'dist/v1.11.0/HSD图号助手/HSD图号助手.exe' --host '<主机当前IPv4>' --prefix 24 --port 8808 --work tmp/employee_portable_new
 ```
 
 v1.3.1 局域网升级：全套416项测试通过，随后新增1项访问码隔离测试，并复测88项局域网测试通过，共覆盖417个不同用例。局域网测试包括认证、会话过期、Host/Origin/CSRF、目录与链接边界、管理权限和共享任务版本冲突。两份前端脚本语法检查及AI渲染断言通过。Windows便携程序已通过指定局域网接口启动和合成图片“导入→自动匹配→摘要→编号导出”的实际流程检查，原始合成输入与导出AI哈希核对通过。当前主机保存的AI设置保持启用且已配置，本次验证未调用DeepSeek。尚未在另一台物理电脑上验证连通，也未新增业务准确率或自动通过量结论。
