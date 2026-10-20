@@ -40,8 +40,8 @@
         <div class="section-heading"><h2 id="keys-heading">API Key <span id="key-count" class="count"></span></h2></div>
         <form id="key-add-form" class="add-form" autocomplete="off">
           <label for="key-batch">添加 Key</label>
-          <div class="add-input"><textarea id="key-batch" rows="2" autocomplete="off" spellcheck="false" autocapitalize="off" aria-describedby="batch-help" placeholder="每行粘贴一个 API Key" disabled></textarea><button id="key-add" class="button primary" type="submit" disabled>添加 Key</button></div>
-          <p id="batch-help" class="muted">每行一个，最多 100 个；提交即清空，不回显密钥。</p>
+          <div class="add-input"><textarea id="key-batch" rows="2" autocomplete="off" spellcheck="false" autocapitalize="off" aria-describedby="batch-help" placeholder="每行粘贴一个 API Key" disabled></textarea><button id="key-reveal" class="button quiet" type="button" aria-pressed="false">显示</button><button id="key-add" class="button primary" type="submit" disabled>添加 Key</button></div>
+          <p id="batch-help" class="muted">每行一个，最多 100 个；提交即清空。输入框默认遮罩，点“显示”可查看。</p>
         </form>
         <div id="key-list" class="key-list" aria-live="polite"><p class="empty">正在读取 Key…</p></div>
       </section>

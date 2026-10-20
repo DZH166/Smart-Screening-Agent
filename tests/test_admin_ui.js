@@ -51,6 +51,12 @@ async function main(){
   assert.ok(ui.keyHtml({id:'disabled',enabled:false,status:'available',requests:1}).includes('已停用'));
 
   response=keyResponse();await ui.boot();const bootRead=calls.filter(({url})=>url==='/api/admin/keys').at(-1);assert.equal(bootRead.options.method,'GET');assert.equal(timers.get(ui.state.timer).delay,30000);
+  // The add-key box is masked by default and can be revealed on demand.
+  assert.ok(!element('key-batch').classList.contains('key-plain'));
+  listeners['key-reveal:click'][0]();
+  assert.ok(element('key-batch').classList.contains('key-plain'));assert.equal(element('key-reveal').textContent,'隐藏');
+  listeners['key-reveal:click'][0]();
+  assert.ok(!element('key-batch').classList.contains('key-plain'));assert.equal(element('key-reveal').textContent,'显示');
   assert.equal(element('settings-state').textContent,'员工共用主机配置，无需填写 Key。');assert.ok(element('qualification-state').textContent.includes('仍需人工确认'));assert.ok(element('persistence-state').textContent.includes('DPAPI'));
   ui.applySettings({...json(initial),enabled:false});assert.match(element('settings-state').textContent,/已关闭 AI/);
   ui.applySettings({...json(initial),configured:false});assert.match(element('settings-state').textContent,/请添加并启用 Key/);
@@ -173,7 +179,9 @@ async function main(){
   assert.ok(ledgerRow.includes('data-reveal')&&ledgerRow.includes('data-copy'));
   for(const text of [source,html,css])assert.ok(!/debug|usage-panel|usage-cost|estimated_usd|费用|US\$|实时调试|累计用量/.test(text),'removed panels have no hidden UI or rendering code');
   assert.ok(calls.every(({url})=>url==='/api/admin/keys'||url==='/api/ai/settings'||url==='/api/admin/ledger'),'no diagnostic or cumulative-cost request');
+  assert.ok(html.includes('id="key-reveal"'),'the add-key input has a reveal toggle');
   assert.ok(!/localStorage|sessionStorage|console\./.test(source),'credentials are not persisted or logged');assert.ok(css.includes('#key-batch{-webkit-text-security:disc}'));
+  assert.ok(css.includes('#key-batch.key-plain{-webkit-text-security:none}'),'the reveal toggle can unmask the input');
   console.log('Admin UI synthetic assertions passed');
 }
 main().catch((error)=>{console.error(error);process.exitCode=1;});

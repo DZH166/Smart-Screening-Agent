@@ -12,7 +12,7 @@
 
 #define MyAppName "智筛 Agent · HSD 图号助手"
 #define MyAppShortName "HSD图号助手"
-#define MyAppVersion "1.10.0"
+#define MyAppVersion "1.10.1"
 #define MyAppPublisher "DZH166"
 #define MyAppURL "https://github.com/DZH166/Smart-Screening-Agent"
 #define MyAppExeName "HSD图号助手.exe"

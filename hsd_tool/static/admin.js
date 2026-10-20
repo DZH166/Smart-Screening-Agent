@@ -263,6 +263,14 @@
     $('ai-enabled').addEventListener('change',()=>{state.enableDirty = true;});
     $('key-list').addEventListener('click',keyAction);
     $('key-list').addEventListener('submit',renameKey);
+    $('key-reveal').addEventListener('click',()=>{
+      const area = $('key-batch'), button = $('key-reveal');
+      const show = !area.classList.contains('key-plain');
+      area.classList.toggle('key-plain', show);
+      button.textContent = show ? '隐藏' : '显示';
+      button.setAttribute?.('aria-pressed', show ? 'true' : 'false');
+      area.focus();
+    });
     $('ledger-list').addEventListener('click',ledgerClick);
     $('admin-logout').addEventListener('click',async()=>{
       try { await fetch('/admin/logout',{method:'POST',headers:{'Content-Type':'application/json','X-HSD-Token':window.HSD_TOKEN},body:'{}'}); } catch (error) {}
