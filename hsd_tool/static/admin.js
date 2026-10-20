@@ -107,7 +107,7 @@
   function applySettings(settings) {
     state.settings = settings;
     if (!state.enableDirty) $('ai-enabled').checked = settings.enabled === true;
-    $('model-label').textContent = `模型：${settings.model || 'DeepSeek'} · ${settings.enabled ? '已启用' : '已关闭'}`;
+    $('model-label').textContent = `模型：${settings.model || 'DeepSeek'} · ${settings.enabled ? '已启用 AI 查找与复核' : 'AI 已关闭，使用本机匹配'}`;
     $('settings-state').textContent = settings.configured ? '已配置 Key。' : '尚未配置 Key。';
     $('storage-warning').textContent = settings.storage_warning || '';
     $('storage-warning').classList.toggle('hidden', !settings.storage_warning);
@@ -266,7 +266,7 @@
     if (state.saving || state.loading || !state.settings || state.conflict) return;
     const enabled = $('ai-enabled').checked;
     state.saving = true; controls(); message('');
-    try { state.enableDirty = false; applySettings(await request('/api/ai/settings',{enabled})); $('ai-enabled').checked = state.settings.enabled === true; message('复核开关已保存。'); }
+    try { state.enableDirty = false; applySettings(await request('/api/ai/settings',{enabled})); $('ai-enabled').checked = state.settings.enabled === true; message('AI 开关已保存。'); }
     catch (error) { $('ai-enabled').checked = state.settings.enabled === true; message(error.message || '设置未保存，请稍后重试。',true); }
     finally { state.saving = false; controls(); }
   }

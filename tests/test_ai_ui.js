@@ -15,7 +15,7 @@ const document = {
 const sandbox = {document, window:{}, AbortController, setTimeout, clearTimeout,
   CustomEvent:class {}, fetch:async()=>({ok:true,json:async()=>({configured:false,enabled:false})})};
 vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../hsd_tool/static/ai-settings.js'),'utf8'),sandbox);
-const {rowHtml,usageText} = sandbox.window.HSDAI;
+const {rowHtml,usageText,retrievalHtml} = sandbox.window.HSDAI;
 const review = {verdict:'same',candidate_id:'f<1',outcome:'auto_passed',
   reason:'图案说明'.repeat(40)+'<script>unsafe</script>', differences:['<extra>'],
   gate_failures:[{code:'validation_required',reason:'资格未完成'},
@@ -83,6 +83,38 @@ assert.ok(protocolGate.indexOf('模型回答存在矛盾') < protocolGate.indexO
 const stale = rowHtml({status:'review',ai_review:{...plain,reason_code:'source_changed'}},'first.ai','f1');
 assert.ok(stale.indexOf('复核图片或原文件已变化') < stale.indexOf('<details'));
 
+// Retrieval is a candidate suggestion, separate from pair review and its five
+// checks / independent qualification. A model's "same" is never acceptance.
+assert.equal(retrievalHtml({status:'review'},'',null),'');
+const retrieval={candidate_id:'retrieval<1',verdict:'same',reason:'图案主体接近，需要本机继续核验。',outcome:'suggestion'};
+const retrievalSuggestion=retrievalHtml({status:'review',ai_retrieval:retrieval},'suggested.ai','retrieval<1');
+assert.ok(retrievalSuggestion.includes('AI 查找建议 · 需人工确认'));
+assert.ok(!retrievalSuggestion.includes('条件验证后自动通过'));
+assert.ok(!retrievalSuggestion.includes('认为满足'));
+assert.ok(!retrievalSuggestion.includes('本机核验已通过'));
+assert.ok(!retrievalSuggestion.includes('<details open'));
+assert.ok(retrievalSuggestion.includes('data-detail-key="ai-retrieval"'));
+const retrievalMismatch=retrievalHtml({status:'review',ai_retrieval:retrieval},'unsafe"<file>','different');
+assert.ok(retrievalMismatch.indexOf('AI 建议与当前候选不同')<retrievalMismatch.indexOf('<details'));
+assert.ok(retrievalMismatch.includes('以本机核验或员工选择为准'));
+assert.ok(retrievalMismatch.includes('data-candidate-id="retrieval&lt;1"'));
+assert.ok(retrievalMismatch.includes('unsafe&quot;&lt;file&gt;'));
+const retrievalAuto=retrievalHtml({status:'auto',ai_retrieval:retrieval},'suggested.ai','other');
+assert.ok(retrievalAuto.includes('本机核验已通过'));
+assert.ok(retrievalAuto.includes('AI 建议与当前候选不同'),'local acceptance must not conceal the model choosing something else');
+assert.ok(!retrievalAuto.includes('需人工确认'));
+assert.ok(retrievalHtml({status:'confirmed',ai_retrieval:retrieval},'suggested.ai','retrieval<1').includes('本项已由员工确认'));
+assert.ok(retrievalHtml({status:'skipped',ai_retrieval:retrieval},'suggested.ai','retrieval<1').includes('本项已跳过'));
+assert.ok(retrievalHtml({status:'review',ai_retrieval:{outcome:'error',reason:'接口暂不可用。'}},'',null).includes('AI 查找未完成 · 需人工确认'));
+const noRepeat=retrievalHtml({status:'review',reason:retrieval.reason,ai_retrieval:retrieval},'suggested.ai','retrieval<1');
+assert.ok(!noRepeat.includes(retrieval.reason),'native pending reason is not duplicated as AI advice');
+const longReason='开头简短说明。'+'详细原因<script>unsafe</script>'.repeat(20);
+const fullRetrieval=retrievalHtml({status:'review',ai_retrieval:{...retrieval,reason:longReason}},'suggested.ai','retrieval<1');
+assert.ok(fullRetrieval.slice(0,fullRetrieval.indexOf('<details')).includes('开头简短说明。'));
+assert.ok(!fullRetrieval.includes('<script>'));
+assert.ok(fullRetrieval.includes('&lt;script&gt;unsafe&lt;/script&gt;'));
+assert.ok(fullRetrieval.indexOf('详细原因')>fullRetrieval.indexOf('<details'));
+
 // Unknown usage is not zero dollars; known partial totals stay labelled USD
 // estimates and the missing usage is explained separately.
 const unknown = usageText({requests:1,failures:1,unknown_usage_requests:1,
@@ -95,4 +127,18 @@ assert.ok(partial.cost.includes('已知用量费用估算 US$'));
 assert.ok(partial.unknown.includes('费用统计不完整'));
 assert.ok(usageText({requests:0,estimated_usd:0}).cost.includes('US$ 0.000000'));
 assert.equal(usageText(null).cost,'费用估算暂不可用');
-console.log('AI UI rendering assertions passed');
+async function settingsChecks(){
+  // Let the initial asynchronous settings read complete before changing the
+  // fixture. No real key or provider is accessed by either refresh.
+  for(let index=0;index<8;index++)await Promise.resolve();
+  sandbox.fetch=async()=>({ok:true,json:async()=>({configured:true,enabled:true})});
+  await sandbox.window.HSDAI.refresh();
+  assert.equal(nodes.get('processing-mode-label').textContent,'AI 查找对应图片 + 本机核验');
+  assert.match(nodes.get('import-processing-note').textContent,/查找候选与本机核验同时进行/);
+  sandbox.fetch=async()=>({ok:true,json:async()=>({configured:true,enabled:false})});
+  await sandbox.window.HSDAI.refresh();
+  assert.equal(nodes.get('processing-mode-label').textContent,'本机匹配');
+  assert.equal(nodes.get('import-processing-note').textContent,'本机匹配，原文件保留');
+  console.log('AI UI rendering assertions passed');
+}
+settingsChecks().catch((error)=>{console.error(error);process.exitCode=1;});

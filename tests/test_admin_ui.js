@@ -57,6 +57,9 @@ async function main(){
 
   ui.applySettings(json(initial));ui.state.pool={keys:[]};ui.renderKeys();
   assert.equal(element('settings-state').textContent,'已配置 Key。');
+  assert.match(element('model-label').textContent,/已启用 AI 查找与复核/);
+  ui.applySettings({...json(initial),enabled:false});assert.match(element('model-label').textContent,/AI 已关闭，使用本机匹配/);
+  ui.applySettings(json(initial));
   const ledgerRow=ui.ledgerHtml({id:'ledger-a',label:'主密钥',api_key:'sk-ledger-visible-value'});
   assert.ok(ledgerRow.includes('data-value="sk-ledger-visible-value"'),'copy keeps the value');
   assert.ok(!/>sk-ledger-visible-value</.test(ledgerRow),'the value stays masked until revealed');
@@ -116,6 +119,7 @@ async function main(){
   assert.ok(html.includes('window.HSD_TOKEN = __HSD_TOKEN__'));assert.ok(html.includes('href="/"'));
   assert.ok(html.includes('id="ledger-list"')&&html.includes('id="ledger-state"'),'the key ledger is present');
   assert.ok(!html.includes('usage-panel')&&!html.includes('qualification-state'),'noisy panels stay removed');
+  assert.ok(html.includes('启用 DeepSeek 查找与复核'),'the v1.9 AI wording is preserved');
   const css=fs.readFileSync(path.join(__dirname,'../hsd_tool/static/admin.css'),'utf8');
   assert.ok(css.includes('#key-batch{-webkit-text-security:disc}'),'batch credentials default to masked input');
   console.log('Admin UI synthetic assertions passed');

@@ -286,6 +286,7 @@ class AiSettings:
                 # The gateway token is the bearer credential for this hop only.
                 key, endpoint = self._gateway["token"], self._gateway["endpoint"]
             return {"enabled": self._enabled, "api_key": key, "model": MODEL,
+                    "matching_workflow": "ai_first",
                     "keys": keys, "key_revision": self._revision,
                     "endpoint": endpoint or OFFICIAL_ENDPOINT, "via_gateway": bool(endpoint),
                     "prices": dict(PRICES), "price_date": PRICE_DATE}

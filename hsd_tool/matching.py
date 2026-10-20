@@ -28,7 +28,8 @@ from PIL import Image
 import pymupdf
 
 from .matching_verification import (affine_coverage, phase_coverage, periodic_extension,
-                                    pixel_metrics, pixel_rms, coherent_difference)
+                                    pixel_metrics, pixel_rms, coherent_difference,
+                                    _pixel_error, _channel_max)
 from .archive_io import member_blocks
 
 MAX_FILES = 500
@@ -430,12 +431,11 @@ def _palette_difference(query: _Appearance, candidate: _Appearance) -> dict:
             'palette_candidate_flat_coverage': second['flat_coverage']}
 
 
-def _features(query: _Appearance, candidate: _Appearance) -> dict:
-    result = {'score': 0., 'strong': False, 'method': 'features',
-              'failed_checks': ['insufficient_geometric_support']}
+def _feature_correspondences(query: _Appearance, candidate: _Appearance):
+    """The original bidirectional ratio test, without geometric/pixel work."""
     if (query.descriptors is None or candidate.descriptors is None
             or min(len(query.descriptors), len(candidate.descriptors)) < 6):
-        return result
+        return [], []
     pairs = cv2.BFMatcher().knnMatch(query.descriptors, candidate.descriptors, k=2)
     good = [pair[0] for pair in pairs if len(pair) == 2 and pair[0].distance < .75 * pair[1].distance]
     source_coordinates = [candidate.keypoints[m.trainIdx].pt for m in good]
@@ -443,8 +443,6 @@ def _features(query: _Appearance, candidate: _Appearance) -> dict:
     source_wider = (candidate.image.shape[1] / candidate.image.shape[0]
                     > query.image.shape[1] / query.image.shape[0] * 1.05)
     if len(good) < 14 or source_wider:
-        # Two identical repeats within the source can make every forward ratio
-        # ambiguous. The reverse direction can independently evidence each copy.
         reverse = cv2.BFMatcher().knnMatch(candidate.descriptors, query.descriptors, k=2)
         seen_pairs = set(zip(source_coordinates, query_coordinates))
         for pair in reverse:
@@ -455,8 +453,36 @@ def _features(query: _Appearance, candidate: _Appearance) -> dict:
                     seen_pairs.add((source_point, query_point))
                     source_coordinates.append(source_point)
                     query_coordinates.append(query_point)
+    return source_coordinates, query_coordinates
+
+
+def _geometric_score_upper_bound(source_coordinates, candidate: _Appearance) -> float:
+    """Bound the existing feature score using *all* possible inlier points.
+
+    RANSAC can only select a subset of these points. Its inlier count and convex
+    hull coverage cannot exceed the complete set, and its pixel factor is at
+    most one. This is an exclusion bound, never positive matching evidence.
+    """
+    if len(source_coordinates) < 6:
+        return 0.
+    area = cv2.contourArea(cv2.convexHull(np.float32(source_coordinates)))
+    coverage = area / (candidate.image.shape[0] * candidate.image.shape[1])
+    # Round conservatively away from exclusion at floating-point boundaries.
+    return min(1., min(1., len(source_coordinates) / 14) * min(1., coverage / .18) + 1e-6)
+
+
+def _features(query: _Appearance, candidate: _Appearance, *, score_cutoff=None) -> dict:
+    result = {'score': 0., 'strong': False, 'method': 'features',
+              'failed_checks': ['insufficient_geometric_support']}
+    source_coordinates, query_coordinates = _feature_correspondences(query, candidate)
     if len(source_coordinates) < 6:
         return result
+    if score_cutoff is not None:
+        bound = _geometric_score_upper_bound(source_coordinates, candidate)
+        if bound < score_cutoff:
+            result.update(score=bound, score_upper_bound=bound,
+                          evaluated_by='geometric_score_upper_bound')
+            return result
     source_points = np.float32(source_coordinates)
     query_points = np.float32(query_coordinates)
     transform, mask = cv2.estimateAffine2D(source_points, query_points, method=cv2.RANSAC,
@@ -692,12 +718,12 @@ def _texture_scan(query: np.ndarray, body: np.ndarray, height: int, best: dict,
                     best_rms = measured_rms
                     patch = candidate_patch
                     location = [x + dx, y + dy]
-    error = np.abs(query.astype(np.float32) - patch.astype(np.float32)) / 255
-    pixel = error.max(axis=2)
+    error = _pixel_error(query, patch)
     rms = float(np.sqrt(np.mean(error ** 2)))
     score = 1 - rms
     if score <= best.get('score', 0.):
         return
+    pixel = _channel_max(error)
     coherent = coherent_difference(query, patch)
     proof = phase_coverage(tiled, query, differences, tile.shape[:2])
     changed = float((pixel > .2).mean())
@@ -1058,18 +1084,22 @@ def _texture_results(query, identities, file_images, precision, cache, executor=
 
 
 def _match_appearances(rows: list[dict], files: list[dict], row_images: dict,
-                       file_images: dict, progress=None, *, texture_workers=2) -> list[dict]:
+                       file_images: dict, progress=None, *, texture_workers=2,
+                       proposals=None) -> list[dict]:
     if type(texture_workers) is not int or texture_workers not in (1, 2):
         raise ValueError('纹样验证工作线程数只能是 1 或 2。')
     if texture_workers == 1:
-        return _match_appearances_serial(rows, files, row_images, file_images, progress)
+        return _match_appearances_serial(rows, files, row_images, file_images, progress,
+                                         proposals=proposals)
     # PyMuPDF rendering and SIFT/RANSAC remain on the calling thread. OpenCV's
     # process-global thread setting is never changed inside a running job.
     with ThreadPoolExecutor(max_workers=texture_workers, thread_name_prefix='hsd-texture') as executor:
-        return _match_appearances_serial(rows, files, row_images, file_images, progress, executor)
+        return _match_appearances_serial(rows, files, row_images, file_images, progress, executor,
+                                         proposals=proposals)
 
 
-def _match_appearances_serial(rows, files, row_images, file_images, progress=None, executor=None):
+def _match_appearances_serial(rows, files, row_images, file_images, progress=None, executor=None,
+                              *, proposals=None):
     results = []
     texture_cache = _TextureCache()
     readable = [f for f in files if f['id'] in file_images]
@@ -1089,13 +1119,40 @@ def _match_appearances_serial(rows, files, row_images, file_images, progress=Non
             continue
         query = row_images[row['id']]
         scores, histograms, failures = {}, {}, []
+        proposal = (proposals or {}).get(row['id'])
+        proposed_id = (proposal.get('file_id') if isinstance(proposal, dict)
+                       and proposal.get('verdict') == 'same' else None)
+        proposed_file = next((file for file in readable if file['id'] == proposed_id), None)
+        proposed_result, score_cutoff = None, None
+        if (proposed_file is not None and not proposed_file.get('issue')
+                and duplicate_previews[file_images[proposed_id].digest] == 1):
+            try:
+                proposed_result = _features(query, file_images[proposed_id])
+                if proposed_result.get('strong') and proposed_result['score'] >= .91:
+                    # This is the unchanged existing feature-only acceptance
+                    # path. AI selects the order of work but supplies no proof.
+                    # Every other file still gets the full descriptor ratio
+                    # test, and only a rigorous upper bound can avoid its warp.
+                    # Preserve the wider credible-competition window too, not
+                    # only the .045 runner-up gap. A candidate within .12 still
+                    # needs its real pattern evidence for qualification/audit.
+                    score_cutoff = min(.91, max(.55, proposed_result['score'] - .12))
+            except Exception:
+                # Failed speculative work never removes a candidate or turns
+                # a partial inspection into a complete competition proof.
+                proposed_result = None
         for file in readable:
             identity = file['id']
             candidate = file_images[identity]
             histograms[identity] = float(cv2.compareHist(query.histogram, candidate.histogram,
                                                         cv2.HISTCMP_BHATTACHARYYA))
             try:
-                result = _features(query, candidate)
+                if identity == proposed_id and proposed_result is not None:
+                    result = proposed_result
+                elif score_cutoff is not None:
+                    result = _features(query, candidate, score_cutoff=score_cutoff)
+                else:
+                    result = _features(query, candidate)
             except Exception:
                 # One unruly pair must never abort the whole batch; it simply
                 # carries no geometric evidence and falls back to the texture pass.
@@ -1106,6 +1163,25 @@ def _match_appearances_serial(rows, files, row_images, file_images, progress=Non
             result['accepted_by'] = '几何特征验证' if result['auto_ok'] else None
             scores[identity] = result
         best_feature = max(scores, key=lambda identity: scores[identity]['score'])
+        if score_cutoff is not None and not scores[best_feature]['strong']:
+            # A higher-scoring but unverified competitor activates the legacy
+            # texture shortlist. Bounds must never reorder that shortlist (or
+            # its dynamically chosen fine pass), so recover exact geometry for
+            # every candidate before entering the original path.
+            scores, failures = {}, []
+            for file in readable:
+                identity = file['id']
+                try:
+                    result = _features(query, file_images[identity])
+                except Exception:
+                    result = {'score': 0., 'strong': False, 'method': 'features'}
+                    failures.append({'file_id': identity, 'check': 'geometry_evaluation_failed'})
+                result['score'] = max(result['score'], .4 * (1 - histograms[identity]))
+                result['auto_ok'] = bool(result['strong'] and result['score'] >= .91)
+                result['accepted_by'] = '几何特征验证' if result['auto_ok'] else None
+                scores[identity] = result
+            score_cutoff = None
+            best_feature = max(scores, key=lambda identity: scores[identity]['score'])
         if not scores[best_feature]['strong']:
             shortlist = sorted(histograms, key=histograms.get)[:6]
             shortlist += sorted(scores, key=lambda identity: scores[identity]['score'], reverse=True)[:2]
@@ -1145,6 +1221,9 @@ def _match_appearances_serial(rows, files, row_images, file_images, progress=Non
         ranking = sorted(scores, key=lambda identity: (-scores[identity]['score'], identity))
         base['candidates'] = [{'file_id': identity, 'score': round(scores[identity]['score'], 4)}
                               for identity in ranking[:5]]
+        for candidate in base['candidates']:
+            if 'score_upper_bound' in scores[candidate['file_id']]:
+                candidate['score_kind'] = 'geometric_upper_bound'
         top = ranking[0]
         top_result = scores[top]
         top_score = top_result['score']
@@ -1165,6 +1244,19 @@ def _match_appearances_serial(rows, files, row_images, file_images, progress=Non
                         'pattern_supported': _pattern_supported(scores[identity])} for identity in ranking],
             'complete': not failures, 'unique': len(credible) == 1 and supported,
             'failures': failures}
+        if score_cutoff is not None:
+            excluded = [{'file_id': identity, 'geometric_score_upper_bound':
+                         scores[identity]['score_upper_bound']}
+                        for identity in ranking if 'score_upper_bound' in scores[identity]]
+            base['evidence']['competition']['bounded_geometry'] = {
+                'version': 'all-correspondence-hull-1',
+                'proposal_file_id': proposed_id, 'cutoff': score_cutoff,
+                'excluded_from_expensive_geometry': excluded,
+                'all_files_ratio_tested': True,
+                'ai_supplies_acceptance_evidence': False}
+            for candidate in base['evidence']['competition']['scores']:
+                if 'score_upper_bound' in scores[candidate['file_id']]:
+                    candidate['score_kind'] = 'geometric_upper_bound'
         base['evidence']['claim_strength'] = ('verified' if top_result.get('auto_ok')
                                                else 'credible' if _ownership_supported(top_result) else 'weak')
         decision_failures = []
@@ -1213,9 +1305,56 @@ def _match_appearances_serial(rows, files, row_images, file_images, progress=Non
     return results
 
 
-def scan_and_match(source_path: str, rows: list[dict], work_dir: str, progress=None, *,
-                   texture_workers=2) -> dict:
-    """Inspect originals read-only and return conservative per-row candidates."""
+@dataclass(frozen=True)
+class PreparedMatching:
+    """Task-local decoded inputs; never serialize this object or share jobs.
+
+    Splitting preparation from verification lets an optional candidate-routing
+    provider inspect the existing previews without a second extraction/render.
+    Files, row IDs and arrays remain bound to this particular preparation.
+    """
+    rows: list[dict]
+    files: list[dict]
+    warnings: list[str]
+    row_images: dict
+    file_images: dict
+    file_bindings: dict[str, str]
+
+
+def _bound_appearance(path: str, detector, bindings: dict[str, str]) -> _Appearance:
+    """Bind the actual encoded image bytes to the pixels decoded from them."""
+    source = Path(path)
+    with _source_reader(source) as (stream, write_locked):
+        signature = _file_signature(os.fstat(stream.fileno()))
+        digest = _source_digest(stream)[0]
+        appearance = _appearance(_read_image(path), detector)
+        checked = digest if write_locked else _source_digest(stream)[0]
+        if (checked != digest or _file_signature(os.fstat(stream.fileno())) != signature
+                or _file_signature(source.stat()) != signature):
+            raise ValueError('准备期间图片发生变化，请重新导入。')
+    bindings[str(source.resolve())] = digest
+    return appearance
+
+
+def _verify_prepared_bindings(prepared: PreparedMatching) -> None:
+    for source, expected in prepared.file_bindings.items():
+        path = Path(source)
+        try:
+            with _source_reader(path) as (stream, _):
+                signature = _file_signature(os.fstat(stream.fileno()))
+                digest = _source_digest(stream)[0]
+                changed = (digest != expected
+                           or _file_signature(os.fstat(stream.fileno())) != signature
+                           or _file_signature(path.stat()) != signature)
+        except OSError as exc:
+            raise ValueError('AI 检索期间原稿或图片无法读取，请重新导入。') from exc
+        if changed:
+            raise ValueError('AI 检索期间源文件发生变化，请重新导入。')
+
+
+def prepare_matching(source_path: str, rows: list[dict], work_dir: str,
+                     progress=None) -> PreparedMatching:
+    """Safely read/extract/render inputs once, without comparing file pairs."""
     work = Path(work_dir).resolve()
     work.mkdir(parents=True, exist_ok=True)
     session = Path(tempfile.mkdtemp(prefix='matching_', dir=work))
@@ -1230,26 +1369,56 @@ def scan_and_match(source_path: str, rows: list[dict], work_dir: str, progress=N
     if not files:
         warnings.append('所选位置没有 .ai 文件，请确认文件夹或压缩包内容。')
     detector = cv2.SIFT_create(nfeatures=1600, contrastThreshold=.025)
-    file_images, row_images = {}, {}
+    file_images, row_images, file_bindings = {}, {}, {}
     for i, record in enumerate(files, 1):
         if progress:
             progress(f'正在生成 AI 预览 {i} / {len(files)}', i, len(files))
         try:
             _render(record, previews)
-            file_images[record['id']] = _appearance(_read_image(record['preview_path']), detector)
+            file_images[record['id']] = _bound_appearance(record['preview_path'], detector,
+                                                        file_bindings)
         except Exception as exc:
             record['issue'] = str(exc) if isinstance(exc, ValueError) else 'AI 文件损坏或预览无法读取，请单独检查。'
     for row in rows:
         if not row.get('image_path') or row.get('issue'):
             continue
         try:
-            row_images[row['id']] = _appearance(_read_image(row['image_path']), detector)
+            row_images[row['id']] = _bound_appearance(row['image_path'], detector, file_bindings)
         except (OSError, ValueError, cv2.error):
             warnings.append(f"第 {row.get('row_number', row['id'])} 行图片无法读取，已留待处理。")
-    cv2.setRNGSeed(42)
-    matches = _match_appearances(rows, files, row_images, file_images, progress,
-                                texture_workers=texture_workers)
     bad_count = sum(bool(file['issue']) for file in files)
     if bad_count:
         warnings.append(f'{bad_count} 个 AI 文件预览有问题或含多个画板，请查看原文件列表。')
-    return {'files': files, 'matches': matches, 'warnings': warnings}
+    file_bindings.update({str(Path(record['source_path']).resolve()): record['source_sha256']
+                          for record in files if record.get('source_sha256')})
+    return PreparedMatching(copy.deepcopy(rows), files, warnings, row_images, file_images,
+                            file_bindings)
+
+
+def match_prepared(prepared: PreparedMatching, progress=None, *, proposals=None,
+                   texture_workers=2, verify_sources=True) -> dict:
+    """Verify local evidence; AI proposals only choose evaluation order.
+
+    A provider round trip can be long, so the split API rechecks every readable
+    source before using its earlier pixels. The immediate legacy wrapper skips
+    this extra pass because _render already checks under its read lease.
+    """
+    if not isinstance(prepared, PreparedMatching):
+        raise TypeError('请传入当前任务准备好的匹配输入。')
+    if verify_sources:
+        _verify_prepared_bindings(prepared)
+    cv2.setRNGSeed(42)
+    matches = _match_appearances(prepared.rows, prepared.files, prepared.row_images,
+                                prepared.file_images, progress,
+                                texture_workers=texture_workers, proposals=proposals)
+    if verify_sources:
+        _verify_prepared_bindings(prepared)
+    return {'files': prepared.files, 'matches': matches, 'warnings': list(prepared.warnings)}
+
+
+def scan_and_match(source_path: str, rows: list[dict], work_dir: str, progress=None, *,
+                   texture_workers=2) -> dict:
+    """Inspect originals read-only and return conservative per-row candidates."""
+    prepared = prepare_matching(source_path, rows, work_dir, progress)
+    return match_prepared(prepared, progress, texture_workers=texture_workers,
+                          verify_sources=False)

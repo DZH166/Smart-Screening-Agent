@@ -88,6 +88,7 @@ class JobManager:
         self._queue_sequence = 0
         self._job_locks = {}
         self._active_operations = 0
+        self._inflight_futures = set()
         self._operation_condition = threading.Condition(self.lock)
         self._closing = False
         # Different resources have different queues. CPU work stays bounded;
@@ -135,7 +136,7 @@ class JobManager:
             # An accepted API operation may still be planning before its pool
             # submission. Let it finish while every executor remains open;
             # new external operations are rejected by job_operation above.
-            while self._active_operations:
+            while self._active_operations or self._inflight_futures:
                 self._operation_condition.wait()
         # CPU jobs may hand off to AI, and AI coordinators may submit cases.
         # Drain in that order instead of rejecting already accepted work.
@@ -259,7 +260,8 @@ class JobManager:
 
     def _submit(self, job, operation):
         """Called under the map lock; retain a separate FIFO per resource."""
-        stage = "cpu" if operation == self._process else "export" if operation == self._export else "ai"
+        stage = ("cpu" if operation == self._process
+                 else "export" if operation == self._export else "ai")
         executor = {"cpu": self.pool, "ai": self.ai_pool, "export": self.export_pool}[stage]
         self._queue_sequence += 1
         job["_queue_order"] = self._queue_sequence
@@ -271,16 +273,22 @@ class JobManager:
         job["_operation_token"] = operation_token
         future = executor.submit(operation, job["id"])
         if hasattr(future, "add_done_callback"):
+            self._inflight_futures.add(future)
             def completed(result):
                 try:
-                    error = result.exception()
-                except BaseException as exc:
-                    error = exc
-                if error is not None:
-                    with self.lock:
-                        if (self.jobs.get(job["id"]) is job and job.get("_operation_token") == operation_token
-                                and job.get("status") in BUSY):
-                            self._fail(job["id"], error)
+                    try:
+                        error = result.exception()
+                    except BaseException as exc:
+                        error = exc
+                    if error is not None:
+                        with self.lock:
+                            if (self.jobs.get(job["id"]) is job and job.get("_operation_token") == operation_token
+                                    and job.get("status") in BUSY):
+                                self._fail(job["id"], error)
+                finally:
+                    with self._operation_condition:
+                        self._inflight_futures.discard(result)
+                        self._operation_condition.notify_all()
             future.add_done_callback(completed)
 
     def _start_operation(self, identifier, status, message):
@@ -309,7 +317,7 @@ class JobManager:
             job = self._start_operation(identifier, "importing", "正在读取表格…")
             job["_started_perf"] = time.perf_counter()
             from .workbook import inspect_workbook
-            from .matching import scan_and_match
+            from .matching import scan_and_match, prepare_matching
             workbook_path = job["_workbook_path"]
             job["_input_digest"] = job.get("_upload_digests", {}).get("workbook") or sha256(workbook_path)
             snapshot_path = Path(job["_work_dir"]) / "source.xlsx"
@@ -330,43 +338,32 @@ class JobManager:
             source_path = Path(job["_source_path"])
             if source_path.is_file():
                 job["_source_archive_digest"] = job.get("_upload_digests", {}).get("source") or sha256(source_path)
+            runtime = self.ai_settings.runtime()
+            if (runtime.get("enabled") and runtime.get("api_key")
+                    and runtime.get("matching_workflow") == "ai_first"):
+                prepared = prepare_matching(job["_source_path"], sheet["rows"],
+                    str(Path(job["_work_dir"]) / "matching"),
+                    progress=lambda m, c=0, t=1: self._progress(identifier, m, c, t))
+                self._check_import_sources(job)
+                with self.job_operation(identifier, internal=True), self.lock:
+                    job["matching_mode"] = "ai_first"
+                    job["files"] = prepared.files
+                    job["warnings"].extend(prepared.warnings)
+                    job["_prepared_matching"] = prepared
+                    job["timings"]["preview_prepare_seconds"] = round(time.perf_counter()-matching_started, 3)
+                    job["ai_retrieval"] = {"status": "queued", "message": "等待 AI 查找对应图片。"}
+                    job["status"] = "queued"
+                    job["progress"] = {"message": "预览已准备，正在等待 AI 查找对应图片…",
+                        "phase": "ai_retrieval", "step_label": "AI 查找对应图片", "current": 0, "total": 1}
+                    self._submit(job, self._retrieve_ai_first)
+                return
+            job["matching_mode"] = "local"
             result = scan_and_match(job["_source_path"], sheet["rows"], str(Path(job["_work_dir"]) / "matching"),
                                     progress=lambda m, c=0, t=1: self._progress(identifier, m, c, t))
             if job.get("_source_archive_digest") and sha256(source_path) != job["_source_archive_digest"]:
                 raise ValueError("读取时源压缩包发生了变化，请重新导入。")
-            matches = {m["row_id"]: m for m in result["matches"]}
             with self.job_operation(identifier, internal=True):
-                job["files"] = result["files"]
-                job["warnings"].extend(result.get("warnings", []))
-                for row in job["rows"]:
-                    match = matches.get(row["id"], {})
-                    row["_status"] = match.get("status", "unmatched")
-                    row["_reason"] = match.get("reason", row.get("issue") or "没有找到对应文件")
-                    row["_file_id"] = match.get("file_id")
-                    row["_reason_code"] = match.get("reason_code", "not_verified")
-                    row["diagnostics"] = match.get("diagnostics", {})
-                    row["evidence"] = match.get("evidence")
-                    row["candidates"] = match.get("candidates", [])
-                    failures = set((row["evidence"] or {}).get("failed_checks", []))
-                    hard_reasons = {"ownership_conflict", "source_issue", "duplicate_preview",
-                                    "candidate_gap", "incomplete_candidate_validation"}
-                    if row["_status"] == "review" and not failures.intersection(hard_reasons):
-                        if "foreground_colours" in failures:
-                            row["_reason"] = "局部颜色存在差异，请确认是否为同款不同色。"
-                            row["_reason_code"] = "local_colour_difference"
-                        elif "coherent_difference" in failures:
-                            row["_reason"] = "局部内容尚未核实，请放大确认。"
-                            row["_reason_code"] = "local_content_unverified"
-                    if row.get("issue"):
-                        row["_status"] = "unmatched"
-                        row["_file_id"] = None
-                        row["_reason_code"] = "workbook_image_issue"
-                        row["_reason"] = row["issue"]
-                    row["_initial_status"] = row["_status"]
-                    row["_initial_file_id"] = row["_file_id"]
-                    row["_initial_reason"] = row["_reason"]
-                    row["_initial_reason_code"] = row["_reason_code"]
-                self._plan(job)
+                self._apply_match_result(job, result)
                 job["revision"] += 1
                 job["timings"]["matching_seconds"] = round(time.perf_counter() - matching_started, 3)
                 job["timings"]["processing_seconds"] = round(time.perf_counter() - job["_started_perf"], 3)
@@ -383,6 +380,199 @@ class JobManager:
                     self._submit(job, self._after_match_ai)
         except Exception as exc:
             self._fail(identifier, exc)
+
+    def _check_import_sources(self, job):
+        if (sha256(job["_workbook_path"]) != job["_input_digest"]
+                or sha256(job["_snapshot_workbook"]) != job["_input_digest"]):
+            raise ValueError("源表格发生变化，请保存后重新导入。")
+        if job.get("_source_archive_digest") and sha256(job["_source_path"]) != job["_source_archive_digest"]:
+            raise ValueError("源压缩包发生变化，请重新导入。")
+
+    def _apply_match_result(self, job, result):
+        matches = {m["row_id"]: m for m in result["matches"]}
+        job["files"] = result["files"]
+        job["warnings"].extend(message for message in result.get("warnings", []) if message not in job["warnings"])
+        for row in job["rows"]:
+            match = matches.get(row["id"], {})
+            row["_status"] = match.get("status", "unmatched")
+            row["_reason"] = match.get("reason", row.get("issue") or "没有找到对应文件")
+            row["_file_id"] = match.get("file_id")
+            row["_reason_code"] = match.get("reason_code", "not_verified")
+            row["diagnostics"] = match.get("diagnostics", {})
+            row["evidence"] = match.get("evidence")
+            row["candidates"] = match.get("candidates", [])
+            failures = set((row["evidence"] or {}).get("failed_checks", []))
+            hard = {"ownership_conflict", "source_issue", "duplicate_preview", "candidate_gap", "incomplete_candidate_validation"}
+            if row["_status"] == "review" and not failures.intersection(hard):
+                if "foreground_colours" in failures:
+                    row.update(_reason="局部颜色存在差异，请确认是否为同款不同色。", _reason_code="local_colour_difference")
+                elif "coherent_difference" in failures:
+                    row.update(_reason="局部内容尚未核实，请放大确认。", _reason_code="local_content_unverified")
+            if row.get("issue"):
+                row.update(_status="unmatched", _file_id=None, _reason_code="workbook_image_issue", _reason=row["issue"])
+            for field in ("status", "file_id", "reason", "reason_code"):
+                row["_initial_"+field] = row["_"+field]
+        self._plan(job)
+
+    def _retrieve_ai_first(self, identifier):
+        from .ai_first import retrieve
+        from .ai_usage import empty_usage
+        from .matching import _verify_prepared_bindings
+        job = self._start_operation(identifier, "ai_review", "AI 正在查找对应图片…")
+        token, revision = job["_operation_token"], job.get("revision", 0)
+        prepared = job["_prepared_matching"]
+        with self.job_operation(identifier, internal=True), self.lock:
+            rows, files = copy.deepcopy(job["rows"]), copy.deepcopy(job["files"])
+            leg = {"state": "queued"}
+            job["_parallel_progress"] = {"ai": {"done": 0, "total": 0, "finished": False},
+                "cpu": {"done": 0, "total": 0, "finished": False}}
+        def current():
+            with self.lock:
+                return (self.jobs.get(identifier) is job and job.get("_operation_token") == token
+                        and job.get("revision", 0) == revision and job.get("status") == "ai_review")
+        def phase_progress(phase, done=0, total=0, *, finished=False):
+            with self.lock:
+                if not current():
+                    return
+                stages = job["_parallel_progress"]
+                stages[phase] = {"done": done, "total": total, "finished": finished}
+                cpu, ai = stages["cpu"], stages["ai"]
+                if not cpu["finished"] and not ai["finished"]:
+                    # These are independent stages; there is no meaningful
+                    # shared percentage or sum of their denominators.
+                    job["progress"] = {"phase": "parallel_verification", "step_label": "AI 查找与本机核验",
+                        "message": (f"AI 查找 {ai['done']} / {ai['total']} 组；" if ai["total"] else "AI 正在准备图片；")
+                            + (f"本机已核验 {cpu['done']} / {cpu['total']} 张。" if cpu["total"] else "本机核验等待开始。"),
+                        "current": 0, "total": 0}
+                else:
+                    remaining, name, label = (ai, "ai_retrieval", "AI 查找对应图片") if cpu["finished"] else (cpu, "local_verification", "本机核验图案与文件")
+                    job["progress"] = {"phase": name, "step_label": label,
+                        "message": "本机核验完成，正在等待 AI 查找结果…" if cpu["finished"] else "AI 查找已结束，本机正在核验图案与文件…",
+                        "current": remaining["done"], "total": remaining["total"]}
+        def checkpoint(artifact):
+            if not current():
+                return
+            with self.job_operation(identifier, internal=True):
+                if current():
+                    job["_ai_first_artifact"] = artifact
+        def progress(done, total):
+            phase_progress("ai", done, total)
+        def verify():
+            started = time.perf_counter()
+            with self.lock:
+                leg.update(state="running")
+                if current():
+                    waited = started-leg["queued_at"]
+                    for name in ("queue_seconds", "queue_cpu_seconds"):
+                        job["timings"][name] = round(job["timings"].get(name, 0)+waited, 3)
+            try:
+                if not current():
+                    return None
+                self._check_import_sources(job)
+                from .matching import match_prepared
+                # Full independent validation proceeds while the provider is
+                # working. Model rankings never omit a competing source.
+                matched = match_prepared(prepared,
+                    lambda message, c=0, t=1: phase_progress("cpu", c, t))
+                self._check_import_sources(job)
+                return matched
+            except Exception:
+                with self.lock:
+                    leg["failed"] = True
+                raise
+            finally:
+                with self.lock:
+                    leg.update(state="finished", elapsed=time.perf_counter()-started)
+                phase_progress("cpu", len(rows), len(rows), finished=True)
+        verification = None
+        started = time.perf_counter()
+        try:
+            with self.lock:
+                # Reserve the resource order and enqueue atomically, just as
+                # _submit does for normal jobs. A concurrent import cannot
+                # overtake this leg while its displayed position says otherwise.
+                self._queue_sequence += 1
+                leg.update(order=self._queue_sequence, queued_at=time.perf_counter())
+                job["_cpu_leg"] = leg
+                verification = self.pool.submit(verify)
+            phase_progress("ai")
+            try:
+                result = retrieve(self, identifier, rows, files, progress=progress,
+                    checkpoint=checkpoint, is_current=lambda: current() and not leg.get("failed"))
+            except Exception:
+                artifact = job.get("_ai_first_artifact", {})
+                result = {"status": "failed", "error_code": "review_unavailable", "proposals": [],
+                          "usage": artifact.get("usage") or empty_usage(), "artifact": artifact}
+            elapsed_ai = time.perf_counter()-started
+            phase_progress("ai", finished=True)
+            with self.job_operation(identifier, internal=True), self.lock:
+                if current():
+                    job["_ai_first_result"] = result
+                    job["_ai_first_artifact"] = result.get("artifact", {})
+                    job.setdefault("_ai_first_runs", []).append(copy.deepcopy(result.get("artifact", {})))
+                    # Only local fixed diagnostics are exposed. Never surface
+                    # provider text or raw exception payloads as job warnings.
+                    for warning in result.get("artifact", {}).get("warnings", []):
+                        if warning in {
+                            "候选检索记录未能完整保存，请保留本批任务并联系管理员。",
+                            "候选检索状态更新未完成，请联系管理员核对记录。",
+                            "候选检索累计用量保存未完成，费用可能不完整。",
+                        } and warning not in job["warnings"]:
+                            job["warnings"].append(warning)
+                    job["ai_retrieval"] = {"status": result["status"], "usage": result.get("usage", empty_usage()),
+                        "proposed": len(result.get("proposals", [])), "error_code": result.get("error_code"),
+                        "message": "AI 查找已结束，等待本机核验。"}
+                    job["timings"]["ai_retrieval_seconds"] = round(elapsed_ai, 3)
+            matched = verification.result()
+            if not current():
+                return
+            # CPU may have finished before the network response. Recheck the
+            # complete inputs at join as well as inside each independent leg.
+            self._check_import_sources(job)
+            _verify_prepared_bindings(prepared)
+            proposals = result.get("proposals", [])
+            counts = collections.Counter(p.get("file_id") for p in proposals if p.get("file_id"))
+            with self.job_operation(identifier, internal=True), self.lock:
+                if not current():
+                    return
+                self._apply_match_result(job, matched)
+                suggested = {p["row_id"]: p for p in proposals}
+                for row in job["rows"]:
+                    proposal = suggested.get(row["id"])
+                    if proposal:
+                        row["ai_retrieval"] = {"candidate_id": proposal.get("file_id"),
+                            "verdict": proposal.get("verdict", "uncertain"), "reason": proposal.get("reason", ""),
+                            "model": proposal.get("model"), "outcome": "suggestion",
+                            "reason_code": "retrieval_conflict" if counts.get(proposal.get("file_id"), 0) > 1 else "retrieval_suggestion"}
+                job["revision"] += 1
+                job["timings"]["local_verification_seconds"] = round(leg["elapsed"], 3)
+                job["timings"]["processing_seconds"] = round(time.perf_counter()-job["_started_perf"], 3)
+                job["ai_retrieval"]["message"] = ("AI 查找完成；通过项均经过本机独立核验。"
+                    if result.get("status") == "completed" else "AI 查找未完整完成，已由本机完成匹配。")
+                job["ai_review"] = {"mode": self.ai_validation.snapshot()["mode"], "eligible": 0,
+                    "reviewed": 0, "suggested_same": 0, "auto_passed": 0, "unresolved": job["stats"]["review"],
+                    "skipped": 0, "usage": empty_usage(), "can_retry": False,
+                    "message": "AI 全库查找建议见图片对照；剩余疑难项可按需补充二次复核。"}
+                job["progress"] = {"message": "核验完成", "current": len(job["rows"]), "total": len(job["rows"])}
+                job["status"] = "ready"
+        except Exception as exc:
+            with self.lock:
+                if current():
+                    self._fail(identifier, exc)
+        finally:
+            # The tracked parent cannot finish while an untracked CPU child
+            # still touches previews; close() keeps all pools alive until here.
+            if verification is not None:
+                try:
+                    verification.result()
+                except Exception:
+                    pass
+            with self.lock:
+                if (self.jobs.get(identifier) is job and job.get("_operation_token") == token
+                        and job.get("_prepared_matching") is prepared):
+                    job.pop("_prepared_matching", None)
+                    job.pop("_cpu_leg", None)
+                    job.pop("_parallel_progress", None)
 
     def _after_match_ai(self, identifier):
         job = self._start_operation(identifier, "ai_review", "正在检查 AI 复核条件…")
@@ -421,6 +611,22 @@ class JobManager:
         if job.get("_queue_stage"):
             return job["_queue_stage"]
         return {"ai_review": "ai", "exporting": "export"}.get(job.get("status"), "cpu")
+
+    def _queue_ahead(self, job, stage, order):
+        """Count each resource leg, including CPU checks during an AI wait."""
+        with self.lock:
+            ahead = 0
+            for other in self.jobs.values():
+                if other is job:
+                    continue
+                normal = (self._stage_for(other) == stage and other["status"] in BUSY
+                    and (other.get("_queue_order", float("inf")) < order
+                    or ("_queue_order" not in other and other["status"] != "queued")))
+                leg = other.get("_cpu_leg", {})
+                parallel = (stage == "cpu" and leg.get("state") in {"queued", "running"}
+                    and (leg.get("state") == "running" or leg.get("order", float("inf")) < order))
+                ahead += bool(normal or parallel)
+            return ahead
 
     def _plan(self, job):
         rows = job["rows"]
@@ -733,13 +939,15 @@ class JobManager:
             report = {"exported": len(mapping), "new_numbers": len(assignments), "preserved_numbers": len(mapping) - len(assignments),
                       "pending": len(pending), "unused_files": len(unused), "workbook": workbook_out.name,
                       "input_sha256": job["_input_digest"], "sheet": job["sheet_name"], "version": __version__,
-                      "stats": dict(job["stats"]), "timings": timings, "ai_review": job.get("ai_review")}
-            decisions = [{key: row.get(key) for key in ("row_number", "status", "file_id", "reason", "reason_code", "diagnostics", "evidence", "ai_review")}
+                      "stats": dict(job["stats"]), "timings": timings, "ai_review": job.get("ai_review"),
+                      "matching_mode": job.get("matching_mode", "local"), "ai_retrieval": job.get("ai_retrieval")}
+            decisions = [{key: row.get(key) for key in ("row_number", "status", "file_id", "reason", "reason_code", "diagnostics", "evidence", "ai_review", "ai_retrieval")}
                          for row in job["rows"]]
             (records / "处理记录.json").write_text(json.dumps({**report, "mapping": mapping, "pending_rows": pending,
                     "unused": unused, "decision_records": decisions,
                     "ai_observations": job.get("_ai_observation_artifact"),
-                    "ai_observation_runs": job.get("_ai_observation_runs", [])}, ensure_ascii=False, indent=2, allow_nan=False), "utf-8")
+                    "ai_observation_runs": job.get("_ai_observation_runs", []),
+                    "ai_first_runs": job.get("_ai_first_runs", [])}, ensure_ascii=False, indent=2, allow_nan=False), "utf-8")
             if final.exists():
                 raise ValueError("输出文件夹已存在，请重新导入后重试。")
             staging.rename(final)
@@ -834,7 +1042,7 @@ class JobManager:
         return expected
 
     def record_directory(self, identifier, section):
-        if section not in {"ai_runs", "export_records"}:
+        if section not in {"ai_runs", "ai_first_runs", "export_records"}:
             raise ValueError("任务记录类型无效。")
         root = self.task_records_root(identifier)
         path = root / section
@@ -982,16 +1190,16 @@ class JobManager:
             if job["status"] == "queued":
                 order = job.get("_queue_order", float("inf"))
                 stage = self._stage_for(job)
-                with self.lock:
-                    queued_jobs = list(self.jobs.values())
-                ahead = sum(j is not job and self._stage_for(j) == stage
-                    and j["status"] in BUSY and (j.get("_queue_order", float("inf")) < order
-                    or ("_queue_order" not in j and j["status"] != "queued"))
-                    for j in queued_jobs)
+                ahead = self._queue_ahead(job, stage, order)
                 result["queue_position"] = ahead + 1
                 result["queue_stage"] = stage
             else:
                 result["queue_position"] = 0
+            cpu_leg = job.get("_cpu_leg", {})
+            if cpu_leg.get("state") == "queued":
+                position = self._queue_ahead(job, "cpu", cpu_leg["order"])+1
+                result["verification_queue_position"] = position
+                result["progress"]["message"] += f" 本机核验队列第 {position} 位。"
             result["download_ready"] = bool(job["status"] == "done" and job.get("_downloadable")
                 and job.get("_download_path") and Path(job["_download_path"]).is_file())
             result["download_name"] = "HSD编号结果.zip" if job.get("_downloadable") else None

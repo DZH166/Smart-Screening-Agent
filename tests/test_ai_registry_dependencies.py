@@ -5,7 +5,7 @@ import pytest
 from hsd_tool.ai_registry import IMPLEMENTATION_MODULES, ValidationRegistry
 
 
-@pytest.mark.parametrize("module", ["matching_verification", "archive_io"])
+@pytest.mark.parametrize("module", ["matching_verification", "archive_io", "ai_first"])
 def test_changed_matching_helper_invalidates_previously_signed_qualification(tmp_path, monkeypatch, module):
     import hsd_tool.ai_policy as policy
     import hsd_tool.ai_registry as registry
