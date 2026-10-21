@@ -1,0 +1,15 @@
+# Actual filename must equal: systemd-escape --path --suffix=mount /var/lib/hsd-agent/storage
+# Format only this project's NEW backing image. Never format a host block device.
+[Unit]
+Description=HSD Agent isolated temporary data filesystem
+Before=hsd-agent.service
+
+[Mount]
+What=/var/lib/hsd-agent/storage.ext4
+Where=/var/lib/hsd-agent/storage
+Type=ext4
+Options=loop,nodev,nosuid,noexec
+TimeoutSec=30
+
+[Install]
+WantedBy=multi-user.target

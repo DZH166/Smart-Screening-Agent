@@ -58,6 +58,7 @@ async function main(){
   listeners['key-reveal:click'][0]();
   assert.ok(!element('key-batch').classList.contains('key-plain'));assert.equal(element('key-reveal').textContent,'显示');
   assert.equal(element('settings-state').textContent,'员工共用主机配置，无需填写 Key。');assert.ok(element('qualification-state').textContent.includes('仍需人工确认'));assert.ok(element('persistence-state').textContent.includes('DPAPI'));
+  ui.applySettings({...json(initial),key_persistence:'linux_aesgcm'});assert.ok(element('persistence-state').textContent.includes('服务器使用独立主密钥'));assert.ok(!element('persistence-state').textContent.includes('重启后需重新填写'));
   ui.applySettings({...json(initial),enabled:false});assert.match(element('settings-state').textContent,/已关闭 AI/);
   ui.applySettings({...json(initial),configured:false});assert.match(element('settings-state').textContent,/请添加并启用 Key/);
   ui.applySettings({...json(initial),storage_warning:'合成存储异常'});assert.equal(element('storage-warning').textContent,'合成存储异常');assert.ok(!element('storage-warning').classList.contains('hidden'));ready();assert.ok(element('storage-warning').classList.contains('hidden'));
@@ -126,18 +127,26 @@ async function main(){
   }
 
   ready();element('ai-enabled').checked=false;listeners['ai-enabled:change'][0]();const enabledSave=deferred();
-  const disabledSettings={...json(initial),enabled:false},disabledPool={keys:[{...initial.keys[0],status:'service_disabled',requests:7}]};
-  fetchHandler=(url)=>url==='/api/ai/settings'?enabledSave.promise:keyResponse(disabledSettings,disabledPool);const savingEnabled=ui.saveEnabled(stopEvent);
-  assert.equal(calls.at(-1).url,'/api/ai/settings');assert.equal(JSON.parse(calls.at(-1).options.body).enabled,false);
+  const disabledSettings={...json(initial),enabled:false,key_revision:5},disabledPool={keys:[{...initial.keys[0],status:'service_disabled',requests:7}]};
+  fetchHandler=(url)=>url==='/api/admin/settings'?enabledSave.promise:keyResponse(disabledSettings,disabledPool);const savingEnabled=ui.saveEnabled(stopEvent);
+  assert.equal(calls.at(-1).url,'/api/admin/settings');assert.equal(JSON.parse(calls.at(-1).options.body).enabled,false);assert.equal(JSON.parse(calls.at(-1).options.body).expected_revision,initial.key_revision);
   const beforeDuplicate=calls.length;await ui.saveEnabled(stopEvent);assert.equal(calls.length,beforeDuplicate);assert.ok(!element('admin-message').textContent.includes('已保存'));
-  enabledSave.resolve({status:200,body:disabledSettings});await savingEnabled;fetchHandler=null;
+  enabledSave.resolve(keyResponse(disabledSettings));await savingEnabled;fetchHandler=null;
   assert.equal(element('ai-enabled').checked,false);assert.ok(element('admin-message').textContent.includes('已保存'));assert.equal(ui.state.conflict,false);
   assert.equal(calls.at(-1).url,'/api/admin/keys');assert.equal(calls.at(-1).options.method,'GET');
   assert.equal(card.querySelector('[data-key-status]').textContent,'AI 已关闭');
 
+  // A stale global switch edit cannot overwrite another administrator page.
+  ready();element('ai-enabled').checked=false;listeners['ai-enabled:change'][0]();
+  response={status:409,body:{error:'配置已在另一页面更新'}};await ui.saveEnabled(stopEvent);
+  assert.equal(ui.state.conflict,true);assert.equal(ui.state.enableDirty,true);
+  assert.equal(element('ai-enabled').checked,false);assert.ok(element('enable-save').disabled);
+  assert.ok(element('admin-message').textContent.includes('本次未保存'));
+  ready(disabledSettings,disabledPool);
+
   // Re-enabling cannot leave a stale "AI disabled" Key badge until the next poll.
   const updatedPool=deferred();element('ai-enabled').checked=true;listeners['ai-enabled:change'][0]();
-  fetchHandler=(url)=>url==='/api/ai/settings'?{status:200,body:json(initial)}:updatedPool.promise;
+  fetchHandler=(url)=>url==='/api/admin/settings'?keyResponse(json(initial)):updatedPool.promise;
   const enabling=ui.saveEnabled(stopEvent);await new Promise(setImmediate);
   assert.equal(ui.state.settings.enabled,true);assert.equal(element('ai-enabled').checked,true);
   assert.equal(card.querySelector('[data-key-status]').textContent,'待验证','clear old runtime status while reading the saved switch state');
@@ -147,7 +156,7 @@ async function main(){
   // A failed status GET after a successful POST cannot undo or mislabel the saved switch.
   ready(disabledSettings,disabledPool);element('ai-enabled').checked=true;listeners['ai-enabled:change'][0]();
   const beforeReadFailure=calls.length;
-  fetchHandler=(url)=>url==='/api/ai/settings'?{status:200,body:json(initial)}:{status:500,body:{error:'Key 状态读取失败，请稍后刷新。'}};
+  fetchHandler=(url)=>url==='/api/admin/settings'?keyResponse(json(initial)):{status:500,body:{error:'Key 状态读取失败，请稍后刷新。'}};
   await ui.saveEnabled(stopEvent);fetchHandler=null;
   assert.equal(calls.length,beforeReadFailure+2);assert.equal(ui.state.settings.enabled,true);assert.equal(element('ai-enabled').checked,true);
   assert.equal(card.querySelector('[data-key-status]').textContent,'待验证');assert.equal(ui.state.saving,false);
@@ -178,7 +187,7 @@ async function main(){
   assert.ok(!/>sk-ledger-visible-value</.test(ledgerRow),'the value stays masked until revealed');
   assert.ok(ledgerRow.includes('data-reveal')&&ledgerRow.includes('data-copy'));
   for(const text of [source,html,css])assert.ok(!/debug|usage-panel|usage-cost|estimated_usd|费用|US\$|实时调试|累计用量/.test(text),'removed panels have no hidden UI or rendering code');
-  assert.ok(calls.every(({url})=>url==='/api/admin/keys'||url==='/api/ai/settings'||url==='/api/admin/ledger'),'no diagnostic or cumulative-cost request');
+  assert.ok(calls.every(({url})=>url==='/api/admin/keys'||url==='/api/admin/settings'||url==='/api/admin/ledger'),'no diagnostic or cumulative-cost request');
   assert.ok(html.includes('id="key-reveal"'),'the add-key input has a reveal toggle');
   assert.ok(!/localStorage|sessionStorage|console\./.test(source),'credentials are not persisted or logged');assert.ok(css.includes('#key-batch{-webkit-text-security:disc}'));
   assert.ok(css.includes('#key-batch.key-plain{-webkit-text-security:none}'),'the reveal toggle can unmask the input');

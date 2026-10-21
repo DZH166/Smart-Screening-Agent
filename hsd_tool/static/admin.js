@@ -93,7 +93,7 @@
     if (!state.enableDirty) $('ai-enabled').checked = settings.enabled === true;
     $('settings-state').textContent = !settings.enabled ? '已关闭 AI，使用本机匹配。' : settings.configured ? '员工共用主机配置，无需填写 Key。' : '请添加并启用 Key，才能使用 AI。';
     $('qualification-state').textContent = settings.mode === 'validated' ? 'AI 二次复核已进入经验证模式：仅符合全部条件的结果可自动通过，其余仍需人工确认。' : 'AI 二次复核尚未取得条件自动通过资格，复核建议仍需人工确认。AI 查找到的候选只有通过本机独立核验，才能按本机规则自动通过；增加 Key 不会放宽判定。';
-    $('persistence-state').textContent = settings.key_persistence === 'windows_dpapi' ? '主机使用当前 Windows 用户的 DPAPI 加密保存密钥。' : '当前环境只在本次服务运行期间保留密钥，重启后需重新填写。';
+    $('persistence-state').textContent = settings.key_persistence === 'windows_dpapi' ? '主机使用当前 Windows 用户的 DPAPI 加密保存密钥。' : settings.key_persistence === 'linux_aesgcm' ? '服务器使用独立主密钥加密保存 API Key。' : '当前环境只在本次服务运行期间保留密钥，重启后需重新填写。';
     $('storage-warning').textContent = settings.storage_warning || '';
     $('storage-warning').classList.toggle('hidden', !settings.storage_warning);
   }
@@ -166,13 +166,22 @@
     state.saving = true; controls(); message('');
     try {
       state.enableDirty = false;
-      applySettings(await request('/api/ai/settings',{enabled}));
+      const result = await request('/api/admin/settings',{enabled,expected_revision:state.settings.key_revision});
+      applySettings(result.settings);
       $('ai-enabled').checked = state.settings.enabled === true;
       // Pool health was measured before this switch changed. Do not present it as current.
       state.pool = {keys:[]}; renderKeys();
       saved = true; message('AI 开关已保存。');
     }
-    catch (error) { $('ai-enabled').checked = state.settings.enabled === true; message(error.message || '设置未保存，请稍后重试。',true); }
+    catch (error) {
+      if (error.status === 409) {
+        state.conflict = true; state.enableDirty = true;
+        message((error.message || '设置已在其他页面更新。') + ' 本次未保存，请点击“刷新设置”核对。',true);
+      } else {
+        $('ai-enabled').checked = state.settings.enabled === true;
+        message(error.message || '设置结果未确认，请刷新设置后重试。',true);
+      }
+    }
     finally { state.saving = false; controls(); }
     if (saved) await refreshOverview(false);
   }

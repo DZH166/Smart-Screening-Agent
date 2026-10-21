@@ -11,7 +11,7 @@ import threading
 from datetime import timedelta
 from pathlib import Path
 
-from flask import Flask, Request, current_app, jsonify, request, send_file, session
+from flask import Flask, Request, current_app, g, jsonify, request, send_file, session
 from werkzeug.exceptions import BadRequest, Conflict, RequestEntityTooLarge
 
 from .service import JobManager
@@ -65,7 +65,12 @@ class EmployeeUploadRequest(Request):
         self._hsd_upload_released = True
 
 
-def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, settings_dir=None):
+def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, settings_dir=None, cloud=None):
+    if lan is not None and cloud is not None:
+        raise ValueError("云服务器与局域网模式不能同时启用。")
+    # CloudAccess intentionally never recognizes a host client: a loopback
+    # reverse proxy is transport, not permission to operate this machine.
+    lan = cloud if cloud is not None else lan
     static = Path(__file__).resolve().parent / "static"
     app = Flask(__name__, static_folder=str(static), static_url_path="/static")
     app.request_class = EmployeeUploadRequest
@@ -75,12 +80,18 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
         app.config.update(SESSION_COOKIE_HTTPONLY=True,
                           SESSION_COOKIE_SAMESITE="Strict", SESSION_COOKIE_NAME="hsd_lan_" + secrets.token_hex(6),
                           PERMANENT_SESSION_LIFETIME=timedelta(hours=8), SESSION_REFRESH_EACH_REQUEST=False)
+    if cloud:
+        app.config.update(SESSION_COOKIE_SECURE=True)
+        app.wsgi_app = cloud.middleware(app.wsgi_app)
     admin_limiter = admin_auth.LoginLimiter()
-    manager = JobManager(data_dir, settings_dir=settings_dir)
+    manager = JobManager(data_dir, settings_dir=settings_dir, **({"preserve_cache": True} if cloud else {}))
     uploads = EmployeeUploads(data_dir) if lan else None
     app.config["HSD_UPLOADS"] = uploads
     app.config["HSD_ACTIVE_UPLOADS"] = 0
     app.config["HSD_ACTIVE_DOWNLOADS"] = 0
+    app.config["HSD_DOWNLOAD_LEASES"] = {}
+    app.config["HSD_JOB_LEASES"] = {}
+    app.config["HSD_CLOUD"] = bool(cloud)
     app.config["HSD_STOPPING"] = False
     token = token or secrets.token_urlsafe(32)
     app.config["HSD_TOKEN"] = token
@@ -134,12 +145,16 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
             return jsonify(error="仅允许指定局域网内的电脑访问。"), 403
         if not lan and request.remote_addr not in {"127.0.0.1", "::1", None}:
             return jsonify(error="仅支持本机访问。"), 403
-        hosts = {"127.0.0.1", "localhost"} | ({lan.host} if lan else set())
-        if request.host.split(":", 1)[0] not in hosts:
-            return jsonify(error="不支持此访问地址。"), 403
-        port = app.config.get("HSD_PORT")
-        if lan and port and request.host not in {f"{host}:{port}" for host in hosts}:
-            return jsonify(error="不支持此访问地址。"), 403
+        if cloud:
+            if request.host_url.rstrip("/") != cloud.origin:
+                return jsonify(error="不支持此访问地址。"), 403
+        else:
+            hosts = {"127.0.0.1", "localhost"} | ({lan.host} if lan else set())
+            if request.host.split(":", 1)[0] not in hosts:
+                return jsonify(error="不支持此访问地址。"), 403
+            port = app.config.get("HSD_PORT")
+            if lan and port and request.host not in {f"{host}:{port}" for host in hosts}:
+                return jsonify(error="不支持此访问地址。"), 403
         remote = bool(lan and not lan.is_host(request.remote_addr))
         is_upload = request.endpoint == "upload_job"
         if request.method == "POST":
@@ -161,14 +176,23 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
                        or request.endpoint in {"admin_login_page", "admin_login", "admin_logout"})
         if remote and not session.get("lan_authenticated") and not admin_entry:
             if request.endpoint == "index" and request.method == "GET":
-                return (static / "lan-login.html").read_text("utf-8")
-            return jsonify(error="请先输入局域网访问码。"), 401
+                html = (static / "lan-login.html").read_text("utf-8")
+                if cloud:
+                    html = (html.replace("员工入口 · 输入主机提供的访问码。", "员工入口 · 输入管理员提供的访问码。")
+                            .replace("DeepSeek 沿用主机配置", "DeepSeek 沿用服务器配置")
+                            .replace("请连接公司局域网。没有访问码或无法连接时，请联系主机管理员。",
+                                     "请使用管理员提供的 HTTPS 网址。文件处理结束后在服务器暂存 3 天，请及时下载；没有访问码或无法连接时请联系管理员。")
+                            .replace("无法连接主机，请确认主机工具仍在运行后重试。", "无法连接服务器，请检查网络后重试。"))
+                return html
+            return jsonify(error="请先输入员工访问码。" if cloud else "请先输入局域网访问码。"), 401
+        if cloud and request.endpoint in {"pick", "create_job", "open_output", "shutdown", "save_ai_settings"}:
+            return jsonify(error="服务器只接受员工上传与结果下载，不提供主机文件或进程操作。"), 403
         if remote and (request.endpoint in {"pick", "open_output", "shutdown"}
                        or (request.endpoint == "save_ai_settings")):
             return jsonify(error="此操作只能在主机上完成。"), 403
-        if admin_area:
+        if admin_area or (cloud and protected_static):
             if not admin_auth.authenticated(session):
-                if request.path.startswith("/api/admin/"):
+                if request.path.startswith("/api/admin/") or protected_static:
                     return jsonify(error="请先登录管理员分区。"), 401
                 return (static / "admin-login.html").read_text("utf-8")
         if lan:
@@ -178,6 +202,12 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
                 job = manager._get(request.view_args["identifier"])
                 if job.get("_owner_id") != employee_id():
                     raise KeyError("找不到此任务，请在上传时使用的浏览器中打开。")
+                if cloud:
+                    identifier = request.view_args["identifier"]
+                    leases = app.config["HSD_JOB_LEASES"]
+                    leases[identifier] = leases.get(identifier, 0) + 1
+                    g.hsd_job_lease = identifier
+                    g.hsd_lease_state = {"released": False, "bound": False}
                 if job.get("_upload_managed"):
                     uploads.validate_job(job)
                 else:
@@ -198,6 +228,9 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
 
     @app.teardown_request
     def release_upload_streams(exc):
+        state = getattr(g, "hsd_lease_state", None)
+        if state is not None and not state["bound"]:
+            release_job_lease(g.hsd_job_lease, state)
         try:
             request.release_upload()
         except (OSError, ValueError):
@@ -205,8 +238,28 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
             # link during cleanup. No path, file contents or credentials logged.
             app.logger.warning("上传临时文件未能清理，请管理员检查磁盘空间与权限。")
 
+    def release_job_lease(identifier, state):
+        with manager.lock:
+            if state["released"]:
+                return
+            state["released"] = True
+            leases = app.config["HSD_JOB_LEASES"]
+            remaining = leases.get(identifier, 1) - 1
+            if remaining:
+                leases[identifier] = remaining
+            else:
+                leases.pop(identifier, None)
+
     @app.after_request
     def response_headers(response):
+        state = getattr(g, "hsd_lease_state", None)
+        if state is not None:
+            identifier = g.hsd_job_lease
+            # send_file's passthrough iterator bypasses Response.close. Keep
+            # streaming, but wrap it so image/HEAD/304 leases are released too.
+            response.direct_passthrough = False
+            response.call_on_close(lambda: release_job_lease(identifier, state))
+            state["bound"] = True
         if request.endpoint != "image" or response.status_code not in {200, 304}:
             response.headers["Cache-Control"] = "no-store"
         response.headers["X-Content-Type-Options"] = "nosniff"
@@ -275,7 +328,11 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
         payload = request.get_json(silent=True)
         if not isinstance(payload, dict):
             return jsonify(error="登录请求格式不正确。"), 400
-        if not admin_auth.verify_credentials(payload.get("username"), payload.get("password")):
+        credentials = cloud.admin_credentials if cloud else None
+        accepted = (credentials.verify(payload.get("username"), payload.get("password"))
+                    if credentials is not None else
+                    (not cloud and admin_auth.verify_credentials(payload.get("username"), payload.get("password"))))
+        if not accepted:
             admin_limiter.fail(address)
             return jsonify(error="账号或密码不正确。"), 401
         admin_limiter.reset(address)
@@ -296,6 +353,27 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
     def admin_key_settings():
         return jsonify(settings=manager.ai_config(), pool=manager.ai_key_pool.snapshot())
 
+    @app.post("/api/admin/settings")
+    def admin_processing_settings():
+        # This narrow administrator route is safe for an authenticated LAN or
+        # cloud operator. The legacy host-only API remains unchanged and this
+        # endpoint cannot replace/clear provider credentials or grant a gate.
+        if request.headers.get("Origin") != request.host_url.rstrip("/"):
+            return jsonify(error="请求来源不匹配。"), 403
+        payload = request.get_json()
+        if set(payload) - {"enabled", "expected_revision"} or type(payload.get("enabled")) is not bool:
+            raise ValueError("管理员设置仅接受是否启用AI的布尔值。")
+        revision = payload.get("expected_revision")
+        if type(revision) is not int or revision < 0:
+            raise ValueError("设置版本无效，请重新读取后再保存。")
+        with manager.lock:
+            if manager.has_active_operations():
+                raise ValueError("当前任务正在处理，请完成后再修改AI设置。")
+            if revision != manager.ai_settings.snapshot()["key_revision"]:
+                raise Conflict("AI设置已在其他页面更新，请重新读取后再保存。")
+            manager.ai_settings.save({"enabled": payload["enabled"]})
+        return jsonify(settings=manager.ai_config(), pool=manager.ai_key_pool.snapshot())
+
     @app.get("/api/admin/debug")
     def admin_debug():
         if set(request.args) - {"after", "limit"}:
@@ -312,9 +390,9 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
     def admin_ledger():
         """Full key values for the host operator's own reuse, explicitly requested.
 
-        This is the one place credentials are returned to a page. It is limited
-        to the password-protected, host-only admin area, responses are marked
-        no-store by the global header policy, and nothing here is logged.
+        This is the one explicitly authorized place credentials are returned to
+        a page. It requires the independent administrator session, including on
+        LAN/HTTPS cloud entries. Responses are no-store and never logged here.
         """
         runtime = manager.ai_settings.runtime()
         return jsonify(keys=[{"id": row["id"], "label": row["label"],
@@ -463,7 +541,16 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
             directory, payload, names = uploads.receive(request.files, request.form, directory=getattr(request, "_hsd_upload_directory", None))
             input_digests = names.pop("_input_digests")
             with manager.lock:
-                identifier = manager.create(payload, owner_id=employee_id(), downloadable=True, display_names=names, input_digests=input_digests)
+                options = {}
+                if cloud:
+                    def register_before_submit(job):
+                        job.update(_upload_managed=True, _upload_dir=str(directory))
+                        retention = app.config.get("HSD_RETENTION")
+                        if retention is None:
+                            raise ValueError("服务器暂存管理尚未就绪，请稍后重试。")
+                        retention.register(job["id"])
+                    options["before_submit"] = register_before_submit
+                identifier = manager.create(payload, owner_id=employee_id(), downloadable=True, display_names=names, input_digests=input_digests, **options)
                 job = manager._get(identifier)
                 job.update(_upload_managed=True, _upload_dir=str(directory))
                 committed = True
@@ -537,11 +624,23 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
                 raise Conflict("主机正在退出，请稍后再下载。")
             response = send_file(path, as_attachment=True, download_name="HSD编号结果.zip", etag=digest, conditional=True)
             app.config["HSD_ACTIVE_DOWNLOADS"] += 1
+            leases = app.config["HSD_DOWNLOAD_LEASES"]
+            leases[identifier] = leases.get(identifier, 0) + 1
         response.direct_passthrough = False
+        closed = False
         @response.call_on_close
         def download_finished():
+            nonlocal closed
             with manager.lock:
+                if closed:
+                    return
+                closed = True
                 app.config["HSD_ACTIVE_DOWNLOADS"] -= 1
+                remaining = app.config["HSD_DOWNLOAD_LEASES"].get(identifier, 1) - 1
+                if remaining:
+                    app.config["HSD_DOWNLOAD_LEASES"][identifier] = remaining
+                else:
+                    app.config["HSD_DOWNLOAD_LEASES"].pop(identifier, None)
         response.headers["Cache-Control"] = "private, no-store"
         return response
 

@@ -1,6 +1,7 @@
 """Local DeepSeek configuration; API credentials never enter public snapshots.
 
-Windows persists credentials with DPAPI CurrentUser. Other platforms retain a
+Windows persists credentials with DPAPI CurrentUser. An explicit Linux server
+master-key file enables authenticated encryption; other environments retain a
 new key in memory only rather than silently falling back to plaintext storage.
 """
 from __future__ import annotations
@@ -152,10 +153,21 @@ def _valid_id(value):
 
 
 class AiSettings:
-    def __init__(self, data_dir: str | Path, *, protector=_DEFAULT, environ=None, gateway=None):
+    def __init__(self, data_dir: str | Path, *, protector=_DEFAULT, environ=None, gateway=None,
+                 credential_key_file=None):
         self.path = Path(data_dir) / "ai_settings.json"
-        self._protector = (_DPAPI() if os.name == "nt" else None) if protector is _DEFAULT else protector
         self._environ = os.environ if environ is None else environ
+        key_file = (self._environ.get("HSD_CREDENTIAL_KEY_FILE", "")
+                    if credential_key_file is None else credential_key_file)
+        self._server_store = None
+        if key_file:
+            if protector is not _DEFAULT:
+                raise ValueError("服务器主密钥配置不能与其他加密方式同时使用")
+            from .credential_store import LinuxCredentialStore
+            self._server_store = LinuxCredentialStore(key_file, self.path)
+            self._protector = self._server_store
+        else:
+            self._protector = (_DPAPI() if os.name == "nt" else None) if protector is _DEFAULT else protector
         self._gateway = load_gateway(self._environ) if gateway is None else dict(gateway or {})
         self._lock = threading.RLock()
         self._enabled = False
@@ -175,13 +187,18 @@ class AiSettings:
 
     def _load(self):
         try:
-            if not self.path.exists():
+            content = (self._server_store.read_settings(MAX_SETTINGS_BYTES)
+                       if self._server_store is not None else None)
+            absent = content is None if self._server_store is not None else not self.path.exists()
+            if absent:
                 # A machine deployed with a gateway has no local key to enter.
                 self._enabled = bool(self._gateway)
                 return
-            if self.path.stat().st_size > MAX_SETTINGS_BYTES:
-                raise ValueError("oversized settings")
-            payload = json.loads(self.path.read_text("utf-8"))
+            if self._server_store is None:
+                if self.path.stat().st_size > MAX_SETTINGS_BYTES:
+                    raise ValueError("oversized settings")
+                content = self.path.read_bytes()
+            payload = json.loads(content.decode("utf-8"))
             if not isinstance(payload, dict) or payload.get("version") not in (1, 2):
                 raise ValueError("invalid settings")
             enabled = payload.get("enabled") is True
@@ -265,6 +282,7 @@ class AiSettings:
             source = keys[0]["source"] if keys else ("gateway" if gateway else "none")
             endpoint = self._gateway["endpoint"] if gateway else None
             persistence = "gateway" if endpoint else (
+                "linux_aesgcm" if self._server_store is not None else
                 "windows_dpapi" if self._protector is not None else "session_only")
             return {"enabled": self._enabled, "configured": bool(keys) or bool(endpoint),
                     "model": MODEL, "mode": "evaluation", "key_source": source,
@@ -303,11 +321,14 @@ class AiSettings:
                         row["encrypted_api_key"] = base64.b64encode(
                             self._protector.encrypt(row["api_key"].encode("ascii"))).decode("ascii")
                     except Exception:
-                        raise ValueError("Windows 无法加密密钥，本次设置未保存") from None
+                        message = ("服务器无法加密密钥，本次设置未保存" if self._server_store is not None
+                                   else "Windows 无法加密密钥，本次设置未保存")
+                        raise ValueError(message) from None
             else:
                 row["encrypted_api_key"] = ""
             next_rows.append(row)
-        changed = (next_rows != self._keys or environment_enabled != self._environment_enabled)
+        changed = (next_rows != self._keys or environment_enabled != self._environment_enabled
+                   or enabled != self._enabled)
         revision = self._revision + int(changed)
         record = {"version": 2, "enabled": enabled, "model": MODEL,
                   "key_revision": revision, "environment_enabled": environment_enabled,
@@ -315,13 +336,16 @@ class AiSettings:
                            for row in next_rows]}
         temporary = None
         try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            descriptor, temporary = tempfile.mkstemp(prefix=".ai-settings-", suffix=".tmp", dir=self.path.parent)
-            with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-                json.dump(record, stream, ensure_ascii=False, allow_nan=False)
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(temporary, self.path)
+            if self._server_store is not None:
+                self._server_store.write_settings(record)
+            else:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                descriptor, temporary = tempfile.mkstemp(prefix=".ai-settings-", suffix=".tmp", dir=self.path.parent)
+                with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                    json.dump(record, stream, ensure_ascii=False, allow_nan=False)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(temporary, self.path)
         except OSError:
             raise ValueError("无法保存本机 DeepSeek 设置，本次设置未生效") from None
         finally:

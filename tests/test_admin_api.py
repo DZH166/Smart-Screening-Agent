@@ -427,7 +427,7 @@ def test_successful_mock_review_and_debug_cannot_create_production_qualification
         job.update(revision=0, timings={})
         manager._plan(job)
         manager.ai_settings.save({"enabled": True})
-        manager.ai_settings.save_pool({"expected_revision": 0, "add": [{"api_key": SECRET, "label": "合成测试"}]})
+        manager.ai_settings.save_pool({"expected_revision": manager.ai_settings.snapshot()["key_revision"], "add": [{"api_key": SECRET, "label": "合成测试"}]})
         calls = []
 
         class ArtificialClient:

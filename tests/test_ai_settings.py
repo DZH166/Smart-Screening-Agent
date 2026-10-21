@@ -260,3 +260,54 @@ def test_removed_key_cannot_be_leaked_as_label_in_same_transaction(tmp_path):
                             "add": [{"api_key": "sk-new-credential-not-real", "label": KEY}]})
     assert KEY not in str(error.value)
     assert settings.snapshot() == first
+
+
+def test_global_ai_toggle_advances_revision_once_and_same_value_does_not(tmp_path):
+    settings = AiSettings(tmp_path, protector=FakeProtector(), environ={})
+    added = settings.save_pool({"expected_revision": 0, "add": [{"api_key": KEY}]})
+    assert added["key_revision"] == 1 and added["enabled"] is False
+    stored_keys = json.loads(settings.path.read_text("utf-8"))["keys"]
+    enabled = settings.save({"enabled": True})
+    assert enabled["key_revision"] == 2 and enabled["enabled"] is True
+    assert json.loads(settings.path.read_text("utf-8"))["keys"] == stored_keys
+    assert settings.save({"enabled": True}) == enabled
+    assert settings.save({"enabled": False})["key_revision"] == 3
+    restored = AiSettings(tmp_path, protector=FakeProtector(), environ={})
+    assert restored.snapshot()["key_revision"] == 3
+    assert restored.snapshot()["enabled"] is False
+    assert restored.runtime()["api_key"] == KEY
+
+
+def test_toggle_rejects_a_stale_pool_write_without_changing_saved_state(tmp_path):
+    from hsd_tool.ai_settings import AiSettingsConflict
+    settings = AiSettings(tmp_path, protector=FakeProtector(), environ={})
+    added = settings.save_pool({"expected_revision": 0, "add": [{"api_key": KEY}]})
+    current = settings.save({"enabled": True})
+    before = settings.path.read_bytes()
+    with pytest.raises(AiSettingsConflict):
+        settings.save_pool({"expected_revision": added["key_revision"],
+                            "remove": [added["keys"][0]["id"]]})
+    assert settings.path.read_bytes() == before
+    assert settings.snapshot() == current
+
+
+def test_failed_toggle_persistence_does_not_advance_revision_and_retry_advances_once(tmp_path, monkeypatch):
+    settings = AiSettings(tmp_path, protector=FakeProtector(), environ={})
+    initial = settings.save_pool({"expected_revision": 0, "add": [{"api_key": KEY}]})
+    before = settings.path.read_bytes()
+    replace = os.replace
+    monkeypatch.setattr(os, "replace", lambda *_: (_ for _ in ()).throw(OSError("synthetic disk error")))
+    with pytest.raises(ValueError):
+        settings.save({"enabled": True})
+    assert settings.snapshot() == initial
+    assert settings.path.read_bytes() == before
+    assert not list(tmp_path.glob(".ai-settings-*.tmp"))
+    monkeypatch.setattr(os, "replace", replace)
+    assert settings.save({"enabled": True})["key_revision"] == initial["key_revision"] + 1
+
+
+def test_combined_new_key_and_enabled_change_is_one_committed_revision(tmp_path):
+    settings = AiSettings(tmp_path, protector=FakeProtector(), environ={})
+    initial = settings.save({"api_key": KEY, "enabled": True})
+    assert initial["key_revision"] == 1 and initial["enabled"] is True
+    assert settings.save({"api_key": KEY, "enabled": True}) == initial

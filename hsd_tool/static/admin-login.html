@@ -27,10 +27,10 @@
 <body>
 <main>
   <h1>管理员登录</h1>
-  <p class="hint">该分区仅用于主机管理员，登录后可管理 DeepSeek Key 与查看实时调试记录。</p>
+  <p class="hint">管理员登录后可管理 DeepSeek 开关和密钥。</p>
   <form id="login">
     <label for="account">账号</label>
-    <input id="account" name="account" autocomplete="username" inputmode="numeric" autofocus>
+    <input id="account" name="account" autocomplete="username" autofocus>
     <label for="password">密码</label>
     <input id="password" name="password" type="password" autocomplete="current-password">
     <button id="submit" type="submit">登录</button>
@@ -62,7 +62,7 @@
       }
       message.textContent = payload.error || '登录失败，请重试。';
     } catch (error) {
-      message.textContent = '无法连接本机服务，请确认程序仍在运行。';
+      message.textContent = '无法连接服务，请稍后重试。';
     } finally {
       document.getElementById('password').value = '';
       submit.disabled = false;

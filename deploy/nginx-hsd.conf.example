@@ -1,0 +1,34 @@
+# A separate listener/site; do not replace another project's server block.
+server {
+    listen 8443 ssl;
+    server_name your-host.example;
+    ssl_certificate /etc/letsencrypt/live/your-host.example/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/your-host.example/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_tickets off;
+    access_log off;
+    error_log /var/log/hsd-agent/nginx-error.log warn;
+
+    client_max_body_size 0;
+    client_body_temp_path /var/lib/hsd-agent/storage/nginx-body;
+    client_body_timeout 300s;
+    send_timeout 300s;
+
+    location / {
+        proxy_pass http://127.0.0.1:8830;
+        proxy_http_version 1.1;
+        proxy_request_buffering off;
+        proxy_buffering off;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host "";
+        proxy_set_header X-Forwarded-Port "";
+        proxy_set_header X-Forwarded-Prefix "";
+        proxy_set_header Forwarded "";
+        proxy_set_header X-Real-IP "";
+        proxy_set_header Connection "";
+    }
+}

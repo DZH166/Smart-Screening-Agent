@@ -80,9 +80,11 @@ def _is_link_or_reparse(path):
 
 
 class JobManager:
-    def __init__(self, data_dir: str | Path, *, settings_dir: str | Path | None = None):
+    def __init__(self, data_dir: str | Path, *, settings_dir: str | Path | None = None,
+                 preserve_cache=False):
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
+        self._preserve_cache = bool(preserve_cache)
         self.lock = threading.RLock()
         self.jobs = {}
         self._queue_sequence = 0
@@ -111,7 +113,8 @@ class JobManager:
         self.ai_debug = AiDebugTrace()
         from .ai_key_pool import ApiKeyPool
         self.ai_key_pool = ApiKeyPool(self.ai_settings)
-        self.cleanup_cache()
+        if not self._preserve_cache:
+            self.cleanup_cache()
 
     def cleanup_cache(self):
         """Delete only self-marked, inactive work folders, never user outputs."""
@@ -130,7 +133,9 @@ class JobManager:
             except OSError:
                 pass
 
-    def close(self):
+    def close(self, *, on_drained=None):
+        if on_drained is not None and not callable(on_drained):
+            raise ValueError("任务收敛回调无效。")
         with self._operation_condition:
             self._closing = True
             # An accepted API operation may still be planning before its pool
@@ -147,9 +152,16 @@ class JobManager:
         with self._operation_condition:
             while self._active_operations:
                 self._operation_condition.wait()
+        # Cloud retention records the final completed state here: all accepted
+        # work has drained, but task metadata still exists. Never invoke an
+        # external callback under the global map lock.
+        if on_drained is not None:
+            on_drained()
+        with self._operation_condition:
             self.jobs.clear()
             self._job_locks.clear()
-        self.cleanup_cache()
+        if not self._preserve_cache:
+            self.cleanup_cache()
 
     @contextmanager
     def job_operation(self, identifier, *, internal=False):
@@ -199,7 +211,9 @@ class JobManager:
         os.replace(temporary, self.settings_path)
 
     def create(self, payload: dict, *, owner_id=None, downloadable=False, display_names=None,
-               input_digests=None):
+               input_digests=None, before_submit=None):
+        if before_submit is not None and not callable(before_submit):
+            raise ValueError("任务登记回调无效。")
         # Only the authenticated multipart receiver supplies these hashes. They
         # are never read from the JSON payload or exposed in public snapshots.
         upload_digests = {}
@@ -249,6 +263,25 @@ class JobManager:
                    "_owner_id": owner_id, "_downloadable": bool(downloadable)}
             job["_batch_started_perf"] = job["_started_perf"]
             self.jobs[identifier] = job
+            if before_submit is not None:
+                try:
+                    # Internal deployment hook only, never taken from payload.
+                    # A failed persistent registration must not start CPU/AI
+                    # work or leave a task inaccessible to the uploader.
+                    before_submit(job)
+                except BaseException:
+                    self.jobs.pop(identifier, None)
+                    self._job_locks.pop(identifier, None)
+                    try:
+                        root = (self.data_dir / "jobs").absolute()
+                        if (work_dir.absolute().parent == root
+                                and work_dir.resolve().parent == root.resolve()
+                                and not _is_link_or_reparse(root) and not _is_link_or_reparse(work_dir)
+                                and (work_dir / ".hsd-job").read_text("ascii") == identifier):
+                            shutil.rmtree(work_dir)
+                    except OSError:
+                        logging.warning("Could not clean an unsubmitted task's own marked work folder")
+                    raise
             try:
                 if owner_id is None:
                     self._save_config(job)

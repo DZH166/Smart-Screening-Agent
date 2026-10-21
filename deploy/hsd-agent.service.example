@@ -1,0 +1,49 @@
+[Unit]
+Description=HSD Agent isolated employee web service
+After=network-online.target
+Wants=network-online.target
+RequiresMountsFor=/var/lib/hsd-agent/storage
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=hsd-agent
+Group=hsd-agent
+WorkingDirectory=/opt/hsd-agent/current
+EnvironmentFile=/etc/hsd-agent/service.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1
+Environment=OPENBLAS_NUM_THREADS=1
+Environment=OMP_NUM_THREADS=1
+Environment=TMPDIR=/var/lib/hsd-agent/storage/tmp
+ExecStartPre=/usr/bin/mountpoint -q /var/lib/hsd-agent/storage
+ExecStart=/opt/hsd-agent/venv/bin/python -m hsd_tool.cloud_server
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGTERM
+KillMode=mixed
+TimeoutStopSec=infinity
+SendSIGKILL=no
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ReadWritePaths=/var/lib/hsd-agent/storage/data /var/lib/hsd-agent/storage/tmp /var/lib/hsd-agent/settings
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CPUQuota=100%
+CPUWeight=20
+MemoryHigh=1500M
+MemoryMax=2G
+MemorySwapMax=512M
+IOWeight=20
+TasksMax=256
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target
