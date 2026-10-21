@@ -2,6 +2,24 @@
    production APIs. The only generated files are PNGs of the built-in artwork. */
 "use strict";
 const $ = (id) => document.getElementById(id);
+const isHosted = document.documentElement.dataset.hosted === "true";
+
+// The shared website uses its real, authenticated feature destinations. The
+// standalone prototype keeps its illustrative numbering and admin sections.
+if (isHosted) {
+  for (const [page, href, label] of [
+    ["numbering", "/", "图片编号"],
+    ["admin", "/admin", "管理员"],
+  ]) {
+    const button = document.querySelector(`[data-page="${page}"]`);
+    const link = document.createElement("a");
+    link.href = href;
+    link.className = button.className;
+    link.textContent = label;
+    button.replaceWith(link);
+    $(page + "-page").remove();
+  }
+}
 const originals = [
   {
     id: "orange-bear",
@@ -84,8 +102,10 @@ function setBox(id, bounds) {
     $(id).setAttribute(name, String(value));
 }
 function render() {
-  for (const page of ["material", "numbering", "admin"])
-    $(page + "-page").hidden = state.page !== page;
+  for (const page of ["material", "numbering", "admin"]) {
+    const section = $(page + "-page");
+    if (section) section.hidden = state.page !== page;
+  }
   document.querySelectorAll("[data-page]").forEach((button) => {
     button.classList.toggle("active", button.dataset.page === state.page);
     if (button.dataset.page === state.page)
@@ -103,7 +123,7 @@ function render() {
   if (state.phase === "process") renderProcess();
   if (state.phase === "results") renderResults();
   document.title =
-    { material: "素材提取", numbering: "图片编号", admin: "统一管理" }[
+    { material: "素材提取（demo内测）", numbering: "图片编号", admin: "统一管理" }[
       state.page
     ] + " · 智筛 Agent 交互演示";
 }

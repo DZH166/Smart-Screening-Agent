@@ -135,13 +135,19 @@ small {
   height: 100%;
   gap: 30px;
 }
-.module-nav button {
+.module-nav button,
+.module-nav a {
   position: relative;
   background: none;
   border: 0;
   padding: 0 2px;
   color: #78857e;
   white-space: nowrap;
+}
+.module-nav a {
+  display: flex;
+  align-items: center;
+  text-decoration: none;
 }
 .module-nav button.active {
   font-weight: 650;

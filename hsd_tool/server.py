@@ -11,7 +11,7 @@ import threading
 from datetime import timedelta
 from pathlib import Path
 
-from flask import Flask, Request, current_app, g, jsonify, request, send_file, session
+from flask import Flask, Request, current_app, g, jsonify, redirect, request, send_file, session
 from werkzeug.exceptions import BadRequest, Conflict, RequestEntityTooLarge
 
 from .service import JobManager
@@ -19,6 +19,7 @@ from .uploads import EmployeeUploads, DiskBudget, UploadWriteError, MAX_UPLOAD_B
 from . import __version__
 from . import admin_auth
 from .cloud_tasks import CloudTaskStore, UploadClaims, upload_id
+from . import material_demo
 
 
 class EmployeeUploadRequest(Request):
@@ -193,7 +194,7 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
         admin_entry = (admin_area or protected_static
                        or request.endpoint in {"admin_login_page", "admin_login", "admin_logout"})
         if remote and not session.get("lan_authenticated") and not admin_entry:
-            if request.endpoint == "index" and request.method == "GET":
+            if request.endpoint in {"index", "material_demo_redirect", "material_demo_page"} and request.method == "GET":
                 html = (static / "lan-login.html").read_text("utf-8")
                 if cloud:
                     html = (html.replace("员工入口 · 输入主机提供的访问码。", "员工入口 · 输入管理员提供的访问码。")
@@ -201,6 +202,12 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
                             .replace("请连接公司局域网。没有访问码或无法连接时，请联系主机管理员。",
                                      "请使用管理员提供的 HTTPS 网址。文件处理结束后在服务器暂存 3 天，请及时下载；没有访问码或无法连接时请联系管理员。")
                             .replace("无法连接主机，请确认主机工具仍在运行后重试。", "无法连接服务器，请检查网络后重试。"))
+                if request.endpoint in {"material_demo_redirect", "material_demo_page"}:
+                    html = (html.replace("HSD 图号助手", "素材提取（demo内测）")
+                            .replace("进入后上传自己的表格和 AI 压缩包，处理完成即可下载结果。DeepSeek 沿用服务器配置，无需填写密钥。",
+                                     "本次仅体验操作界面，不调用 AI，也不上传文件；下载内容是内置示例。")
+                            .replace("进入后上传自己的表格和 AI 压缩包，处理完成即可下载结果。DeepSeek 沿用主机配置，无需填写密钥。",
+                                     "本次仅体验操作界面，不调用 AI，也不上传文件；下载内容是内置示例。"))
                 return html
             return jsonify(error="请先输入员工访问码。" if cloud else "请先输入局域网访问码。"), 401
         if cloud and request.endpoint in {"pick", "create_job", "open_output", "shutdown", "save_ai_settings"}:
@@ -307,6 +314,10 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
         response.headers["Referrer-Policy"] = "no-referrer"
         # The inline token/bootstrap is the only inline script; UI does not load external resources.
         response.headers["Content-Security-Policy"] = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'"
+        if getattr(g, "hsd_material_demo", False):
+            # The prototype operates entirely in this browser. Its local file
+            # preview needs blob images, but it has no reason to call any API.
+            response.headers["Content-Security-Policy"] = material_demo.CSP
         if download_frame:
             response.headers["Content-Security-Policy"] = response.headers["Content-Security-Policy"].replace("frame-ancestors 'none'", "frame-ancestors 'self'")
         return response
@@ -349,6 +360,21 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
         html = (static / "index.html").read_text("utf-8")
         access = {"lan": bool(lan), "remote": bool(lan and not lan.is_host(request.remote_addr))}
         return html.replace("__HSD_TOKEN__", json.dumps(token)).replace("__HSD_ACCESS__", json.dumps(access))
+
+    @app.get("/material-demo")
+    def material_demo_redirect():
+        return redirect("/material-demo/", code=308)
+
+    @app.get("/material-demo/")
+    @app.get("/material-demo/index.html")
+    def material_demo_page():
+        g.hsd_material_demo = True
+        return material_demo.asset_response("index.html")
+
+    @app.get("/material-demo/<path:filename>")
+    def material_demo_asset(filename):
+        g.hsd_material_demo = True
+        return material_demo.asset_response(filename)
 
     @app.get("/admin")
     def admin_page():

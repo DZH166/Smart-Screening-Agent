@@ -104,6 +104,21 @@ h3 {
   font-size:18px;
   font-weight:650
 }
+.material-demo-entry {
+  color:var(--blue);
+  font-size:14px;
+  font-weight:600;
+  text-decoration:none;
+  white-space:nowrap;
+  padding:6px 10px;
+  border:1px solid var(--line);
+  border-radius:6px;
+  background:var(--surface)
+}
+.material-demo-entry:hover {
+  background:var(--blue-light);
+  border-color:#b7c7f1
+}
 .steps {
   display:flex;
   align-items:center;
