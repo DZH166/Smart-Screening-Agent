@@ -1,0 +1,516 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>素材提取 · 智筛 Agent 交互演示</title>
+    <link rel="stylesheet" href="demo.css" />
+    <script src="demo.js" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="#material" aria-label="智筛 Agent 工作台"
+        ><span class="brand-mark" aria-hidden="true"
+          ><span></span><span></span><span></span><span></span></span
+        ><strong>智筛 Agent</strong><span class="brand-divider"></span
+        ><span class="brand-caption">员工工作台</span></a
+      >
+      <nav class="module-nav" aria-label="工作功能">
+        <button type="button" data-page="numbering">图片编号</button>
+        <button
+          type="button"
+          data-page="material"
+          class="active"
+          aria-current="page"
+        >
+          素材提取 <span class="new-label">新</span>
+        </button>
+      </nav>
+      <div class="top-actions">
+        <span class="demo-badge">交互演示</span
+        ><button
+          type="button"
+          class="text-button admin-entry"
+          data-page="admin"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M12 3 4.5 6v5.5c0 4 3 7 7.5 9.5 4.5-2.5 7.5-5.5 7.5-9.5V6Z"
+            />
+            <path d="m9 12 2 2 4-4" /></svg
+          >管理员
+        </button>
+      </div>
+    </header>
+    <div class="demo-notice">
+      <span class="notice-dot" aria-hidden="true"></span
+      ><span
+        >界面演示，不调用
+        AI、不上传文件。提取结果与下载文件均为内置合成示例。</span
+      >
+    </div>
+
+    <main class="workspace">
+      <section id="material-page">
+        <div class="page-heading">
+          <div>
+            <div class="breadcrumb">员工工作台 <span>/</span> 素材提取</div>
+            <h1>素材提取</h1>
+            <p>把拼图里的完整设计，整理成独立的透明 PNG。</p>
+          </div>
+          <div id="step-indicator" class="step-indicator" aria-label="演示步骤">
+            <span class="current">1 <b>导入图片</b></span
+            ><i></i><span>2 <b>提取素材</b></span
+            ><i></i><span>3 <b>检查与下载</b></span>
+          </div>
+        </div>
+
+        <section id="upload-view" class="upload-layout" aria-label="导入拼图">
+          <div class="panel import-panel">
+            <div class="panel-title">
+              <h2>选择一张拼图</h2>
+              <span class="subtle">原件保留</span>
+            </div>
+            <button type="button" id="drop-zone" class="drop-zone">
+              <span id="upload-placeholder"
+                ><span class="upload-symbol"
+                  ><svg viewBox="0 0 48 48" aria-hidden="true">
+                    <rect x="6" y="8" width="36" height="32" rx="6" />
+                    <circle cx="17" cy="18" r="3" />
+                    <path d="m8 34 10-10 8 8 5-5 10 10" />
+                    <path d="M33 5v12m-6-6h12" /></svg></span
+                ><strong>把图片拖到这里</strong
+                ><span>或点击选择电脑上的图片</span
+                ><small>PNG、JPG、WebP</small></span
+              >
+              <img id="local-preview" alt="所选图片的本机预览" hidden />
+            </button>
+            <input
+              id="image-file"
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              hidden
+            />
+            <p id="file-caption" class="file-caption">
+              图片仅在你的浏览器中预览，不会发送到服务器。
+            </p>
+            <p id="file-error" class="inline-error" role="alert" hidden></p>
+            <div class="upload-actions">
+              <button id="choose-file" type="button" class="button secondary">
+                选择图片</button
+              ><button id="start-demo" type="button" class="button primary">
+                用示例体验提取 <span aria-hidden="true">→</span>
+              </button>
+            </div>
+            <p id="upload-explainer" class="quiet-note">
+              演示将使用右侧示例，不会对上传的图片执行去水印或抠图。
+            </p>
+          </div>
+          <div class="example-panel">
+            <div class="example-heading">
+              <span class="eyebrow">内置示例</span
+              ><span class="sample-pill">原创合成素材</span>
+            </div>
+            <div class="example-sheet">
+              <img
+                src="assets/source-sheet.svg"
+                alt="含六个原创设计和 SAMPLE 字样的合成拼图"
+              />
+            </div>
+            <div class="example-caption">
+              <div>
+                <strong>一张拼图，多个完整设计</strong>
+                <p>人物、文字和装饰分别提取，同一设计保持完整。</p>
+              </div>
+              <span class="example-count">6 <small>个示例</small></span>
+            </div>
+          </div>
+        </section>
+
+        <section
+          id="process-view"
+          class="panel process-layout"
+          hidden
+          aria-label="演示处理流程"
+        >
+          <div class="process-source">
+            <img src="assets/source-sheet.svg" alt="演示处理的合成拼图" /><span
+              class="image-tag"
+              >合成示例 · 非真实处理</span
+            >
+          </div>
+          <div class="process-content">
+            <span class="eyebrow">流程演示</span>
+            <h2 id="process-title">识别完整设计</h2>
+            <p id="process-description">
+              把属于同一设计的人物、文字和配件放在一起。
+            </p>
+            <ol id="process-steps" class="process-steps">
+              <li class="current">
+                <span>1</span>
+                <div>
+                  <strong>识别完整设计</strong>
+                  <p>找出人物、文字、徽章和图案。</p>
+                </div>
+              </li>
+              <li>
+                <span>2</span>
+                <div>
+                  <strong>分离背景与处理水印</strong>
+                  <p>保留设计内容，处理需要修复的区域。</p>
+                </div>
+              </li>
+              <li>
+                <span>3</span>
+                <div>
+                  <strong>生成独立素材</strong>
+                  <p>检查边缘、文字和设计是否完整。</p>
+                </div>
+              </li>
+            </ol>
+            <p class="process-demo-hint">
+              点击下一步查看界面变化，没有后台 AI 任务。
+            </p>
+            <div class="process-actions">
+              <button id="stop-demo" type="button" class="button secondary">
+                结束演示</button
+              ><button id="next-step" type="button" class="button primary">
+                下一步：处理水印 →
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <section id="results-view" hidden aria-label="检查示例素材">
+          <div class="results-layout">
+            <aside class="source-panel panel">
+              <div class="panel-title">
+                <h2>原始拼图</h2>
+                <button id="zoom-source" type="button" class="text-button">
+                  放大
+                </button>
+              </div>
+              <div class="source-stage">
+                <img src="assets/source-sheet.svg" alt="合成示例原图" /><svg
+                  id="source-highlight"
+                  viewBox="0 0 960 720"
+                  aria-label="当前素材在原图中的位置"
+                >
+                  <rect
+                    id="source-box"
+                    x="0"
+                    y="0"
+                    width="0"
+                    height="0"
+                    rx="14"
+                  />
+                </svg>
+              </div>
+              <div class="source-meta">
+                <span>示例拼图.svg</span><span>960 × 720</span>
+              </div>
+              <div class="source-location">
+                <span class="location-dot"></span>
+                <p id="source-location">点击右侧素材，查看它在原图中的位置。</p>
+              </div>
+              <div class="source-tip">
+                <strong>先看这三个地方</strong>
+                <p>设计有没有缺少 · 文字有没有保留 · 边缘是否干净</p>
+              </div>
+              <button
+                id="restart-demo"
+                type="button"
+                class="button secondary full-width"
+              >
+                换一张图片
+              </button>
+            </aside>
+            <div class="result-content">
+              <div class="results-toolbar">
+                <div>
+                  <h2>
+                    示例素材 <span id="result-count" class="count">6</span>
+                  </h2>
+                  <p>点击放大查看，勾选想下载的素材。</p>
+                </div>
+                <div class="results-tools">
+                  <button
+                    id="undo-remove"
+                    type="button"
+                    class="text-button"
+                    hidden
+                  >
+                    撤销移除</button
+                  ><button id="select-all" type="button" class="text-button">
+                    取消全选
+                  </button>
+                </div>
+              </div>
+              <p id="edit-reminder" class="edit-reminder" role="status" hidden>
+                已保存修正方案。本 Demo 不执行重新抠图，下载仍为内置示例。
+              </p>
+              <div id="asset-grid" class="asset-grid"></div>
+              <div id="empty-results" class="empty-results" hidden>
+                <strong>示例素材已移除</strong>
+                <p>可撤销移除，或重新开始演示。</p>
+              </div>
+            </div>
+          </div>
+          <div class="download-bar">
+            <div>
+              <strong id="selected-count">已选择 6 个示例素材</strong>
+              <p>下载透明 PNG，ZIP 内直接放图片。</p>
+            </div>
+            <div class="download-actions">
+              <span class="download-demo-note">仅下载合成示例</span
+              ><button id="download-all" type="button" class="button primary">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 3v12m-4-4 4 4 4-4M5 16v4h14v-4" /></svg
+                ><span>下载示例 ZIP</span>
+              </button>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <section id="numbering-page" hidden>
+        <div class="page-heading">
+          <div>
+            <div class="breadcrumb">员工工作台 <span>/</span> 图片编号</div>
+            <h1>图片编号</h1>
+            <p>现有功能继续保留，可靠匹配直接通过，只处理疑难项。</p>
+          </div>
+        </div>
+        <div class="panel numbering-panel">
+          <div class="panel-title">
+            <h2>导入本批文件</h2>
+            <span class="sample-pill">已有功能入口演示</span>
+          </div>
+          <div class="numbering-files">
+            <label
+              >图片编号表<span class="mock-file"
+                >选择 Excel 表格 <small>.xlsx</small></span
+              ></label
+            ><label
+              >AI 压缩包<span class="mock-file"
+                >选择 AI 压缩包 <small>.zip</small></span
+              ></label
+            >
+          </div>
+          <label class="start-number-label" for="start-number"
+            >本批起始号
+            <input
+              id="start-number"
+              type="number"
+              min="1"
+              max="9999"
+              value="1"
+            /><span>例如 HSD0001</span></label
+          >
+          <div class="numbering-footer">
+            <p>此页只展示功能分区，编号处理请使用现有正式工具。</p>
+            <a
+              class="button primary"
+              href="https://39.106.45.116:8443/"
+              target="_blank"
+              rel="noopener"
+              >打开正式图号助手 ↗</a
+            >
+          </div>
+        </div>
+      </section>
+
+      <section id="admin-page" hidden>
+        <div class="page-heading">
+          <div>
+            <div class="breadcrumb">管理 <span>/</span> 服务设置</div>
+            <h1>统一管理</h1>
+            <p>员工使用同一个网站，管理员统一配置服务。</p>
+          </div>
+          <span class="sample-pill">分区演示 · 不读取真实设置</span>
+        </div>
+        <div class="admin-layout">
+          <section class="panel admin-card">
+            <div class="provider-symbol">D</div>
+            <div>
+              <h2>DeepSeek</h2>
+              <p>沿用当前共享 Key 管理，负责图片识别和设计盘点。</p>
+              <span class="provider-state">共用设置入口示意</span>
+            </div>
+            <a
+              class="text-button"
+              href="https://39.106.45.116:8443/admin"
+              target="_blank"
+              rel="noopener"
+              >正式管理页 ↗</a
+            >
+          </section>
+          <section class="panel admin-card">
+            <div class="provider-symbol image-provider">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="3" y="3" width="18" height="18" rx="4" />
+                <path d="m4 17 5-5 4 4 3-3 5 5" />
+                <circle cx="9" cy="8" r="1" />
+              </svg>
+            </div>
+            <div>
+              <h2>素材图像服务</h2>
+              <p>负责抠图和局部修复，具体服务待确认后接入。</p>
+              <span class="provider-state pending-state"
+                >尚未接入 · 演示占位</span
+              >
+            </div>
+          </section>
+        </div>
+        <details class="panel admin-help">
+          <summary>这版 Demo 能做什么？</summary>
+          <ul>
+            <li>体验两个员工功能入口、上传预览、示例处理步骤和结果查看。</li>
+            <li>调整框选、涂抹修正方案，体验选择、移除、撤销和下载示例。</li>
+            <li>不保存密钥、不调用收费服务，不改变正式网站的设置。</li>
+          </ul>
+        </details>
+      </section>
+    </main>
+    <footer class="page-footer">
+      <span>智筛 Agent · 功能整合演示</span><span>演示素材为原创合成内容</span>
+    </footer>
+
+    <dialog id="zoom-dialog" class="zoom-dialog">
+      <div class="dialog-heading">
+        <div>
+          <span class="eyebrow">示例对照</span>
+          <h2 id="zoom-title">查看素材</h2>
+        </div>
+        <button
+          type="button"
+          class="close-button"
+          data-close="zoom-dialog"
+          aria-label="关闭对照"
+        >
+          ×
+        </button>
+      </div>
+      <div class="zoom-comparison">
+        <figure>
+          <figcaption>在原图中的位置</figcaption>
+          <div class="zoom-source-stage">
+            <img src="assets/source-sheet.svg" alt="合成原图位置" /><svg
+              viewBox="0 0 960 720"
+              aria-hidden="true"
+            >
+              <rect
+                id="zoom-source-box"
+                x="0"
+                y="0"
+                width="0"
+                height="0"
+                rx="14"
+              />
+            </svg>
+          </div>
+        </figure>
+        <figure>
+          <figcaption>透明背景示例</figcaption>
+          <div class="zoom-asset-stage checker">
+            <img id="zoom-asset" alt="当前内置示例素材" />
+          </div>
+        </figure>
+      </div>
+      <div class="dialog-footer">
+        <p>示例仅展示交互，不代表真实抠图或去水印效果。</p>
+        <button type="button" class="button primary" data-close="zoom-dialog">
+          看好了
+        </button>
+      </div>
+    </dialog>
+    <dialog id="editor-dialog" class="editor-dialog">
+      <div class="dialog-heading">
+        <div>
+          <span class="eyebrow">仅调整当前素材</span>
+          <h2 id="editor-title">局部修正</h2>
+        </div>
+        <button
+          type="button"
+          class="close-button"
+          data-close="editor-dialog"
+          aria-label="关闭修正"
+        >
+          ×
+        </button>
+      </div>
+      <div class="editor-layout">
+        <div class="editor-left">
+          <div class="editor-tools" role="group" aria-label="修正工具">
+            <button type="button" data-tool="bounds" class="active">
+              移动范围</button
+            ><button type="button" data-tool="add">标记水印</button
+            ><button type="button" data-tool="erase">擦除标记</button
+            ><button id="clear-marks" type="button" class="text-button">
+              清空标记
+            </button>
+          </div>
+          <div class="editor-canvas">
+            <img
+              src="assets/source-sheet.svg"
+              alt="可移动范围和标记水印的合成示例"
+            /><svg
+              id="editor-surface"
+              viewBox="0 0 960 720"
+              aria-label="拖动方框或涂抹标记区域"
+            >
+              <g id="editor-strokes"></g>
+              <rect id="editor-box" x="0" y="0" width="0" height="0" rx="10" />
+              <rect
+                id="editor-handle"
+                x="0"
+                y="0"
+                width="20"
+                height="20"
+                rx="4"
+              />
+            </svg>
+          </div>
+          <p id="tool-hint" class="quiet-note">
+            拖动方框调整位置，拖动右下角调整范围。
+          </p>
+        </div>
+        <div class="editor-right">
+          <div class="editor-result checker">
+            <img id="editor-asset" alt="内置示例预览" />
+          </div>
+          <label class="field-label" for="asset-label"
+            >素材名称<input
+              id="asset-label"
+              type="text"
+              maxlength="30"
+              autocomplete="off"
+          /></label>
+          <div class="editor-explanation">
+            <strong>保留完整设计</strong>
+            <p>人物、文字和配件属于同一设计时，一起框选。</p>
+          </div>
+          <p class="editor-demo-note">
+            这里只保存操作方案，不执行重新抠图。预览和下载仍是内置示例。
+          </p>
+        </div>
+      </div>
+      <div class="dialog-footer">
+        <p>操作只影响这份演示，不修改原文件。</p>
+        <div>
+          <button
+            type="button"
+            class="button secondary"
+            data-close="editor-dialog"
+          >
+            返回</button
+          ><button id="save-correction" type="button" class="button primary">
+            保存修正方案
+          </button>
+        </div>
+      </div>
+    </dialog>
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  </body>
+</html>
