@@ -87,6 +87,51 @@ def test_cloud_never_grants_host_privileges_even_for_loopback():
         CloudAccess(ORIGIN, "HSD")
 
 
+def test_cloud_code_minimum_remains_sixteen_without_an_explicit_override():
+    for code in ("demo", "x" * 15):
+        with pytest.raises(ValueError, match="至少需要16位"):
+            CloudAccess(ORIGIN, code)
+    assert CloudAccess(ORIGIN, "x" * 16).code == "x" * 16
+    assert CloudAccess(ORIGIN, "demo", min_code_length=4).code == "demo"
+    assert CloudAccess(ORIGIN, "x", min_code_length=1).code == "x"
+    assert CloudAccess(ORIGIN, "x" * 64, min_code_length=64).code == "x" * 64
+
+
+@pytest.mark.parametrize("minimum", [True, False, None, "4", 4.0, 0, -1, 65])
+def test_cloud_rejects_invalid_constructor_code_minimum(minimum):
+    with pytest.raises(ValueError, match="最短长度"):
+        CloudAccess(ORIGIN, CODE, min_code_length=minimum)
+
+
+@pytest.mark.parametrize("code", ["", " ", "has space", "line\nbreak", "\x00bad", "非ASCII", "x" * 65])
+def test_short_code_override_does_not_relax_visible_ascii_or_maximum_length(code):
+    with pytest.raises(ValueError):
+        CloudAccess(ORIGIN, code, min_code_length=1)
+
+
+def test_short_code_override_preserves_rate_limit_and_host_boundaries(tmp_path, monkeypatch):
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.delenv("HSD_CREDENTIAL_KEY_FILE", raising=False)
+    access = CloudAccess(ORIGIN, "demo", min_code_length=4)
+    app = create_app(tmp_path / "data", cloud=access, token=TOKEN, settings_dir=tmp_path / "settings")
+    try:
+        client = app.test_client()
+        for _ in range(10):
+            assert cloud_request(client, "/api/lan/login", method="POST", payload={"code": "wrong"}).status_code == 403
+        assert cloud_request(client, "/api/lan/login", method="POST", payload={"code": "demo"}).status_code == 429
+        logged_in = cloud_request(client, "/api/lan/login", method="POST", payload={"code": "demo"}, forwarded="203.0.113.26")
+        assert logged_in.status_code == 200 and "Secure" in logged_in.headers["Set-Cookie"]
+        config = cloud_request(client, "/api/config", forwarded="127.0.0.1").json
+        assert config["access"]["remote"] and "code" not in config["access"]
+        for address in ("127.0.0.1", "::1", CLIENT):
+            assert not access.is_host(address)
+        for path in ("/api/pick", "/api/jobs", "/api/shutdown", "/api/ai/settings"):
+            assert cloud_request(client, path, method="POST", payload={}, forwarded="127.0.0.1").status_code == 403
+        assert cloud_request(client, "/api/admin/keys").status_code == 401
+    finally:
+        app.config["HSD_MANAGER"].close()
+
+
 @pytest.mark.parametrize("peer,forwarded,headers", [
     (CLIENT, CLIENT, {}), ("127.0.0.1", "", {}),
     ("127.0.0.1", "127.0.0.1, 203.0.113.25", {}),
@@ -298,6 +343,60 @@ def test_explicit_https_port_is_part_of_origin_and_host_boundary():
 def test_cloud_factory_requires_all_private_configuration():
     with pytest.raises(ValueError):
         create_cloud_app({})
+
+
+@pytest.fixture
+def cloud_factory_stubs(tmp_path, monkeypatch):
+    from hsd_tool import cloud_admin, cloud_retention, cloud_server, server
+    created = []
+    closed = []
+    manager = SimpleNamespace(ai_settings=SimpleNamespace(snapshot=lambda: {"key_persistence": "linux_aesgcm"}),
+                              close=lambda: closed.append(True))
+    app = SimpleNamespace(config={"HSD_MANAGER": manager, "HSD_JOB_LEASES": {}})
+    def create(*args, **kwargs):
+        created.append(kwargs["cloud"])
+        return app
+    retention = SimpleNamespace(start=lambda: retention)
+    monkeypatch.setattr(server, "create_app", create)
+    monkeypatch.setattr(cloud_admin, "CloudAdminCredentials", lambda path: object())
+    monkeypatch.setattr(cloud_retention, "CloudRetention", lambda *args: retention)
+    environment = {"HSD_PUBLIC_ORIGIN": ORIGIN, "HSD_DATA_DIR": str(tmp_path / "data"),
+                   "HSD_SETTINGS_DIR": str(tmp_path / "settings"),
+                   "HSD_EMPLOYEE_CODE_FILE": str(tmp_path / "synthetic-employee-code"),
+                   "HSD_CREDENTIAL_KEY_FILE": str(tmp_path / "synthetic-encryption-key"),
+                   "HSD_ADMIN_CREDENTIAL_FILE": str(tmp_path / "synthetic-admin-digest")}
+    return cloud_server, environment, app, created, closed
+
+
+def test_factory_default_code_minimum_remains_sixteen(cloud_factory_stubs, monkeypatch):
+    module, environment, app, created, closed = cloud_factory_stubs
+    monkeypatch.setattr(module, "_private_file", lambda path: b"demo")
+    with pytest.raises(ValueError, match="至少需要16位"):
+        create_cloud_app(environment)
+    assert created == [] and closed == []
+    monkeypatch.setattr(module, "_private_file", lambda path: b"x" * 16)
+    assert create_cloud_app(environment) is app
+    assert created[0].code == "x" * 16
+
+
+@pytest.mark.parametrize("minimum,code", [("1", "x"), ("4", "demo"), ("16", CODE), ("64", "x" * 64)])
+def test_factory_explicit_code_minimum_is_instance_configuration(cloud_factory_stubs, monkeypatch, minimum, code):
+    module, environment, app, created, closed = cloud_factory_stubs
+    monkeypatch.setattr(module, "_private_file", lambda path: code.encode("ascii"))
+    environment["HSD_EMPLOYEE_CODE_MIN_LENGTH"] = minimum
+    assert create_cloud_app(environment) is app
+    assert created[0].code == code and closed == []
+
+
+@pytest.mark.parametrize("minimum", ["", "0", "65", "-1", "+4", " 4", "4 ", "04", "4.0", "true", "４", None, 4, True])
+def test_factory_invalid_code_minimum_fails_before_reading_credentials(cloud_factory_stubs, monkeypatch, minimum):
+    module, environment, app, created, closed = cloud_factory_stubs
+    environment["HSD_EMPLOYEE_CODE_MIN_LENGTH"] = minimum
+    read = []
+    monkeypatch.setattr(module, "_private_file", lambda path: read.append(path))
+    with pytest.raises(ValueError, match="最短长度配置"):
+        create_cloud_app(environment)
+    assert read == [] and created == [] and closed == []
 
 
 def test_cloud_factory_closes_manager_instead_of_accepting_plaintext_fallback(tmp_path, monkeypatch):

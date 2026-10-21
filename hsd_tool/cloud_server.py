@@ -51,7 +51,9 @@ def _private_file(path: Path) -> bytes:
 class CloudAccess(LanAccess):
     """Reuse employee sessions/ownership without any host access exception."""
 
-    def __init__(self, origin: str, code: str, *, admin_credentials=None):
+    def __init__(self, origin: str, code: str, *, admin_credentials=None, min_code_length=16):
+        if type(min_code_length) is not int or not 1 <= min_code_length <= 64:
+            raise ValueError("服务器员工访问码最短长度必须为1–64之间的整数。")
         try:
             parsed = urlsplit(origin)
             port = parsed.port
@@ -76,8 +78,8 @@ class CloudAccess(LanAccess):
         self.origin = "https://" + self.authority
         self.code = self._code(code)
         self.admin_credentials = admin_credentials
-        if len(self.code) < 16:
-            raise ValueError("服务器员工访问码至少需要16位，请通过私有文件配置。")
+        if len(self.code) < min_code_length:
+            raise ValueError(f"服务器员工访问码至少需要{min_code_length}位，请通过私有文件配置。")
         self._attempts = defaultdict(deque)
         self._lock = threading.Lock()
 
@@ -142,6 +144,13 @@ def create_cloud_app(environ=None):
                 "HSD_EMPLOYEE_CODE_FILE", "HSD_CREDENTIAL_KEY_FILE", "HSD_ADMIN_CREDENTIAL_FILE")
     if any(not env.get(name) for name in required):
         raise ValueError("服务器缺少公开地址、数据目录或私有凭据文件配置。")
+    # Default policy remains unchanged. A deliberately configured instance may
+    # accept its operator-selected shorter code; request data cannot set this.
+    minimum = env.get("HSD_EMPLOYEE_CODE_MIN_LENGTH", "16")
+    if (not isinstance(minimum, str)
+            or not re.fullmatch(r"(?:[1-9]|[1-5][0-9]|6[0-4])", minimum)):
+        raise ValueError("服务器员工访问码最短长度配置必须为1–64之间的正整数。")
+    minimum = int(minimum)
     data, settings = Path(env["HSD_DATA_DIR"]), Path(env["HSD_SETTINGS_DIR"])
     if not data.is_absolute() or not settings.is_absolute():
         raise ValueError("服务器数据与设置目录必须使用绝对路径。")
@@ -151,7 +160,8 @@ def create_cloud_app(environ=None):
         raise ValueError("员工访问码文件必须使用可见ASCII字符。") from None
     from .cloud_admin import CloudAdminCredentials
     access = CloudAccess(env["HSD_PUBLIC_ORIGIN"], code,
-                         admin_credentials=CloudAdminCredentials(Path(env["HSD_ADMIN_CREDENTIAL_FILE"])))
+                         admin_credentials=CloudAdminCredentials(Path(env["HSD_ADMIN_CREDENTIAL_FILE"])),
+                         min_code_length=minimum)
     # AiSettings independently validates ownership/permissions and encrypts the
     # provider keys. No plaintext/Windows-DPAPI fallback is enabled here.
     if not Path(env["HSD_CREDENTIAL_KEY_FILE"]).is_absolute():
