@@ -2,6 +2,7 @@
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
+import uuid
 
 import pytest
 from werkzeug.test import EnvironBuilder
@@ -39,6 +40,16 @@ def captured_jobs(base_captured_jobs, employee_app, monkeypatch):
     capture_create = manager.create
     def create(*args, before_submit=None, **kwargs):
         identifier = capture_create(*args, **kwargs)
+        # Cloud checkpoints intentionally require production UUID namespaces.
+        job = manager.jobs.pop(identifier)
+        real_id = uuid.uuid4().hex
+        work = Path(job["_work_dir"])
+        target = work.with_name(real_id)
+        work.rename(target)
+        (target / ".hsd-job").write_text(real_id, "ascii")
+        job.update(id=real_id, _work_dir=str(target))
+        manager.jobs[real_id] = job
+        identifier = real_id
         if before_submit:
             before_submit(manager._get(identifier))
         return identifier

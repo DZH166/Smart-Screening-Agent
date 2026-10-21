@@ -28,20 +28,26 @@ class FakeXHR {
   setRequestHeader(name,value){this.headers[name]=value;}
   addEventListener(name,callback){this.listeners[name]=callback;}
   send(data){this.data=data;}
+  abort(){this.aborted=true;this.listeners.abort?.();}
   load(status,response){this.status=status;this.responseText=JSON.stringify(response);this.listeners.load();}
 }
 const location={origin:'http://192.168.1.2:8805',assign(url){location.assigned=url;}};
+const storage=new Map(),calls=[],timers=new Map();let nextTimer=0,nextUploadId=0,fetchHandler=async()=>({ok:true,status:200,json:async()=>({ready:true})});
+const setTimer=(callback,delay)=>{timers.set(++nextTimer,{callback,delay});return nextTimer;};
+const clearTimer=(id)=>timers.delete(id);
 const sandbox={document:{getElementById:element,querySelectorAll(selector){
   if(selector!=='.step')return [];
   return [1,2,3].map((number)=>{const node=element(`step-${number}`);node.dataset.step=String(number);return node;});
 },body:{classList:{toggle(){}}},documentElement:{dataset:{}}},
-  window:{HSD_ACCESS:{lan:true,remote:true},HSD_TOKEN:'session-token',location,setTimeout(){return 1;},clearTimeout(){},scrollTo(){}},
-  location, performance:{now:()=>0},setTimeout:()=>1,clearTimeout(){},AbortController,
+  window:{HSD_ACCESS:{lan:true,remote:true},HSD_TOKEN:'session-token',location,setTimeout:setTimer,clearTimeout:clearTimer,scrollTo(){},crypto:{randomUUID:()=>`00000000-0000-4000-8000-${String(++nextUploadId).padStart(12,'0')}`}},
+  location, performance:{now:()=>0},setTimeout:setTimer,clearTimeout:clearTimer,AbortController,
+  sessionStorage:{setItem:(key,value)=>storage.set(key,value),getItem:(key)=>storage.get(key)||null,removeItem:(key)=>storage.delete(key)},
+  fetch:async(url,options)=>{calls.push({url,options});return fetchHandler(url,options);},
   FormData:class{constructor(){this.parts=[];}append(...part){this.parts.push(part);}},XMLHttpRequest:FakeXHR,
 };
 const source=fs.readFileSync(path.join(__dirname,'../hsd_tool/static/app.js'),'utf8');
 assert.ok(source.includes('init().catch('));
-vm.runInNewContext(source.replace(/  init\(\)\.catch\([^\n]+\);/, '  window.testUI={state,validateUploadFiles,configureAccess,setFormBusy,uploadFiles,isBusy,renderProgress,renderSummary,renderDone,openOutput,formatBytes,updateUploadSelection,startJob};'),sandbox);
+vm.runInNewContext(source.replace(/  init\(\)\.catch\([^\n]+\);/, '  window.testUI={state,validateUploadFiles,configureAccess,setFormBusy,uploadFiles,isBusy,renderProgress,renderSummary,renderDone,openOutput,formatBytes,updateUploadSelection,startJob,recoverUpload,rememberUpload,storedUpload,stopUpload,stopJob,pollJob,renderJob,resetTask};'),sandbox);
 const ui=sandbox.window.testUI;
 const MiB=1024*1024;
 const workbook={name:'员工表格.XLSX',size:2*MiB};
@@ -212,13 +218,84 @@ async function main(){
   assert.equal(element('open-output-button').textContent,'下载结果 ZIP ↓');
   assert.ok(!element('open-output-button').disabled);
   await ui.openOutput();
-  assert.equal(location.assigned,'/api/jobs/my%2Fjob/download');
+  assert.equal(element('result-download-frame').src,'/api/jobs/my%2Fjob/download?frame=1');
+  assert.equal(location.assigned,undefined,'download must never navigate away from the employee page');
+  assert.ok(calls.at(-1).url.endsWith('/download-status'),'the server validates before the browser streams the ZIP');
+  element('result-download-frame').contentDocument={body:{textContent:JSON.stringify({error:'下载结果发生变化，请重新处理。'})}};
+  element('result-download-frame').onload();assert.match(element('notice-text').textContent,/下载结果发生变化/);
+  assert.equal(ui.state.downloading,false);assert.ok(!element('open-output-button').disabled);
+  element('result-download-frame').contentDocument={body:{textContent:''}};
   ui.state.job.download_ready=false;ui.renderDone();
   assert.ok(element('open-output-button').disabled);
   ui.state.job={id:'summary',status:'ready',rows:[],output_root:'private-host-path'};
   ui.renderSummary();
   assert.match(element('summary-output').textContent,/下载.*电脑/);
   assert.ok(!element('summary-output').textContent.includes('private-host-path'));
+
+  // A committed upload whose response is lost is recovered without a second POST.
+  const reply=(body,status=200)=>({ok:status<400,status,json:async()=>body});
+  const flush=async()=>{for(let i=0;i<12;i++)await Promise.resolve();};
+  element('workbook-upload').files=[workbook];element('source-upload').files=[zip];element('start-number').value='12';
+  fetchHandler=async(url)=>{assert.match(url,/upload-status/);return reply({state:'completed',job_id:'recovered-job'});};
+  const firstCount=xhrs.length,lost=ui.startJob({preventDefault(){}}),lostRequest=xhrs.at(-1);
+  assert.ok(lostRequest.headers['X-HSD-Upload-ID']);assert.ok(storage.has('hsd-pending-upload'));
+  lostRequest.listeners.error();await lost;
+  assert.equal(xhrs.length,firstCount+1);assert.equal(ui.state.job.id,'recovered-job');assert.equal(storage.get('hsd-active-job'),'recovered-job');
+  assert.equal(storage.has('hsd-pending-upload'),false);
+
+  // A missing status is not proof that the original request can never arrive.
+  // Lock its inputs and retry with exactly the same request ID.
+  ui.state.job=null;fetchHandler=async()=>reply({state:'missing'});
+  const missing=ui.startJob({preventDefault(){}}),missingRequest=xhrs.at(-1),originalId=missingRequest.headers['X-HSD-Upload-ID'];
+  missingRequest.listeners.error();await missing;
+  assert.equal(ui.state.uploadUncertain,true);assert.equal(ui.state.uploadRetryAllowed,true);
+  assert.ok(element('workbook-upload').disabled);assert.equal(element('start-button').textContent,'重试本次上传');
+  const retry=ui.startJob({preventDefault(){}}),retryRequest=xhrs.at(-1);
+  assert.equal(retryRequest.headers['X-HSD-Upload-ID'],originalId);
+  retryRequest.load(200,{id:'same-upload-job',reused:true});await retry;assert.equal(ui.state.job.id,'same-upload-job');
+
+  // Browser abort is only a transfer interruption; confirmation comes from the server.
+  ui.state.job=null;let cancellationRecorded=false;
+  fetchHandler=async(url,options)=>{if(options.method==='POST'){assert.match(url,/upload-status\/.*\/cancel$/);cancellationRecorded=true;return reply({state:'cancelled'});}return reply({state:cancellationRecorded?'cancelled':'pending'});};
+  const uploading=ui.startJob({preventDefault(){}}),toAbort=xhrs.at(-1);
+  const stopping=ui.stopUpload();await uploading;await stopping;await flush();
+  assert.equal(toAbort.aborted,true);assert.equal(ui.state.uploadRequest,null);assert.equal(ui.state.uploadUncertain,false);
+  assert.match(element('notice-text').textContent,/服务器已确认/);
+
+  // A stop remains busy until the server reports that all work has ended.
+  ui.state.job={id:'stop-job',status:'matching',revision:1,rows:[],files:[]};
+  let finishStop;fetchHandler=()=>new Promise((resolve)=>{finishStop=resolve;});
+  const stop=ui.stopJob();await flush();const sent=calls.length;await ui.stopJob();assert.equal(calls.length,sent,'duplicate stop requests are blocked');
+  assert.equal(JSON.parse(calls.at(-1).options.body).expected_revision,1,'employee cancellation must satisfy server revision checks');
+  finishStop(reply({id:'stop-job',status:'cancelling',revision:2,cancel_requested:true,rows:[],files:[]}));await stop;
+  assert.equal(ui.state.job.status,'cancelling');assert.ok(ui.isBusy());assert.equal(element('stop-job-button').disabled,true);
+  assert.match(element('processing-message').textContent,/等待返回或超时/);
+  fetchHandler=async()=>reply({id:'stop-job',status:'matching',revision:1,rows:[],files:[]});await ui.pollJob();
+  assert.equal(ui.state.job.status,'cancelling','an old poll response cannot undo an accepted stop request');
+  fetchHandler=async()=>reply({id:'stop-job',status:'cancelled',revision:3,rows:[],files:[]});await ui.pollJob();
+  assert.equal(ui.isBusy(),false);assert.match(element('cancelled-message').textContent,/服务器已结束/);
+  await ui.resetTask();assert.equal(ui.state.job,null);
+
+  // A newly accepted upload placeholder must read its real revision first.
+  ui.state.job={id:'fresh-upload',status:'queued',rows:[],files:[]};
+  const placeholderCalls=[];
+  fetchHandler=async(url,options)=>{placeholderCalls.push({url,options});return options.method==='POST'?reply({id:'fresh-upload',status:'cancelled',revision:5,rows:[],files:[]}):reply({id:'fresh-upload',status:'matching',revision:4,rows:[],files:[]});};
+  await ui.stopJob();assert.equal(placeholderCalls.length,2);assert.equal(placeholderCalls[0].options.method,'GET');
+  assert.equal(JSON.parse(placeholderCalls[1].options.body).expected_revision,4);assert.equal(ui.state.job.status,'cancelled');
+
+  // A failed old download preflight must not overwrite the next batch's notice.
+  ui.state.job={id:'old-download',status:'done',download_ready:true,rows:[]};
+  let failPreflight;fetchHandler=()=>new Promise((_resolve,reject)=>{failPreflight=reject;});
+  const oldDownload=ui.openOutput();await flush();await ui.resetTask();
+  element('notice-text').textContent='下一批的提示';failPreflight(new TypeError('模拟旧下载断网'));await oldDownload;
+  assert.equal(ui.state.job,null);assert.equal(element('notice-text').textContent,'下一批的提示');assert.equal(ui.state.downloading,false);
+
+  // Expired download authentication keeps the task ID for re-login recovery.
+  ui.state.job={id:'auth-job',status:'done',download_ready:true,rows:[]};storage.set('hsd-active-job','auth-job');
+  fetchHandler=async()=>reply({error:'请先输入员工访问码。'},401);await ui.openOutput();
+  assert.equal(ui.state.authExpired,true);assert.equal(storage.get('hsd-active-job'),'auth-job');
+  assert.equal(location.assigned,undefined);assert.equal(element('notice-action').textContent,'重新登录');
+  ui.state.authExpired=false;ui.state.job=null;
 
   ui.configureAccess({lan:false,remote:false});ui.setFormBusy(false);
   assert.ok(!element('local-workbook-field').classList.contains('hidden'));

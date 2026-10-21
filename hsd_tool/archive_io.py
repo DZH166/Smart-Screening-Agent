@@ -11,6 +11,7 @@ import lzma
 import struct
 import zipfile
 import zlib
+from .cancellation import check
 
 CHUNK_BYTES = 1024 * 1024
 
@@ -55,6 +56,7 @@ def _bounded_native_blocks(stream, info, chunk_size):
         pending = pending[4 + property_size:]
     count, crc = 0, 0
     while not inflater.eof:
+        check()
         if inflater.needs_input:
             if pending:
                 raw, pending = pending, b''
@@ -109,6 +111,7 @@ def member_blocks(archive: zipfile.ZipFile, info, chunk_size=CHUNK_BYTES):
             stream._decompressor = measured
         count = 0
         while block := stream.read(chunk_size):
+            check()
             count += len(block)
             if count > info.file_size or measured is not None and measured.count > info.file_size:
                 raise zipfile.BadZipFile('压缩包实际展开长度不符。')

@@ -131,6 +131,18 @@ def idle(manager, identifier, *, timeout=6):
     pytest.fail("Artificial service flow did not settle")
 
 
+def test_preparation_budget_keeps_complete_local_results_without_provider_calls(scenario, monkeypatch):
+    value = scenario(count=2)
+    monkeypatch.setattr(first, 'MAX_PREPARED_IMAGE_BYTES', 1)
+    identifier = value.create()
+    job = idle(value.manager, identifier)
+    assert job['status'] == 'ready' and job['stats']['auto'] == 2
+    assert job['ai_retrieval']['error_code'] == 'resource_limit'
+    assert not value.opener.calls and job['ai_retrieval']['usage']['requests'] == 0
+    assert any('内存预算' in warning for warning in job['warnings'])
+    assert 'verify' in value.events
+
+
 def test_enabled_private_capability_routes_prepare_retrieve_then_independent_cpu_verification(scenario):
     value = scenario(count=1)
     assert value.manager.ai_settings.runtime()["matching_workflow"] == "ai_first"

@@ -85,7 +85,7 @@ def captured_jobs(employee_app, monkeypatch):
     manager = employee_app.config["HSD_MANAGER"]
     calls = []
 
-    def create(payload, *, owner_id=None, downloadable=False, display_names=None, input_digests=None):
+    def create(payload, *, owner_id=None, downloadable=False, display_names=None, input_digests=None, before_submit=None):
         identifier = f"employee{len(calls) + 1}"
         captured = {"payload": dict(payload), "owner_id": owner_id,
                     "downloadable": downloadable, "display_names": display_names, "input_digests": input_digests}
@@ -103,6 +103,8 @@ def captured_jobs(employee_app, monkeypatch):
             "_workbook_path": payload["workbook_path"], "_source_path": payload["source_path"],
             "_output_root": payload["output_root"], "_work_dir": str(work),
         }
+        if before_submit:
+            before_submit(manager.jobs[identifier])
         return identifier
 
     monkeypatch.setattr(manager, "create", create)

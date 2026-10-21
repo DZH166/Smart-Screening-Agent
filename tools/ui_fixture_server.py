@@ -22,7 +22,9 @@ from PIL import Image, ImageDraw
 
 
 SCENARIOS = {"review", "mixed", "auto", "partial", "done", "queued", "matching", "ai-review",
-             "ai-failed", "ai-off", "error", "conflict", "save-failed", "import-local", "import-employee"}
+             "ai-failed", "ai-off", "error", "conflict", "save-failed", "import-local", "import-employee",
+             "cancelling", "cancelled", "cancel-failed", "download-failed", "download-auth",
+             "upload-lost", "upload-pending"}
 ROOT = Path(__file__).resolve().parents[1]
 MEASUREMENT = r"""
 (() => {
@@ -92,7 +94,7 @@ def make_job(scenario: str, count: int, identifier: str) -> dict:
         fid = f"f{index}"
         for file_id in (fid, f"g{index}"):
             files.append({"id": file_id, "name": f"界面测试-{file_id}.ai", "relative_path": f"合成素材/{file_id}.ai", "issue": ""})
-        status = "auto" if scenario in {"auto", "done"} else "review"
+        status = "auto" if scenario in {"auto", "done", "download-failed", "download-auth"} else "review"
         if scenario in {"mixed", "partial"}:
             status = "auto" if index < count-4 else "review" if index < count-1 else "unmatched" if index == count-1 else "skipped"
         row = {"id": f"r{index}", "row_number": index+1, "number": f"HSD{index:04}" if index % 3 else "",
@@ -109,7 +111,9 @@ def make_job(scenario: str, count: int, identifier: str) -> dict:
             row["ai_review"] = {"verdict": "error", "outcome": "error", "candidate_id": fid,
                                 "reason": "复核连接超时，请人工对照图片；本机匹配结果仍然保留。"}
         rows.append(row)
-    status = {"done": "done", "queued": "queued", "matching": "matching", "ai-review": "ai_review", "error": "error"}.get(scenario, "ready")
+    status = {"done": "done", "queued": "queued", "matching": "matching", "ai-review": "ai_review", "error": "error",
+              "cancelling": "cancelling", "cancelled": "cancelled", "cancel-failed": "matching",
+              "download-failed": "done", "download-auth": "done"}.get(scenario, "ready")
     usage = {"requests": 3, "successes": 2, "failures": 1, "unknown_usage_requests": 1,
              "estimated_usd": .0023, "cost_incomplete": True}
     job = {"id": identifier, "status": status, "revision": 1, "can_undo": False,
@@ -119,6 +123,7 @@ def make_job(scenario: str, count: int, identifier: str) -> dict:
            "progress": {"message": "正在比对合成预览，仅供界面验收", "current": 8, "total": 20}, "queue_position": 2,
            "error": "AI 压缩包内没有可读取的文件，请重新选择 ZIP。" if status == "error" else None,
            "_history": [], "_scenario": scenario, "_failed_once": False,
+           "cancel_requested": status in {"cancelling", "cancelled"}, "_cancel_polls": 2,
            "ai_review": None if scenario == "ai-off" else {"mode": "evaluation", "reviewed": 3, "suggested_same": 2,
                "auto_passed": 0, "usage": usage, "can_retry": scenario == "ai-failed", "message": "正在复核合成预览"}}
     return job
@@ -130,6 +135,7 @@ def create_fixture_app(static_dir: Path, host: str = "127.0.0.1") -> Flask:
     app.config.update(SESSION_COOKIE_NAME="hsd_ui_fixture_" + secrets.token_hex(4), SESSION_COOKIE_HTTPONLY=True,
                       SESSION_COOKIE_SAMESITE="Strict", MAX_CONTENT_LENGTH=4*1024*1024)
     jobs: dict[str, dict] = {}
+    uploads: dict[str, dict] = {}
     metrics: Counter = Counter()
     local = {"127.0.0.1", "::1", host}
     local.update(socket.gethostbyname_ex(socket.gethostname())[2])
@@ -169,7 +175,8 @@ def create_fixture_app(static_dir: Path, host: str = "127.0.0.1") -> Flask:
         session["employee"] = employee
         session["delay_ms"] = min(500, max(0, request.args.get("delay", 60, type=int)))
         session["scenario"] = scenario
-        if not scenario.startswith("import-"):
+        session["fixture_owner"] = secrets.token_hex(12)
+        if not scenario.startswith(("import-", "upload-")):
             identifier = "synthetic-" + secrets.token_hex(6)
             session["job"] = identifier
             jobs[identifier] = make_job(scenario, count, identifier)
@@ -211,6 +218,11 @@ def create_fixture_app(static_dir: Path, host: str = "127.0.0.1") -> Flask:
             return jsonify(error="不存在此合成测试任务"), 404
         if job["status"] == "exporting":
             job.update(status="done", download_ready=True)
+        if job["status"] == "cancelling":
+            if job["_cancel_polls"]:
+                job["_cancel_polls"] -= 1
+            else:
+                job.update(status="cancelled", progress={"message": "合成任务已停止", "current": 0, "total": 0})
         return jsonify(snapshot(job))
 
     @app.post("/api/jobs/<identifier>/<action>")
@@ -220,6 +232,20 @@ def create_fixture_app(static_dir: Path, host: str = "127.0.0.1") -> Flask:
             return jsonify(error="不存在此合成测试任务"), 404
         time.sleep(session.get("delay_ms", 60)/1000)
         data = request.get_json(silent=True) or {}
+        if action == "cancel":
+            if type(data.get("expected_revision")) is not int or data["expected_revision"] != job["revision"]:
+                return jsonify(error="其他页面已更新本批记录，请刷新后重试。"), 409
+            if job["_scenario"] == "cancel-failed" and not job["_failed_once"]:
+                job["_failed_once"] = True
+                return jsonify(error="模拟停止连接失败，请重试。"), 503
+            if job["status"] not in {"queued", "importing", "matching", "ai_review", "exporting", "cancelling", "cancelled"}:
+                return jsonify(error="本批已经结束，无需停止。"), 400
+            if job["status"] != "cancelled":
+                job.update(status="cancelling", cancel_requested=True)
+                job["revision"] += 1
+            return jsonify(snapshot(job))
+        if job["status"] in {"cancelling", "cancelled"}:
+            return jsonify(error="本批已请求停止，不能继续操作。"), 409
         if job["_scenario"] in {"conflict", "save-failed"} and not job["_failed_once"]:
             job["_failed_once"] = True
             if job["_scenario"] == "conflict":
@@ -260,10 +286,56 @@ def create_fixture_app(static_dir: Path, host: str = "127.0.0.1") -> Flask:
     @app.post("/api/jobs")
     @app.post("/api/jobs/upload")
     def create():
+        request_id = request.headers.get("X-HSD-Upload-ID")
+        if request_id and request_id in uploads:
+            claim = uploads[request_id]
+            if claim["owner"] != session.get("fixture_owner"):
+                return jsonify(error="不存在此合成上传"), 404
+            if claim["state"] == "completed":
+                return jsonify(id=claim["job_id"], reused=True)
+            return jsonify(error="本次上传仍待确认或已经停止。"), 409
         identifier = "synthetic-" + secrets.token_hex(6)
         session["job"] = identifier
         jobs[identifier] = make_job("mixed", 20, identifier)
+        if request_id:
+            uploads[request_id] = {"owner": session.get("fixture_owner"), "state": "completed", "job_id": identifier, "polls": 2}
+            if session.get("scenario") == "upload-pending":
+                uploads[request_id]["state"] = "pending"
+            if session.get("scenario") in {"upload-lost", "upload-pending"}:
+                return jsonify(error="模拟上传已受理但回包失败，请核对状态。"), 503
         return jsonify(id=identifier)
+
+    @app.get("/api/jobs/upload-status/<request_id>")
+    def upload_status(request_id):
+        claim = uploads.get(request_id)
+        if not claim:
+            return jsonify(state="missing")
+        if claim["owner"] != session.get("fixture_owner"):
+            return jsonify(error="不存在此合成上传"), 404
+        if claim["state"] == "pending":
+            if claim["polls"]:
+                claim["polls"] -= 1
+            else:
+                claim["state"] = "cancelled" if claim.get("cancellation_requested") else "completed"
+        result = {key: claim[key] for key in ("state", "job_id", "cancellation_requested") if key in claim}
+        return jsonify(result)
+
+    @app.post("/api/jobs/upload-status/<request_id>/cancel")
+    def cancel_upload(request_id):
+        claim = uploads.get(request_id)
+        if not claim:
+            uploads[request_id] = {"owner": session.get("fixture_owner"), "state": "cancelled"}
+            return jsonify(state="cancelled")
+        if claim["owner"] != session.get("fixture_owner"):
+            return jsonify(error="不存在此合成上传"), 404
+        if claim["state"] == "pending":
+            claim["cancellation_requested"] = True
+        elif claim["state"] == "completed":
+            job = jobs[claim["job_id"]]
+            if job["status"] in {"queued", "importing", "matching", "ai_review", "exporting"}:
+                job.update(status="cancelling", cancel_requested=True)
+                job["revision"] += 1
+        return jsonify({key: claim[key] for key in ("state", "job_id", "cancellation_requested") if key in claim})
 
     @app.get("/api/jobs/<identifier>/image/<kind>/<image_id>")
     def image(identifier, kind, image_id):
@@ -278,11 +350,22 @@ def create_fixture_app(static_dir: Path, host: str = "127.0.0.1") -> Flask:
         response.headers["Cache-Control"] = "private, max-age=86400, immutable"
         return response
 
+    @app.get("/api/jobs/<identifier>/download-status")
+    def download_status(identifier):
+        job = current_job(identifier)
+        if not job or job["status"] != "done":
+            return jsonify(error="合成测试结果未完成"), 400
+        return jsonify(ready=True, download_url=f"/api/jobs/{identifier}/download")
+
     @app.get("/api/jobs/<identifier>/download")
     def download(identifier):
         job = current_job(identifier)
         if not job or job["status"] != "done":
             return jsonify(error="合成测试结果未完成"), 400
+        if job["_scenario"] == "download-failed":
+            return jsonify(error="模拟下载校验失败，请重新处理。"), 400
+        if job["_scenario"] == "download-auth":
+            return jsonify(error="模拟登录已失效，请先输入员工访问码。"), 401
         output = io.BytesIO()
         with zipfile.ZipFile(output, "w") as archive:
             archive.writestr("界面测试数据.txt", "此文件仅用于UI下载展示，不含真实业务数据，不是AI资格验证。")

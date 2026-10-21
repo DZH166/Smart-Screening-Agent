@@ -150,3 +150,30 @@ def test_unexpected_failure_after_review_entry_keeps_unknown_charge():
     assert not caught.value.attempt_history[0].get("not_called")
     assert manager.ai_key_pool.snapshot()["usage"]["requests"] == 1
     assert "private provider" not in str(caught.value) + json.dumps(caught.value.attempt_history)
+
+
+def test_cancel_during_client_factory_is_checked_before_any_dispatch():
+    manager, client, openers, _ = manager_and_client([[response()]])
+    manager.jobs = {'job1': {}}
+    original = client.factory
+    def factory(key):
+        manager.jobs['job1']['cancel_requested'] = True
+        return original(key)
+    client.factory = factory
+    with pytest.raises(ReviewError) as caught:
+        client.review(CONTENT, row_id='r2')
+    assert caught.value.code == 'stale_case'
+    assert caught.value.usage['requests'] == 0
+    assert all(not opener.calls for opener in openers.values())
+
+
+def test_cancel_during_retry_wait_keeps_first_attempt_but_prevents_second():
+    manager, client, openers, _ = manager_and_client([[http_error(503), response()]])
+    manager.jobs = {'job1': {}}
+    client.sleep = lambda _: manager.jobs['job1'].update(cancel_requested=True)
+    with pytest.raises(ReviewError) as caught:
+        client.review(CONTENT, row_id='r2')
+    assert caught.value.code == 'stale_case'
+    assert caught.value.usage['requests'] == 1
+    assert caught.value.usage['unknown_usage_requests'] == 1
+    assert len(next(iter(openers.values())).calls) == 1

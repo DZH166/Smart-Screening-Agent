@@ -31,6 +31,8 @@ from .matching_verification import (affine_coverage, phase_coverage, periodic_ex
                                     pixel_metrics, pixel_rms, coherent_difference,
                                     _pixel_error, _channel_max)
 from .archive_io import member_blocks
+from .cancellation import (check as cancellation_check, TaskCancelled,
+                           current_check, scope as cancellation_scope)
 
 MAX_FILES = 500
 MAX_ENTRIES = 10000
@@ -90,6 +92,7 @@ def _source_digest(stream) -> tuple[str, bytes]:
     prefix = stream.read(1024)
     digest = hashlib.sha256(prefix)
     while block := stream.read(IO_CHUNK_BYTES):
+        cancellation_check()
         digest.update(block)
     return digest.hexdigest(), prefix
 
@@ -142,6 +145,7 @@ def _collect(source: Path, directory: Path, warnings: list[str]) -> list[dict]:
                     dirs.remove(name)
                     warnings.append(f'已跳过链接目录：{p.relative_to(source)}')
             for name in names:
+                cancellation_check()
                 count += 1
                 if count > MAX_ENTRIES:
                     raise ValueError('文件夹内文件过多，请把本批次 AI 文件单独放入一个文件夹。')
@@ -165,6 +169,7 @@ def _collect(source: Path, directory: Path, warnings: list[str]) -> list[dict]:
                 raise ValueError('压缩包条目过多，请仅打包本批次 AI 文件。')
             entries, total = [], 0
             for info in infos:
+                cancellation_check()
                 name = _zip_name(info)
                 _safe_zip_name(name)
                 mode = info.external_attr >> 16
@@ -1072,11 +1077,18 @@ def _ownership_supported(result: dict) -> bool:
 
 
 def _texture_results(query, identities, file_images, precision, cache, executor=None):
+    parent_check = current_check()
     def evaluate(identity):
-        try:
-            return identity, _texture(query, file_images[identity], precision=precision, cache=cache)
-        except Exception:
-            return identity, None
+        with cancellation_scope(parent_check):
+            cancellation_check()
+            try:
+                result = _texture(query, file_images[identity], precision=precision, cache=cache)
+                cancellation_check()
+                return identity, result
+            except TaskCancelled:
+                raise
+            except Exception:
+                return identity, None
     # Both map variants preserve original candidate order, including failures.
     # No worker touches geometry RNG, row ownership or another worker's best.
     return (executor.map(evaluate, identities) if executor is not None
@@ -1105,6 +1117,7 @@ def _match_appearances_serial(rows, files, row_images, file_images, progress=Non
     readable = [f for f in files if f['id'] in file_images]
     duplicate_previews = Counter(a.digest for a in file_images.values())
     for i, row in enumerate(rows, 1):
+        cancellation_check()
         if progress:
             progress(f'正在比对第 {i} / {len(rows)} 张表格图片', i, len(rows))
         base = {'row_id': row['id'], 'status': 'unmatched', 'file_id': None,
@@ -1142,6 +1155,7 @@ def _match_appearances_serial(rows, files, row_images, file_images, progress=Non
                 # a partial inspection into a complete competition proof.
                 proposed_result = None
         for file in readable:
+            cancellation_check()
             identity = file['id']
             candidate = file_images[identity]
             histograms[identity] = float(cv2.compareHist(query.histogram, candidate.histogram,
@@ -1338,6 +1352,7 @@ def _bound_appearance(path: str, detector, bindings: dict[str, str]) -> _Appeara
 
 def _verify_prepared_bindings(prepared: PreparedMatching) -> None:
     for source, expected in prepared.file_bindings.items():
+        cancellation_check()
         path = Path(source)
         try:
             with _source_reader(path) as (stream, _):
@@ -1369,17 +1384,24 @@ def prepare_matching(source_path: str, rows: list[dict], work_dir: str,
     if not files:
         warnings.append('所选位置没有 .ai 文件，请确认文件夹或压缩包内容。')
     detector = cv2.SIFT_create(nfeatures=1600, contrastThreshold=.025)
-    file_images, row_images, file_bindings = {}, {}, {}
+    from .appearance_cache import DiskAppearances, AppearanceStorageError
+    file_bindings = {}
+    file_images = DiskAppearances(session / 'file_appearances', file_bindings)
+    row_images = DiskAppearances(session / 'row_appearances', file_bindings)
     for i, record in enumerate(files, 1):
+        cancellation_check()
         if progress:
             progress(f'正在生成 AI 预览 {i} / {len(files)}', i, len(files))
         try:
             _render(record, previews)
             file_images[record['id']] = _bound_appearance(record['preview_path'], detector,
                                                         file_bindings)
+        except (TaskCancelled, AppearanceStorageError):
+            raise
         except Exception as exc:
             record['issue'] = str(exc) if isinstance(exc, ValueError) else 'AI 文件损坏或预览无法读取，请单独检查。'
     for row in rows:
+        cancellation_check()
         if not row.get('image_path') or row.get('issue'):
             continue
         try:
@@ -1413,7 +1435,8 @@ def match_prepared(prepared: PreparedMatching, progress=None, *, proposals=None,
                                 texture_workers=texture_workers, proposals=proposals)
     if verify_sources:
         _verify_prepared_bindings(prepared)
-    return {'files': prepared.files, 'matches': matches, 'warnings': list(prepared.warnings)}
+    return {'files': prepared.files, 'matches': matches, 'warnings': list(prepared.warnings),
+            'comparison_bindings': dict(prepared.file_bindings)}
 
 
 def scan_and_match(source_path: str, rows: list[dict], work_dir: str, progress=None, *,

@@ -201,7 +201,7 @@ async function main(){
   assert.ok(a.node('export-button').disabled,'no exportable match must keep summary action disabled');
   assert.ok(a.node('undo-button').disabled,'no saved operation must keep undo disabled');
   a.ui.state.manualOpen=true;a.ui.state.manualQuery='候选';a.ui.state.candidatesOpen=true;
-  let release;a.setFetch(()=>new Promise(resolve=>{release=resolve;}));
+  let release;a.setFetch((_url,options)=>options.method==='POST'?new Promise(resolve=>{release=resolve;}):Promise.resolve(response({error:'模拟读取失败'},503)));
   const saving=a.ui.resolveRow('g0');await flush();
   assert.equal(a.ui.state.resolving,true);assert.equal(a.ui.state.job.rows[0].status,'review');
   await a.ui.resolveRow('g0');assert.equal(a.requests.length,1,'double submit must not create two requests');
@@ -223,15 +223,22 @@ async function main(){
   a.setFetch(async(_url,options)=>{conflictCalls++;return options.method==='POST'?response({error:'其他页面已更新，请核对'},409):response(conflict);});
   await a.ui.resolveRow('f0');assert.equal(conflictCalls,2);assert.equal(a.ui.state.job.revision,8);assert.equal(a.ui.state.job.rows[0].status,'review');assert.match(a.node('notice-text').textContent,/其他页面已更新/);
 
+  // A successful server save with a lost response is re-read before retrying.
+  const committed=job();committed.revision=9;committed.can_undo=true;committed.rows[0].status='confirmed';committed.rows[0].file_id='f0';
+  let reconciliationReads=0;
+  a.setFetch(async(_url,options)=>{if(options.method==='POST')throw new TypeError('模拟回包丢失');reconciliationReads++;return response(committed);});
+  await a.ui.resolveRow('f0');assert.equal(reconciliationReads,1);assert.equal(a.ui.state.job.revision,9);assert.equal(a.ui.state.job.rows[0].status,'confirmed');
+
   // Polling must stop after a terminal state, and must not schedule a new poll after stop.
   const p=harness();p.ui.acceptJob({...job(),status:'matching'});p.setFetch(async()=>response({...job(),status:'ready'}));
   await p.ui.pollJob();assert.equal(p.requests.length,1);assert.equal(p.timers.size,0);
   p.ui.state.stopped=true;p.ui.schedulePoll(100);assert.equal(p.timers.size,0);await p.ui.pollJob();assert.equal(p.requests.length,1);
   for(const status of [401,403,404]){
     const denied=harness();denied.ui.acceptJob({...job(),status:'matching'});denied.ui.schedulePoll(1000);
-    denied.setFetch(async()=>response({error:'模拟会话或任务失效'},status));await denied.ui.pollJob();
-    assert.equal(denied.ui.state.job,null);assert.equal(denied.timers.size,0);assert.equal(denied.requests.length,1);
-    assert.ok(!denied.node('import-view').classList.contains('hidden'));assert.match(denied.node('notice-text').textContent,status===404?/任务已不存在/:/会话已失效/);
+    denied.setFetch(async()=>response({error:status===403?'请求来源不匹配。':'模拟会话或任务失效'},status));await denied.ui.pollJob();
+    if(status===401){assert.equal(denied.ui.state.job.id,'synthetic-job');assert.equal(denied.ui.state.authExpired,true);assert.equal(denied.node('notice-action').textContent,'重新登录');}
+    else{assert.equal(denied.ui.state.job,null);assert.ok(!denied.node('import-view').classList.contains('hidden'));assert.match(denied.node('notice-text').textContent,status===404?/任务已不存在/:/请求来源不匹配/);}
+    assert.equal(denied.timers.size,0);assert.equal(denied.requests.length,1);
     await denied.ui.pollJob();assert.equal(denied.requests.length,1,'invalid session must not continue polling');
   }
 

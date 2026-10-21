@@ -23,7 +23,7 @@ from pathlib import Path
 from .service import BUSY
 
 _UUID = re.compile(r"[0-9a-f]{32}")
-_FINISHED = {"ready", "done", "error"}
+_FINISHED = {"ready", "done", "error", "cancelled"}
 _STATES = BUSY | _FINISHED | {"orphaned"}
 _FIELDS = {"schema", "job_id", "batch_id", "registered_at", "observed_at",
            "settled_at", "expires_at", "retention_seconds", "status", "revision",
@@ -78,7 +78,12 @@ class CloudRetention:
         self._event = threading.Event()
         self._thread = None
         self._sweep_lock = threading.Lock()
+        self._expiring = set()
+        manager._expiring_tasks = self._expiring
         self._load()
+        persistence = getattr(manager, "task_persistence", None)
+        if persistence is not None:
+            persistence.retention = self
 
     @staticmethod
     def _safe_directory(path):
@@ -298,9 +303,8 @@ class CloudRetention:
                 identifiers = list(self._records)
             for identifier in identifiers:
                 try:
-                    # Registration, owner checks, edits, asset leases and expiry
-                    # use this same lock. Remove the in-memory task before I/O,
-                    # preventing later requests acquiring a new asset lease.
+                    # Reserve this task while locked, then inspect its tree
+                    # without holding up other employees' status/preview calls.
                     with self.manager.lock:
                         payload = self._records[identifier]
                         if self._read(identifier) != payload:
@@ -314,10 +318,19 @@ class CloudRetention:
                                        "settled_at": settled, "expires_at": settled + self.retention_seconds}
                             self._save(payload)
                         if (not delete or payload["status"] in BUSY or payload["expires_at"] > now
-                                or self.job_leases.get(identifier, 0)
-                                or self.manager._active_operations or self.manager._inflight_futures):
+                                or self.job_leases.get(identifier, 0) or self._has_work(identifier)):
                             continue
-                        targets = self._targets(payload)
+                        self._expiring.add(identifier)
+                        reserved_job = job
+                        reserved = (payload["status"], payload["revision"], payload["operation_token"])
+                    targets = self._targets(payload)
+                    with self.manager.lock:
+                        job = self.manager.jobs.get(identifier)
+                        if job is not reserved_job or self.job_leases.get(identifier, 0) or self._has_work(identifier):
+                            continue
+                        if job is not None and (job.get("status"), job.get("revision", 0),
+                                                job.get("_operation_token") or "") != reserved:
+                            continue
                         manifest = self._path(identifier)
                         if job is not None:
                             self.manager.jobs.pop(identifier, None)
@@ -328,13 +341,32 @@ class CloudRetention:
                     for target in targets:
                         if target.exists():
                             shutil.rmtree(target)
+                    persistence = getattr(self.manager, "task_persistence", None)
+                    if persistence is not None:
+                        persistence.forget_job(identifier)
                     manifest.unlink()
                     with self.manager.lock:
                         self._records.pop(identifier, None)
                     removed.append(identifier)
                 except (OSError, ValueError, TypeError, OverflowError):
                     _LOG.warning("Cloud task expiry was deferred because its files or state could not be verified")
+                finally:
+                    with self.manager.lock:
+                        self._expiring.discard(identifier)
+            if delete:
+                persistence = getattr(self.manager, "task_persistence", None)
+                if persistence is not None:
+                    persistence.sweep_uploads(now=now)
         return removed
+
+    def _has_work(self, identifier):
+        checker = getattr(self.manager, "task_has_work", None)
+        if checker is not None:
+            return checker(identifier)
+        # Older standalone managers/fixtures remain conservative. Production
+        # JobManager tracks each task rather than requiring the entire service
+        # to be idle before an unrelated old batch can expire.
+        return bool(self.manager._active_operations or self.manager._inflight_futures)
 
     def start(self):
         if self._thread is not None:

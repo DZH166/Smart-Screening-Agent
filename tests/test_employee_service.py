@@ -315,7 +315,8 @@ def test_employee_ai_retry_queues_but_local_retry_keeps_busy_guard(tmp_path, mon
         assert manager.snapshot("sample")["status"] == "queued"
         assert manager.snapshot("sample")["queue_position"] == 1
         assert manager.snapshot("sample")["queue_stage"] == "ai"
-        assert calls[0][0] == manager._rerun_ai
+        assert calls[0][0] == manager._run_task
+        assert calls[0][1:] == (manager._rerun_ai, "sample")
     finally:
         manager.close()
 

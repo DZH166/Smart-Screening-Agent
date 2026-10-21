@@ -19,10 +19,11 @@
       </div>
     </header>
     <div id="admin-message" class="notice hidden" role="status" aria-live="polite"></div>
+    <a id="admin-login" class="button primary login-link hidden" href="/admin/login">重新登录</a>
     <main>
       <section class="panel settings-panel" aria-labelledby="settings-heading">
         <div class="section-heading">
-          <h2 id="settings-heading">AI 开关</h2>
+          <h2 id="settings-heading">AI 处理</h2>
           <form id="enable-form">
             <label class="enable-control"><input id="ai-enabled" type="checkbox" disabled><span>启用 DeepSeek</span></label>
             <button id="enable-save" class="button secondary" type="submit" disabled>保存</button>
@@ -37,18 +38,22 @@
         </div></details>
       </section>
       <section class="panel keys-panel" aria-labelledby="keys-heading">
-        <div class="section-heading"><h2 id="keys-heading">API Key <span id="key-count" class="count"></span></h2></div>
-        <form id="key-add-form" class="add-form" autocomplete="off">
-          <label for="key-batch">添加 Key</label>
-          <div class="add-input"><textarea id="key-batch" rows="2" autocomplete="off" spellcheck="false" autocapitalize="off" aria-describedby="batch-help" placeholder="每行粘贴一个 API Key" disabled></textarea><button id="key-reveal" class="button quiet" type="button" aria-pressed="false">显示</button><button id="key-add" class="button primary" type="submit" disabled>添加 Key</button></div>
-          <p id="batch-help" class="muted">每行一个，最多 100 个；提交即清空。输入框默认遮罩，点“显示”可查看。</p>
-        </form>
+        <div class="section-heading"><div><h2 id="keys-heading">API Key <span id="key-count" class="count"></span></h2><p class="muted">员工共用这些 Key，无需在各自电脑配置。</p></div></div>
         <div id="key-list" class="key-list" aria-live="polite"><p class="empty">正在读取 Key…</p></div>
+        <form id="key-add-form" class="add-form" autocomplete="off">
+          <label for="key-batch">批量添加</label>
+          <div class="add-input"><textarea id="key-batch" rows="2" autocomplete="off" spellcheck="false" autocapitalize="off" aria-describedby="batch-help" placeholder="每行粘贴一个 API Key" disabled></textarea><button id="key-reveal" class="button quiet" type="button" aria-pressed="false">显示</button><button id="key-add" class="button primary" type="submit" disabled>添加 Key</button></div>
+          <p id="batch-help" class="muted">每行一个，最多 100 个；提交即清空。默认遮罩，可按需显示。</p>
+        </form>
       </section>
       <section class="panel ledger-panel" aria-labelledby="ledger-heading">
-        <div class="section-heading"><h2 id="ledger-heading">Key 账本</h2><p id="ledger-state">正在读取…</p></div>
-        <p class="ledger-warning">默认遮罩，点“显示”才展开；截图或录屏会暴露密钥。</p>
-        <div id="ledger-list" class="ledger-list"><p class="empty">暂未添加 Key。</p></div>
+        <details id="ledger-details"><summary><span id="ledger-heading">查看或复制 Key</span><span class="muted">Key 账本</span></summary>
+          <div class="ledger-body">
+            <div class="ledger-tools"><p class="ledger-warning">仅在展开时读取。默认遮罩，显示后请避免截图或录屏。</p><button id="ledger-refresh" class="button quiet" type="button">重新读取</button></div>
+            <p id="ledger-state" class="muted" role="status" aria-live="polite"></p>
+            <div id="ledger-list" class="ledger-list"></div>
+          </div>
+        </details>
       </section>
     </main>
   </div>

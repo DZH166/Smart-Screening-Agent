@@ -265,6 +265,12 @@ main {
 .notice>span {
   min-width:0
 }
+.notice #notice-action {flex-shrink:0;white-space:nowrap}
+.processing-controls {display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:20px}
+.processing-controls .processing-footnote {margin:0}
+#stop-upload-button {margin-top:8px}
+#cancelled-view .subtitle {margin:16px 0 24px}
+@media(max-width:600px){.processing-controls{align-items:flex-start;flex-direction:column}.notice{flex-wrap:wrap}}
 summary {
   cursor:pointer;
   color:#405978;

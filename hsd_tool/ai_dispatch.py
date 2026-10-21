@@ -44,6 +44,12 @@ class ManagedReviewClient:
         return error
 
     def review(self, content, *, row_id):
+        def stopped():
+            job = getattr(self.manager, "jobs", {}).get(self.job_id, {})
+            return bool(job.get("cancel_requested"))
+
+        if stopped():
+            raise ReviewError("stale_case", "本批已请求停止，本项未发送。")
         runtime = self.manager.ai_settings.runtime()
         # Only a gateway deployment redirects transport; direct keys keep the
         # official origin, and factories that ignore the option stay compatible.
@@ -74,6 +80,8 @@ class ManagedReviewClient:
         last_error = None
         history = []
         for attempt in (1, 2):
+            if stopped():
+                raise self._error("stale_case", "本批已请求停止，不再发送请求。", usage, history)
             try:
                 omit = set(excluded)
                 if retry_key is not None:
@@ -99,6 +107,8 @@ class ManagedReviewClient:
                 client.attempts = 1
                 if not self.manager.ai_key_pool.validate_credential(key_id, credential["api_key"]):
                     raise ReviewError("pool_unavailable", "Key 已停用或正在冷却，本项未发送请求。")
+                if stopped():
+                    raise ReviewError("stale_case", "本批已请求停止，本项未发送请求。")
                 dispatched = True
                 result = client.review(content)
             except ReviewError as error:

@@ -4,7 +4,9 @@
   const $ = (id) => document.getElementById(id);
   const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const state = {settings:null, pool:{keys:[]}, loading:false, saving:false, refreshing:false, conflict:false,
-    keysSignature:'', timer:null, polling:false, stopped:false, enableDirty:false};
+    keysSignature:'', timer:null, polling:false, stopped:false, enableDirty:false, locked:false,
+    epoch:0, ledgerEpoch:0, ledgerLoading:false, loggingOut:false, suspended:false, authLost:false};
+  const controllers = new Set();
   const statuses = {ready:['可用','ok'],available:['可用','ok'],active:['调用中','ok'],busy:['调用中','ok'],
     cooldown:['冷却中','warning'],rate_limited:['限流冷却中','warning'],disabled:['已停用',''],invalid:['密钥不可用','error'],
     service_disabled:['AI 已关闭',''],paused_authentication:['认证失败，已暂停','error'],paused_insufficient_balance:['余额不足，已暂停','error'],
@@ -16,14 +18,48 @@
     $('admin-message').classList.toggle('error', error);
   }
 
-  async function request(path, payload) {
+  function clearLedger() {
+    state.ledgerEpoch += 1; state.ledgerLoading = false;
+    // Remove data-value attributes as well as visible text; masking alone retains secrets.
+    $('ledger-list').replaceChildren();
+    $('ledger-state').textContent = '';
+  }
+
+  function clearSecrets() {
+    clearLedger(); $('ledger-details').open = false;
+    $('key-batch').value = ''; $('key-batch').classList.remove('key-plain');
+    $('key-reveal').textContent = '显示'; $('key-reveal').setAttribute('aria-pressed','false');
+  }
+
+  function lockPage(text, authLost = true) {
+    state.locked = true; state.stopped = true; state.epoch += 1;
+    state.loading = false; state.saving = false; state.refreshing = false; state.polling = false;
+    state.authLost = state.authLost || authLost;
+    stopPolling(); clearSecrets();
+    controllers.forEach((controller)=>controller.abort());
+    $('admin-login').classList.toggle('hidden', !authLost);
+    if (text) message(text,true);
+    controls();
+  }
+
+  async function request(path, payload, allowLocked = false) {
+    if (state.locked && !allowLocked) { const error = new Error('请重新登录。'); error.obsolete = true; throw error; }
+    const epoch = state.epoch;
     const controller = new AbortController();
+    controllers.add(controller);
     const timeout = setTimeout(() => controller.abort(), 20000);
     try {
       const response = await fetch(path, {method:payload === undefined ? 'GET' : 'POST',
-        headers:payload === undefined ? {} : {'Content-Type':'application/json','X-HSD-Token':window.HSD_TOKEN || ''},
+        headers:{'X-HSD-Token':window.HSD_TOKEN || '',...(payload === undefined ? {} : {'Content-Type':'application/json'})},
         body:payload === undefined ? undefined : JSON.stringify(payload),cache:'no-store',signal:controller.signal});
+      if (epoch !== state.epoch) { const error = new Error('页面状态已变化。'); error.obsolete = true; throw error; }
+      if (response.status === 401 || response.status === 403) {
+        const text = response.status === 401 ? '登录已过期，请重新登录。' : '管理员权限或页面凭证已失效，请重新登录。';
+        lockPage(text);
+        const error = new Error(text); error.status = response.status; error.obsolete = true; throw error;
+      }
       const result = await response.json();
+      if (epoch !== state.epoch) { const error = new Error('页面状态已变化。'); error.obsolete = true; throw error; }
       if (!response.ok) {
         const error = new Error(result.error || '管理服务暂不可用，请稍后重试。');
         error.status = response.status;
@@ -31,10 +67,12 @@
       }
       return result;
     } catch (error) {
+      if (epoch !== state.epoch) error.obsolete = true;
+      if (error.obsolete) throw error;
       if (error.name === 'AbortError') throw new Error('请求超时，请刷新设置确认结果。');
       if (error instanceof TypeError) throw new Error('暂时无法连接主机工具，请稍后重试。');
       throw error;
-    } finally { clearTimeout(timeout); }
+    } finally { clearTimeout(timeout); controllers.delete(controller); }
   }
 
   function isEnvironment(key) { return /^(environment|env)$/i.test(String(key.source || '')); }
@@ -58,9 +96,12 @@
   }
 
   function controls() {
-    const locked = state.loading || state.saving || !state.settings || state.conflict;
-    ['ai-enabled','enable-save','key-batch','key-add'].forEach((id) => $(id).disabled = locked);
-    $('admin-refresh').disabled = state.loading || state.saving || state.refreshing;
+    const locked = state.locked || state.loading || state.saving || !state.settings || state.conflict;
+    ['ai-enabled','enable-save','key-batch','key-add','key-reveal'].forEach((id) => $(id).disabled = locked);
+    $('admin-refresh').disabled = state.locked || state.loading || state.saving || state.refreshing;
+    $('admin-logout').disabled = state.loggingOut;
+    $('admin-logout').textContent = state.loggingOut ? '正在退出…' : '退出登录';
+    $('ledger-refresh').disabled = state.locked || state.ledgerLoading;
     $('admin-refresh').textContent = state.refreshing ? '刷新中…' : '刷新设置';
     $('key-add').textContent = state.saving ? '正在保存…' : '添加 Key';
     $('key-list').querySelectorAll('button,input').forEach((node) => node.disabled = locked);
@@ -91,7 +132,7 @@
   function applySettings(settings) {
     state.settings = settings;
     if (!state.enableDirty) $('ai-enabled').checked = settings.enabled === true;
-    $('settings-state').textContent = !settings.enabled ? '已关闭 AI，使用本机匹配。' : settings.configured ? '员工共用主机配置，无需填写 Key。' : '请添加并启用 Key，才能使用 AI。';
+    $('settings-state').textContent = !settings.enabled ? '已关闭 AI，使用本机匹配。' : settings.configured ? '已启用，导入后自动运行。' : '请添加并启用 Key，才能使用 AI。';
     $('qualification-state').textContent = settings.mode === 'validated' ? 'AI 二次复核已进入经验证模式：仅符合全部条件的结果可自动通过，其余仍需人工确认。' : 'AI 二次复核尚未取得条件自动通过资格，复核建议仍需人工确认。AI 查找到的候选只有通过本机独立核验，才能按本机规则自动通过；增加 Key 不会放宽判定。';
     $('persistence-state').textContent = settings.key_persistence === 'windows_dpapi' ? '主机使用当前 Windows 用户的 DPAPI 加密保存密钥。' : settings.key_persistence === 'linux_aesgcm' ? '服务器使用独立主密钥加密保存 API Key。' : '当前环境只在本次服务运行期间保留密钥，重启后需重新填写。';
     $('storage-warning').textContent = settings.storage_warning || '';
@@ -99,7 +140,8 @@
   }
 
   async function refreshOverview(manual = false) {
-    if (state.refreshing || state.loading || state.saving) return;
+    if (state.locked || state.refreshing || state.loading || state.saving) return;
+    const epoch = state.epoch;
     const revision = state.settings?.key_revision;
     const blocking = manual || !state.settings;
     state.refreshing = true; if (blocking) state.loading = true; controls();
@@ -111,20 +153,21 @@
         state.conflict = false; state.enableDirty = false; applySettings(result.settings);
       } else if (result.settings?.key_revision !== state.settings.key_revision) {
         state.conflict = true;
+        clearLedger();
         message('配置已在其他页面更新。请刷新设置，核对后再修改。',true);
         return;
       }
       state.pool = result.pool || {keys:[]}; renderKeys();
-      if (manual) { state.stopped = false; message('已读取最新设置。'); loadLedger(); }
+      if (manual) { state.stopped = false; message('已读取最新设置。'); clearLedger(); loadLedger(); }
     } catch (error) {
-      if (error.status === 403) { state.stopped = true; state.conflict = true; }
-      message(error.status === 403 ? '仅限主机管理员在本机访问。' : error.message,true);
-    } finally { state.refreshing = false; if (blocking) state.loading = false; controls(); }
+      if (!error.obsolete) message(error.message,true);
+    } finally { if (epoch === state.epoch) { state.refreshing = false; if (blocking) state.loading = false; } controls(); }
   }
 
   async function mutateKeys(change) {
-    if (state.saving || state.loading || state.conflict || !state.settings) return;
-    state.saving = true; controls(); message('');
+    if (state.locked || state.saving || state.loading || state.conflict || !state.settings) return;
+    const epoch = state.epoch;
+    state.saving = true; clearLedger(); controls(); message('');
     const payload = {...change,expected_revision:state.settings.key_revision};
     try {
       const result = await request('/api/admin/keys',payload);
@@ -132,12 +175,13 @@
       message('已保存 Key，接口将在处理任务时验证。');
       loadLedger();
     } catch (error) {
+      if (error.obsolete) return;
       if (error.status === 409) { state.conflict = true; message('其他页面已修改密钥配置。请刷新设置，核对后再修改；本次未保存。',true); }
       else message(error.message || '配置未保存，请稍后重试。',true);
     } finally {
       for (const key of payload.add || []) delete key.api_key;
-      $('key-batch').value = '';
-      state.saving = false; controls();
+      if (epoch === state.epoch) { $('key-batch').value = ''; state.saving = false; }
+      controls();
     }
   }
 
@@ -160,7 +204,8 @@
 
   async function saveEnabled(event) {
     event.preventDefault();
-    if (state.saving || state.loading || !state.settings || state.conflict) return;
+    if (state.locked || state.saving || state.loading || !state.settings || state.conflict) return;
+    const epoch = state.epoch;
     const enabled = $('ai-enabled').checked;
     let saved = false;
     state.saving = true; controls(); message('');
@@ -174,6 +219,7 @@
       saved = true; message('AI 开关已保存。');
     }
     catch (error) {
+      if (error.obsolete) return;
       if (error.status === 409) {
         state.conflict = true; state.enableDirty = true;
         message((error.message || '设置已在其他页面更新。') + ' 本次未保存，请点击“刷新设置”核对。',true);
@@ -182,13 +228,13 @@
         message(error.message || '设置结果未确认，请刷新设置后重试。',true);
       }
     }
-    finally { state.saving = false; controls(); }
+    finally { if (epoch === state.epoch) state.saving = false; controls(); }
     if (saved) await refreshOverview(false);
   }
 
   function keyAction(event) {
     const button = event.target.closest('[data-action]'), card = button?.closest('[data-key-id]');
-    if (!button || !card || state.saving || state.loading || state.conflict) return;
+    if (!button || !card || state.locked || state.saving || state.loading || state.conflict) return;
     const key = currentKeys().find((item)=>item.id === card.dataset.keyId);
     if (!key) return;
     const action = button.dataset.action;
@@ -217,23 +263,24 @@
   }
 
   async function loadLedger() {
+    if (state.locked || !$('ledger-details').open || state.ledgerLoading) return;
     const stateLine = $('ledger-state'), list = $('ledger-list');
+    clearLedger();
+    const version = state.ledgerEpoch;
+    state.ledgerLoading = true; stateLine.textContent = '正在读取…'; controls();
     try {
-      const response = await fetch('/api/admin/ledger', {headers:{'X-HSD-Token':window.HSD_TOKEN}});
-      if (!response.ok) {
-        stateLine.textContent = response.status === 401 ? '登录已失效，请重新登录。' : '读取失败。';
-        return;
-      }
-      const payload = await response.json();
+      const payload = await request('/api/admin/ledger');
+      if (state.locked || version !== state.ledgerEpoch || !$('ledger-details').open) return;
       const keys = Array.isArray(payload.keys) ? payload.keys : [];
       list.innerHTML = keys.length ? keys.map(ledgerHtml).join('') : '<p class="empty">暂未添加 Key。</p>';
       stateLine.textContent = keys.length ? `${keys.length} 个` : '';
     } catch (error) {
-      stateLine.textContent = '读取失败。';
-    }
+      if (!error.obsolete && version === state.ledgerEpoch) stateLine.textContent = '读取失败，请点击“重新读取”重试。';
+    } finally { if (version === state.ledgerEpoch) { state.ledgerLoading = false; controls(); } }
   }
 
   function ledgerClick(event) {
+    if (state.locked || !$('ledger-details').open) return;
     const row = event.target.closest('[data-ledger-id]');
     const code = row?.querySelector('.ledger-key');
     if (!code) return;
@@ -246,23 +293,56 @@
     }
     if (event.target.closest('[data-copy]')) {
       const button = event.target.closest('[data-copy]');
+      if (!navigator.clipboard?.writeText) { message('当前浏览器无法复制，请显示 Key 后手动复制。',true); return; }
+      const version = state.ledgerEpoch;
       navigator.clipboard.writeText(code.dataset.value || '').then(() => {
+        if (state.locked || version !== state.ledgerEpoch) return;
         button.textContent = '已复制';
-        setTimeout(() => { button.textContent = '复制'; }, 1200);
-      }).catch(() => { button.textContent = '复制失败'; });
+        setTimeout(() => { if (version === state.ledgerEpoch) button.textContent = '复制'; }, 1200);
+      }).catch(() => { if (!state.locked && version === state.ledgerEpoch) button.textContent = '复制失败'; });
     }
+  }
+
+  async function logout() {
+    if (state.loggingOut) return;
+    state.loggingOut = true;
+    // Clear secrets immediately, but report success only after server revocation.
+    lockPage('正在退出登录…',false);
+    try {
+      const result = await request('/admin/logout',{},true);
+      if (result.ok !== true) throw new Error('退出结果未确认。');
+      window.location.replace('/admin/login');
+    } catch (error) {
+      message('退出请求未完成，本页密钥已清空。请重试“退出登录”，或重新登录确认会话状态。',true);
+      $('admin-login').classList.remove('hidden');
+    } finally { state.loggingOut = false; controls(); }
+  }
+
+  function suspend() {
+    state.suspended = true;
+    lockPage('',false);
+  }
+
+  async function resume() {
+    if (!state.suspended || state.authLost || state.loggingOut) return;
+    state.suspended = false; state.locked = false; state.stopped = false;
+    // A restored page must reauthenticate before its controls can be enabled.
+    state.settings = null; state.conflict = false; state.enableDirty = false;
+    await refreshOverview(true);
+    schedulePoll();
   }
 
   function stopPolling() { clearTimeout(state.timer); state.timer = null; }
   function schedulePoll(delay = 30000) {
     stopPolling();
-    if (!state.stopped && !document.hidden) state.timer = setTimeout(poll,delay);
+    if (!state.stopped && !state.locked && !document.hidden) state.timer = setTimeout(poll,delay);
   }
   async function poll() {
-    if (state.polling || state.stopped || document.hidden) return;
+    if (state.polling || state.stopped || state.locked || document.hidden) return;
+    const epoch = state.epoch;
     state.polling = true;
     try { await refreshOverview(false); }
-    finally { state.polling = false; schedulePoll(); }
+    finally { if (epoch === state.epoch) { state.polling = false; schedulePoll(); } }
   }
 
   async function boot() {
@@ -273,6 +353,7 @@
     $('key-list').addEventListener('click',keyAction);
     $('key-list').addEventListener('submit',renameKey);
     $('key-reveal').addEventListener('click',()=>{
+      if (state.locked) return;
       const area = $('key-batch'), button = $('key-reveal');
       const show = !area.classList.contains('key-plain');
       area.classList.toggle('key-plain', show);
@@ -281,16 +362,19 @@
       area.focus();
     });
     $('ledger-list').addEventListener('click',ledgerClick);
-    $('admin-logout').addEventListener('click',async()=>{
-      try { await fetch('/admin/logout',{method:'POST',headers:{'Content-Type':'application/json','X-HSD-Token':window.HSD_TOKEN},body:'{}'}); } catch (error) {}
-      window.location.replace('/admin/login');
+    $('ledger-details').addEventListener('toggle',()=>{
+      if ($('ledger-details').open) {
+        if (state.locked) $('ledger-details').open = false;
+        else loadLedger();
+      } else clearLedger();
     });
+    $('ledger-refresh').addEventListener('click',loadLedger);
+    $('admin-logout').addEventListener('click',logout);
     document.addEventListener('visibilitychange',()=>{ if (document.hidden) stopPolling(); else schedulePoll(0); });
-    window.addEventListener('pagehide',()=>{ state.stopped = true; stopPolling(); $('key-batch').value = ''; });
-    window.addEventListener('pageshow',()=>{ if (state.stopped) { state.stopped = false; schedulePoll(0); } });
-    window.addEventListener('beforeunload',()=>{ $('key-batch').value = ''; stopPolling(); });
+    window.addEventListener('pagehide',suspend);
+    window.addEventListener('pageshow',resume);
+    window.addEventListener('beforeunload',suspend);
     await refreshOverview(false);
-    loadLedger();
     schedulePoll();
   }
   boot().catch(()=>message('管理页面加载失败，请刷新后重试。',true));

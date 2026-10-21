@@ -81,3 +81,55 @@ def test_fixture_has_no_real_ai_and_employee_admin_calls_stay_denied():
     assert client.post("/api/ai/settings", json={"enabled": True}).status_code == 403
     assert client.get("/api/ai/usage").status_code == 403
     assert client.post(f"/api/jobs/{identifier}/open-output", json={}).status_code == 403
+
+
+def test_fixture_cancel_waits_then_settles_without_export():
+    client = fixture().test_client()
+    client.get("/?scenario=matching&delay=0")
+    identifier = client.get("/api/config").json["active_job_id"]
+    path = f"/api/jobs/{identifier}"
+    assert client.post(path + "/cancel", json={}).status_code == 409
+    stopped = client.post(path + "/cancel", json={"expected_revision": 1}).json
+    assert stopped["status"] == "cancelling" and stopped["cancel_requested"]
+    assert client.post(path + "/export", json={}).status_code == 409
+    assert client.get(path).json["status"] == "cancelling"
+    assert client.get(path).json["status"] == "cancelling"
+    assert client.get(path).json["status"] == "cancelled"
+    assert client.get(path + "/download-status").status_code == 400
+
+
+def test_fixture_download_preflight_success_then_readable_stream_failure():
+    for scenario, code in (("download-failed", 400), ("download-auth", 401)):
+        client = fixture().test_client()
+        client.get(f"/?scenario={scenario}&delay=0")
+        identifier = client.get("/api/config").json["active_job_id"]
+        path = f"/api/jobs/{identifier}"
+        assert client.get(path + "/download-status").json["ready"]
+        failed = client.get(path + "/download?frame=1")
+        assert failed.status_code == code and failed.json["error"].startswith("模拟")
+
+
+def test_fixture_upload_recovery_and_stop_remain_owned_and_idempotent():
+    app = fixture()
+    first, other = app.test_client(), app.test_client()
+    first.get("/?scenario=upload-lost&delay=0")
+    other.get("/?scenario=upload-lost&delay=0")
+    headers = {"X-HSD-Upload-ID": "00000000-0000-4000-8000-000000000001"}
+    status = "/api/jobs/upload-status/" + headers["X-HSD-Upload-ID"]
+    assert first.post("/api/jobs/upload", headers=headers).status_code == 503
+    accepted = first.get(status).json
+    assert accepted["state"] == "completed" and accepted["job_id"]
+    repeated = first.post("/api/jobs/upload", headers=headers).json
+    assert repeated["id"] == accepted["job_id"] and repeated["reused"]
+    assert other.get(status).status_code == 404
+    assert other.post(status + "/cancel", json={}).status_code == 404
+    first.get("/?scenario=upload-pending&delay=0")
+    headers["X-HSD-Upload-ID"] = "00000000-0000-4000-8000-000000000002"
+    status = "/api/jobs/upload-status/" + headers["X-HSD-Upload-ID"]
+    assert first.post("/api/jobs/upload", headers=headers).status_code == 503
+    assert first.get(status).json["state"] == "pending"
+    assert first.post(status + "/cancel", json={}).json["cancellation_requested"]
+    first.get(status)
+    assert first.get(status).json["state"] == "cancelled"
+    missing = "/api/jobs/upload-status/00000000-0000-4000-8000-000000000003"
+    assert first.post(missing + "/cancel", json={}).json["state"] == "cancelled"

@@ -18,6 +18,7 @@ from .service import JobManager
 from .uploads import EmployeeUploads, DiskBudget, UploadWriteError, MAX_UPLOAD_BYTES, MAX_WORKBOOK_BYTES, MAX_SOURCE_BYTES, disk_full
 from . import __version__
 from . import admin_auth
+from .cloud_tasks import CloudTaskStore, UploadClaims, upload_id
 
 
 class EmployeeUploadRequest(Request):
@@ -39,9 +40,22 @@ class EmployeeUploadRequest(Request):
         uploads = current_app.config["HSD_UPLOADS"]
         if not getattr(self, "_hsd_upload_directory", None):
             self._hsd_upload_directory = uploads.begin()
+            claim = getattr(g, "hsd_upload_claim", None)
+            if claim is not None:
+                current_app.config["HSD_UPLOAD_CLAIMS"].bind_directory(*claim, self._hsd_upload_directory)
             self._hsd_upload_budget = DiskBudget(self._hsd_upload_directory)
             self._hsd_upload_streams = []
         stream = uploads.open_stream(self._hsd_upload_directory, self._hsd_upload_budget)
+        claim = getattr(g, "hsd_upload_claim", None)
+        if claim is not None:
+            original_write = stream.write
+            def checked_write(data):
+                try:
+                    current_app.config["HSD_UPLOAD_CLAIMS"].ensure_active(*claim)
+                except ValueError as exc:
+                    raise UploadWriteError(str(exc)) from None
+                return original_write(data)
+            stream.write = checked_write
         self._hsd_upload_streams.append(stream)
         return stream
 
@@ -96,6 +110,10 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
     token = token or secrets.token_urlsafe(32)
     app.config["HSD_TOKEN"] = token
     app.config["HSD_MANAGER"] = manager
+    claims = CloudTaskStore(manager, cloud.origin) if cloud else UploadClaims()
+    app.config["HSD_UPLOAD_CLAIMS"] = claims
+    if cloud:
+        manager.task_persistence = claims
     app.config["HSD_INSTANCE"] = secrets.token_hex(16)
     app.config["HSD_SHUTDOWN"] = None
     runtime = {"frozen": bool(getattr(sys, "frozen", False)), "version": __version__}
@@ -198,8 +216,16 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
         if lan:
             employee_id()
         if lan and (request.view_args or {}).get("identifier"):
+            identifier = request.view_args["identifier"]
+            if cloud:
+                with manager.lock:
+                    missing = identifier not in manager.jobs
+                if missing:
+                    claims.restore(identifier, employee_id(), app.config["HSD_RETENTION"])
             with manager.lock:
-                job = manager._get(request.view_args["identifier"])
+                if identifier in getattr(manager, "_expiring_tasks", set()):
+                    raise KeyError("任务已过期，请重新上传。")
+                job = manager._get(identifier)
                 if job.get("_owner_id") != employee_id():
                     raise KeyError("找不到此任务，请在上传时使用的浏览器中打开。")
                 if cloud:
@@ -221,6 +247,13 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
                 if app.config["HSD_STOPPING"] and request.endpoint != "shutdown":
                     raise Conflict("主机正在退出，请稍后重新打开员工入口。")
         if is_upload:
+            identifier = upload_id(request.headers.get("X-HSD-Upload-ID") or secrets.token_hex(16))
+            state = claims.reserve(identifier, employee_id())
+            if state["state"] == "completed":
+                return jsonify(id=state["job_id"], reused=True)
+            if state["state"] != "reserved":
+                raise Conflict("本次上传仍在处理或已停止，请查询上传状态。")
+            g.hsd_upload_claim = (identifier, employee_id())
             request._hsd_upload_unlimited = True
             request.max_content_length = None
             request.max_form_memory_size = 512 * 1024
@@ -237,6 +270,9 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
             # Do not mask an interrupted/malformed request or follow a replaced
             # link during cleanup. No path, file contents or credentials logged.
             app.logger.warning("上传临时文件未能清理，请管理员检查磁盘空间与权限。")
+        claim = getattr(g, "hsd_upload_claim", None)
+        if claim is not None:
+            claims.finish(*claim)
 
     def release_job_lease(identifier, state):
         with manager.lock:
@@ -252,6 +288,9 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
 
     @app.after_request
     def response_headers(response):
+        if cloud and getattr(g, "hsd_recovery_token", None):
+            response.set_cookie(claims.cookie_name, g.hsd_recovery_token, max_age=30 * 86400,
+                                secure=True, httponly=True, samesite="Strict", path="/")
         state = getattr(g, "hsd_lease_state", None)
         if state is not None:
             identifier = g.hsd_job_lease
@@ -263,10 +302,13 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
         if request.endpoint != "image" or response.status_code not in {200, 304}:
             response.headers["Cache-Control"] = "no-store"
         response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
+        download_frame = request.endpoint == "download" and request.args.get("frame") == "1"
+        response.headers["X-Frame-Options"] = "SAMEORIGIN" if download_frame else "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
         # The inline token/bootstrap is the only inline script; UI does not load external resources.
         response.headers["Content-Security-Policy"] = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'"
+        if download_frame:
+            response.headers["Content-Security-Policy"] = response.headers["Content-Security-Policy"].replace("frame-ancestors 'none'", "frame-ancestors 'self'")
         return response
 
     @app.errorhandler(ValueError)
@@ -428,7 +470,20 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
         session.clear()
         session.permanent = True
         session["lan_authenticated"] = True
-        session["employee_id"] = secrets.token_hex(16)
+        if cloud:
+            recovery = request.cookies.get(claims.cookie_name)
+            try:
+                owner = claims.owner(recovery)
+            except ValueError:
+                recovery = claims.new_token()
+                owner = claims.owner(recovery)
+            g.hsd_recovery_token = recovery
+            session["employee_id"] = owner
+            retention = app.config.get("HSD_RETENTION")
+            if retention is not None and hasattr(retention, "_records"):
+                claims.restore_owner(owner, retention)
+        else:
+            session["employee_id"] = secrets.token_hex(16)
         return jsonify(ok=True)
 
     @app.post("/api/lan/logout")
@@ -541,16 +596,22 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
             directory, payload, names = uploads.receive(request.files, request.form, directory=getattr(request, "_hsd_upload_directory", None))
             input_digests = names.pop("_input_digests")
             with manager.lock:
-                options = {}
-                if cloud:
-                    def register_before_submit(job):
-                        job.update(_upload_managed=True, _upload_dir=str(directory))
+                def register_before_submit(job):
+                    job.update(_upload_managed=True, _upload_dir=str(directory),
+                               _upload_request_id=g.hsd_upload_claim[0])
+                    if cloud:
                         retention = app.config.get("HSD_RETENTION")
                         if retention is None:
                             raise ValueError("服务器暂存管理尚未就绪，请稍后重试。")
                         retention.register(job["id"])
-                    options["before_submit"] = register_before_submit
-                identifier = manager.create(payload, owner_id=employee_id(), downloadable=True, display_names=names, input_digests=input_digests, **options)
+                        claims.save_job(job)
+                    # Both LAN and cloud must commit the reservation before
+                    # CPU/AI submission. A concurrent stop can then either
+                    # prevent submission or cancel an accepted task by ID.
+                    claims.commit(*g.hsd_upload_claim, job["id"])
+                claims.ensure_active(*g.hsd_upload_claim)
+                identifier = manager.create(payload, owner_id=employee_id(), downloadable=True,
+                    display_names=names, input_digests=input_digests, before_submit=register_before_submit)
                 job = manager._get(identifier)
                 job.update(_upload_managed=True, _upload_dir=str(directory))
                 committed = True
@@ -562,6 +623,29 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
             if directory is not None and not committed:
                 uploads.discard(directory)
             request.release_upload()
+
+    @app.get("/api/jobs/upload-status/<request_id>")
+    def upload_status(request_id):
+        if not lan:
+            raise KeyError("未启用员工上传。")
+        return jsonify(claims.lookup(request_id, employee_id()))
+
+    @app.post("/api/jobs/upload-status/<request_id>/cancel")
+    def cancel_upload(request_id):
+        if not lan:
+            raise KeyError("未启用员工上传。")
+        state = claims.cancel(request_id, employee_id())
+        if state["state"] == "completed":
+            identifier = state["job_id"]
+            with manager.lock:
+                if cloud and identifier not in manager.jobs:
+                    claims.restore(identifier, employee_id(), app.config["HSD_RETENTION"])
+                job = manager._get(identifier)
+                if job.get("_owner_id") != employee_id():
+                    raise KeyError("找不到此任务。")
+            if job["status"] in {"queued", "importing", "matching", "ai_review", "exporting", "cancelling"}:
+                manager.cancel(identifier)
+        return jsonify(state)
 
     @app.get("/api/jobs/<identifier>")
     def read_job(identifier):
@@ -595,6 +679,14 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
             if result.get("last_undone_row_id"):
                 public["last_undone_row_id"] = result["last_undone_row_id"]
             return jsonify(public)
+
+    @app.post("/api/jobs/<identifier>/cancel")
+    def cancel_job(identifier):
+        payload = request.get_json()
+        with manager.job_operation(identifier):
+            check_revision(identifier, payload)
+            manager.cancel(identifier, payload.get("expected_revision"))
+        return jsonify(public_job(identifier))
 
     def check_revision(identifier, payload):
         expected = payload.get("expected_revision")
@@ -643,6 +735,13 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
                     app.config["HSD_DOWNLOAD_LEASES"].pop(identifier, None)
         response.headers["Cache-Control"] = "private, no-store"
         return response
+
+    @app.get("/api/jobs/<identifier>/download-status")
+    def download_status(identifier):
+        if not lan:
+            raise KeyError("此任务不提供浏览器下载。")
+        manager.download_asset(identifier)
+        return jsonify(ready=True, download_url=f"/api/jobs/{identifier}/download")
 
     @app.post("/api/jobs/<identifier>/open-output")
     def open_output(identifier):

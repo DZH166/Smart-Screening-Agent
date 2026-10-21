@@ -14,6 +14,7 @@ function element(id) {
       addEventListener(name,fn){(listeners[`${id}:${name}`] ||= []).push(fn);},
       querySelectorAll(selector){return selector==='[data-key-id]'?this.cards:selector==='button,input'?this.controls:[];},
       querySelector(selector){return element(`${id}:${selector}`);},focus(){sandbox.document.activeElement=this;},
+      replaceChildren(){this.innerHTML='';},setAttribute(name,value){this[name]=value;},
     };
     let html='';Object.defineProperty(node,'innerHTML',{get(){return html;},set(value){html=value;this.htmlWrites++;}});
     nodes.set(id,node);
@@ -21,17 +22,17 @@ function element(id) {
   return nodes.get(id);
 }
 const sandbox = {document:{hidden:false,activeElement:null,getElementById:element,addEventListener(name,fn){listeners[name]=fn;}},
-  window:{HSD_TOKEN:'synthetic-csrf',addEventListener(name,fn){listeners[`window:${name}`]=fn;}},AbortController,
+  window:{HSD_TOKEN:'synthetic-csrf',location:{replacements:[],replace(url){this.replacements.push(url);}},addEventListener(name,fn){listeners[`window:${name}`]=fn;}},AbortController,
   setTimeout(fn,delay){const id=nextTimer++;timers.set(id,{fn,delay});return id;},clearTimeout(id){timers.delete(id);},
   fetch:async(url,options)=>{calls.push({url,options});const result=fetchHandler?await fetchHandler(url,options):response;return {ok:result.status>=200&&result.status<300,status:result.status,json:async()=>result.body};},
 };
-vm.runInNewContext(source.replace("  boot().catch(()=>message('管理页面加载失败，请刷新后重试。',true));",'  window.testAdmin={state,keyStats,keyHtml,ledgerHtml,loadLedger,renderKeys,applySettings,refreshOverview,addKeys,saveEnabled,mutateKeys,keyAction,renameKey,stopPolling,schedulePoll,poll,boot};'),sandbox);
+vm.runInNewContext(source.replace("  boot().catch(()=>message('管理页面加载失败，请刷新后重试。',true));",'  window.testAdmin={state,keyStats,keyHtml,ledgerHtml,loadLedger,renderKeys,applySettings,refreshOverview,addKeys,saveEnabled,mutateKeys,keyAction,renameKey,stopPolling,schedulePoll,poll,logout,boot};'),sandbox);
 const ui=sandbox.window.testAdmin;
 const initial={enabled:true,configured:true,model:'synthetic-model',mode:'evaluation',key_revision:4,key_persistence:'windows_dpapi',keys:[{id:'key-a',label:'主密钥',enabled:true,source:'saved'}]};
 const stopEvent={preventDefault(){}};
 function json(value){return JSON.parse(JSON.stringify(value));}
 function ready(settings=initial,pool={keys:[]}){
-  Object.assign(ui.state,{loading:false,saving:false,refreshing:false,conflict:false,stopped:false,polling:false,enableDirty:false});
+  Object.assign(ui.state,{loading:false,saving:false,refreshing:false,conflict:false,stopped:false,polling:false,enableDirty:false,locked:false,authLost:false,suspended:false,loggingOut:false});
   ui.applySettings(json(settings));ui.state.pool=json(pool);ui.renderKeys();
 }
 function keyResponse(settings=initial,pool={keys:[]}){return {status:200,body:{settings:json(settings),pool:json(pool)}};}
@@ -51,13 +52,14 @@ async function main(){
   assert.ok(ui.keyHtml({id:'disabled',enabled:false,status:'available',requests:1}).includes('已停用'));
 
   response=keyResponse();await ui.boot();const bootRead=calls.filter(({url})=>url==='/api/admin/keys').at(-1);assert.equal(bootRead.options.method,'GET');assert.equal(timers.get(ui.state.timer).delay,30000);
+  assert.ok(!calls.some(({url})=>url==='/api/admin/ledger'),'the closed ledger must not fetch plaintext at boot');
   // The add-key box is masked by default and can be revealed on demand.
   assert.ok(!element('key-batch').classList.contains('key-plain'));
   listeners['key-reveal:click'][0]();
   assert.ok(element('key-batch').classList.contains('key-plain'));assert.equal(element('key-reveal').textContent,'隐藏');
   listeners['key-reveal:click'][0]();
   assert.ok(!element('key-batch').classList.contains('key-plain'));assert.equal(element('key-reveal').textContent,'显示');
-  assert.equal(element('settings-state').textContent,'员工共用主机配置，无需填写 Key。');assert.ok(element('qualification-state').textContent.includes('仍需人工确认'));assert.ok(element('persistence-state').textContent.includes('DPAPI'));
+  assert.equal(element('settings-state').textContent,'已启用，导入后自动运行。');assert.ok(element('qualification-state').textContent.includes('仍需人工确认'));assert.ok(element('persistence-state').textContent.includes('DPAPI'));
   ui.applySettings({...json(initial),key_persistence:'linux_aesgcm'});assert.ok(element('persistence-state').textContent.includes('服务器使用独立主密钥'));assert.ok(!element('persistence-state').textContent.includes('重启后需重新填写'));
   ui.applySettings({...json(initial),enabled:false});assert.match(element('settings-state').textContent,/已关闭 AI/);
   ui.applySettings({...json(initial),configured:false});assert.match(element('settings-state').textContent,/请添加并启用 Key/);
@@ -172,22 +174,60 @@ async function main(){
   sandbox.document.hidden=true;listeners.visibilitychange();assert.equal(ui.state.timer,null);const beforeHidden=calls.length;await ui.poll();assert.equal(calls.length,beforeHidden);
   sandbox.document.hidden=false;listeners.visibilitychange();assert.equal(timers.get(ui.state.timer).delay,0);
   const pollRead=deferred();fetchHandler=()=>pollRead.promise;const inFlight=ui.poll();const beforeSecondPoll=calls.length;await ui.poll();assert.equal(calls.length,beforeSecondPoll);pollRead.resolve(keyResponse());await inFlight;fetchHandler=null;
-  response={status:403,body:{error:'仅主机'}};await ui.poll();assert.equal(ui.state.stopped,true);assert.equal(ui.state.timer,null);assert.ok(element('admin-message').textContent.includes('仅限主机'));
-  response=keyResponse();await ui.refreshOverview(true);assert.equal(ui.state.stopped,false);assert.equal(ui.state.conflict,false);
-  element('key-batch').value=synthetic;listeners['window:pagehide']();assert.equal(element('key-batch').value,'');assert.equal(ui.state.timer,null);assert.equal(ui.state.stopped,true);const afterLeave=calls.length;await ui.poll();assert.equal(calls.length,afterLeave);
-  listeners['window:pageshow']();assert.equal(ui.state.stopped,false);assert.equal(timers.get(ui.state.timer).delay,0);
+  response={status:403,body:{error:'权限失效'}};await ui.poll();assert.equal(ui.state.stopped,true);assert.equal(ui.state.timer,null);assert.ok(element('admin-message').textContent.includes('重新登录'));assert.ok(!element('admin-message').textContent.includes('仅限主机'));
+  const expiredCalls=calls.length;response=keyResponse();await ui.refreshOverview(true);assert.equal(calls.length,expiredCalls,'expired pages cannot unlock themselves by refreshing settings');
+  await listeners['window:pageshow']();assert.equal(ui.state.locked,true,'pageshow cannot restore an expired administrator session');
+  ready();element('key-batch').value=synthetic;listeners['window:pagehide']();assert.equal(element('key-batch').value,'');assert.equal(ui.state.timer,null);assert.equal(ui.state.stopped,true);assert.equal(ui.state.locked,true);const afterLeave=calls.length;await ui.poll();assert.equal(calls.length,afterLeave);
+  const resumeRead=deferred();fetchHandler=()=>resumeRead.promise;const resuming=listeners['window:pageshow']();assert.equal(element('key-add').disabled,true,'restored pages recheck authentication before enabling edits');
+  resumeRead.resolve(keyResponse());await resuming;fetchHandler=null;assert.equal(ui.state.stopped,false);assert.equal(timers.get(ui.state.timer).delay,30000);
   element('key-batch').value=synthetic;listeners['window:beforeunload']();assert.equal(element('key-batch').value,'');assert.equal(ui.state.timer,null);
+
+  // Plaintext is only fetched on demand and is removed, including attributes, on close.
+  const secret='sk-synthetic-ledger-for-ui-only';
+  ready();response={status:200,body:{keys:[{id:'test-key',label:'测试密钥',api_key:secret}]}};
+  element('ledger-details').open=true;await ui.loadLedger();
+  assert.ok(element('ledger-list').innerHTML.includes(`data-value="${secret}"`));
+  assert.equal(calls.at(-1).options.cache,'no-store');assert.equal(calls.at(-1).options.headers['X-HSD-Token'],'synthetic-csrf');
+  element('ledger-details').open=false;listeners['ledger-details:toggle'][0]();assert.equal(element('ledger-list').innerHTML,'');
+  const closedRead=deferred();fetchHandler=()=>closedRead.promise;element('ledger-details').open=true;const closingWork=ui.loadLedger();element('ledger-details').open=false;listeners['ledger-details:toggle'][0]();
+  closedRead.resolve(response);await closingWork;fetchHandler=null;assert.equal(element('ledger-list').innerHTML,'','late plaintext cannot repopulate a closed ledger');
+
+  // Every authenticated path must lock on 401/403, clear secrets and stop reads.
+  for(const [operation,status] of [['overview',401],['ledger',403],['keys',401],['switch',403]]){
+    ready();element('ledger-details').open=true;element('ledger-list').innerHTML=`<code data-value="${secret}">${secret}</code>`;element('key-batch').value=synthetic;
+    element('key-batch').classList.add('key-plain');ui.schedulePoll();response={status,body:{error:'expired'}};
+    if(operation==='overview')await ui.refreshOverview(false);
+    if(operation==='ledger')await ui.loadLedger();
+    if(operation==='keys')await ui.mutateKeys({update:[{id:'key-a',enabled:false}]});
+    if(operation==='switch')await ui.saveEnabled(stopEvent);
+    assert.equal(element('ledger-list').innerHTML,'',operation);assert.equal(element('ledger-details').open,false);assert.equal(element('key-batch').value,'');assert.ok(!element('key-batch').classList.contains('key-plain'));
+    assert.equal(ui.state.locked,true);assert.equal(ui.state.timer,null);assert.equal(element('key-add').disabled,true);assert.equal(element('key-reveal').disabled,true);assert.ok(!element('admin-login').classList.contains('hidden'));
+    const stoppedCalls=calls.length;await ui.poll();await ui.refreshOverview(true);assert.equal(calls.length,stoppedCalls);
+  }
+
+  // A successful response arriving after navigation cannot restore any plaintext.
+  ready();element('ledger-details').open=true;const leavingRead=deferred();fetchHandler=()=>leavingRead.promise;const leavingWork=ui.loadLedger();
+  listeners['window:pagehide']();leavingRead.resolve({status:200,body:{keys:[{id:'late',api_key:secret}]}});await leavingWork;fetchHandler=null;
+  assert.equal(element('ledger-list').innerHTML,'');assert.equal(ui.state.locked,true);assert.equal(ui.state.timer,null);
+
+  // Failed logout never pretends the server revoked its session; retry is explicit.
+  ready();element('ledger-details').open=true;element('ledger-list').innerHTML=`<code data-value="${secret}">${secret}</code>`;element('key-batch').value=synthetic;
+  const redirects=sandbox.window.location.replacements.length;response={status:500,body:{error:'synthetic logout failure'}};await ui.logout();
+  assert.equal(sandbox.window.location.replacements.length,redirects);assert.ok(element('admin-message').textContent.includes('退出请求未完成'));assert.equal(element('ledger-list').innerHTML,'');assert.equal(element('key-batch').value,'');assert.equal(ui.state.locked,true);assert.equal(element('admin-logout').disabled,false);
+  const retry=deferred();fetchHandler=()=>retry.promise;const retrying=ui.logout();const beforeDuplicateLogout=calls.length;await ui.logout();assert.equal(calls.length,beforeDuplicateLogout);assert.equal(element('admin-logout').disabled,true);
+  retry.resolve({status:200,body:{ok:true}});await retrying;fetchHandler=null;assert.equal(sandbox.window.location.replacements.at(-1),'/admin/login');
 
   const html=fs.readFileSync(path.join(__dirname,'../hsd_tool/static/admin.html'),'utf8'),css=fs.readFileSync(path.join(__dirname,'../hsd_tool/static/admin.css'),'utf8');
   assert.ok(html.includes('window.HSD_TOKEN = __HSD_TOKEN__'));assert.ok(html.includes('href="/"'));assert.equal((html.match(/<section\b/g)||[]).length,3,'AI settings, Key management and the Key ledger');
   assert.ok(html.includes('同时由本机独立核验'));assert.ok(html.includes('模型建议不能解除文件硬异常'));assert.ok(html.includes('<summary>使用说明</summary>'));assert.ok(html.includes('原始 XLSX、ZIP、AI 文件和本机路径不会发送'));
+  assert.ok(html.includes('<details id="ledger-details">')&&!html.includes('<details id="ledger-details" open'),'the key ledger is closed until requested');
   assert.ok(html.includes('id="ledger-list"')&&html.includes('id="ledger-state"'),'the key ledger is present');
   const ledgerRow=ui.ledgerHtml({id:'ledger-a',label:'主密钥',api_key:'sk-ledger-visible-value'});
   assert.ok(ledgerRow.includes('data-value="sk-ledger-visible-value"'),'copy keeps the value');
   assert.ok(!/>sk-ledger-visible-value</.test(ledgerRow),'the value stays masked until revealed');
   assert.ok(ledgerRow.includes('data-reveal')&&ledgerRow.includes('data-copy'));
   for(const text of [source,html,css])assert.ok(!/debug|usage-panel|usage-cost|estimated_usd|费用|US\$|实时调试|累计用量/.test(text),'removed panels have no hidden UI or rendering code');
-  assert.ok(calls.every(({url})=>url==='/api/admin/keys'||url==='/api/admin/settings'||url==='/api/admin/ledger'),'no diagnostic or cumulative-cost request');
+  assert.ok(calls.every(({url})=>url==='/api/admin/keys'||url==='/api/admin/settings'||url==='/api/admin/ledger'||url==='/admin/logout'),'no diagnostic or cumulative-cost request');
   assert.ok(html.includes('id="key-reveal"'),'the add-key input has a reveal toggle');
   assert.ok(!/localStorage|sessionStorage|console\./.test(source),'credentials are not persisted or logged');assert.ok(css.includes('#key-batch{-webkit-text-security:disc}'));
   assert.ok(css.includes('#key-batch.key-plain{-webkit-text-security:none}'),'the reveal toggle can unmask the input');

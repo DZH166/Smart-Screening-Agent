@@ -147,6 +147,17 @@ def test_image_cache_reuses_only_identical_encoded_input_and_detects_changed_pix
     assert old_digest != changed_digest and old["pixels_sha256"] != changed["pixels_sha256"]
 
 
+def test_image_preparation_budget_fails_before_sending_partial_library(manager, tmp_path, monkeypatch):
+    rows, files = batch(tmp_path, 2)
+    monkeypatch.setattr(first, 'MAX_PREPARED_IMAGE_BYTES', 1)
+    opener = Opener()
+    result = run(manager, rows, files, opener)
+    assert result['status'] == 'failed' and result['error_code'] == 'resource_limit'
+    assert not opener.calls and not result['proposals']
+    assert result['usage']['requests'] == 0
+    assert result['artifact']['warnings']
+
+
 def test_short_random_aliases_retry_collisions_without_positional_fallback(monkeypatch):
     outcomes = iter(("deadbeef", "deadbeef", "00112233", "deadbeef"))
     sizes = []

@@ -36,11 +36,13 @@ from .ai_dispatch import ManagedReviewClient
 from .ai_images import MAX_PIXELS
 from .ai_settings import MODEL
 from .ai_usage import empty_usage, merge_usage
+from .cancellation import check as cancellation_check
 
 PROTOCOL_VERSION = "hsd-ai-first-retrieval-1"
 MAX_REQUEST_BYTES = 48 * 1024 * 1024
 MAX_IMAGES = 600
 QUERY_GROUP_SIZE = 20
+MAX_PREPARED_IMAGE_BYTES = 128 * 1024 * 1024
 _ID = re.compile(r"[A-Za-z0-9_-]{1,80}\Z")
 _STOP_CODES = {"authentication", "insufficient_balance", "rate_limit", "network_error",
                "provider_error", "request_rejected", "redirect_blocked", "not_configured", "pool_unavailable",
@@ -62,6 +64,7 @@ def _sha(path):
     digest = hashlib.sha256()
     with Path(path).open("rb") as stream:
         for block in iter(lambda: stream.read(1024 * 1024), b""):
+            cancellation_check()
             digest.update(block)
     return digest.hexdigest()
 
@@ -256,11 +259,10 @@ class RetrievalClient(DeepSeekClient):
 
 def _image(path, cache):
     """Match the existing overview/panel pixels without a PNG encode/decode."""
-    raw = Path(path).read_bytes()
-    raw_digest = hashlib.sha256(raw).hexdigest()
+    raw_digest = _sha(path)
     if raw_digest in cache:
         return raw_digest, cache[raw_digest]
-    with Image.open(BytesIO(raw)) as source:
+    with Image.open(path) as source:
         if source.width * source.height > MAX_PIXELS:
             raise ValueError("preview too large")
         rgba = ImageOps.exif_transpose(source).convert("RGBA")
@@ -283,6 +285,8 @@ def _image(path, cache):
         panel.save(stream, "WEBP", lossless=True, method=1, exact=True)
         encoded.append((caption, "data:image/webp;base64," + base64.b64encode(stream.getvalue()).decode("ascii")))
     result = {"pixels_sha256": pixels_digest, "size": [image.width, image.height], "panels": encoded}
+    if _sha(path) != raw_digest:
+        raise ValueError("preview changed during encoding")
     cache[raw_digest] = result
     return raw_digest, result
 
@@ -426,6 +430,8 @@ def retrieve(manager, job_id, rows, files, *, progress=None, checkpoint=None,
             return finish("failed", "invalid_input")
         artifact["implementation_sha256"] = _implementation()
         cache, aliases = {}, set()
+        encoded_bytes = 0
+        encoded_digests = set()
         for kind, collection, destination in (("query", rows, queries), ("candidate", files, candidates)):
             for item in collection:
                 rejected = artifact["rejected_rows" if kind == "query" else "rejected_files"]
@@ -442,6 +448,12 @@ def retrieve(manager, job_id, rows, files, *, progress=None, checkpoint=None,
                             rejected.append({"id": item["id"], "reason_code": "source_changed"})
                             continue
                     image_digest, prepared = _image(image_path, cache)
+                    if image_digest not in encoded_digests:
+                        encoded_digests.add(image_digest)
+                        encoded_bytes += sum(len(url) for _, url in prepared["panels"])
+                        if encoded_bytes > MAX_PREPARED_IMAGE_BYTES:
+                            warning("本批 AI 图片准备超过运行内存预算，已继续完整本机核验。")
+                            return finish("failed", "resource_limit")
                 except (OSError, ValueError, KeyError, Image.DecompressionBombError):
                     rejected.append({"id": item["id"], "reason_code": "source_changed" if kind == "candidate" else "query_unreadable"})
                     continue

@@ -21,9 +21,10 @@ from datetime import datetime
 from pathlib import Path
 
 from . import __version__
+from .cancellation import TaskCancelled, check as cancellation_check, scope as cancellation_scope
 
 ACCEPTED = {"auto", "confirmed"}
-BUSY = {"queued", "importing", "matching", "ai_review", "exporting"}
+BUSY = {"queued", "importing", "matching", "ai_review", "exporting", "cancelling"}
 COMPRESSION_SAMPLE_BYTES = 64 * 1024
 COMPRESSION_SAMPLE_BUDGET = 3 * COMPRESSION_SAMPLE_BYTES
 
@@ -65,6 +66,7 @@ def sha256(path: str | Path) -> str:
     digest = hashlib.sha256()
     with open(path, "rb") as stream:
         for chunk in iter(lambda: stream.read(4 * 1024 * 1024), b""):
+            cancellation_check()
             digest.update(chunk)
     return digest.hexdigest()
 
@@ -91,6 +93,9 @@ class JobManager:
         self._job_locks = {}
         self._active_operations = 0
         self._inflight_futures = set()
+        self._future_jobs = {}
+        self._job_operations = collections.Counter()
+        self.task_persistence = None
         self._operation_condition = threading.Condition(self.lock)
         self._closing = False
         # Different resources have different queues. CPU work stays bounded;
@@ -157,6 +162,8 @@ class JobManager:
         # external callback under the global map lock.
         if on_drained is not None:
             on_drained()
+        if self.task_persistence is not None:
+            self.task_persistence.save_all()
         with self._operation_condition:
             self.jobs.clear()
             self._job_locks.clear()
@@ -169,18 +176,85 @@ class JobManager:
         with self.lock:
             if self._closing and not internal:
                 raise ValueError("工具正在退出，不能再修改任务。")
+            if identifier in getattr(self, "_expiring_tasks", set()):
+                raise KeyError("该任务已过期，请重新导入。")
             self._get(identifier)
             operation_lock = self._job_locks.setdefault(identifier, threading.RLock())
             # Count operations waiting for this task's lock as well. Shutdown
             # cannot miss a user action which already passed its entry check.
             self._active_operations += 1
+            self._job_operations[identifier] += 1
         try:
             with operation_lock:
                 yield
         finally:
             with self._operation_condition:
                 self._active_operations -= 1
+                self._job_operations[identifier] -= 1
+                if not self._job_operations[identifier]:
+                    del self._job_operations[identifier]
+                self._settle_cancel(identifier)
                 self._operation_condition.notify_all()
+
+    def task_has_work(self, identifier):
+        with self.lock:
+            return bool(self._job_operations.get(identifier)
+                        or any(value == identifier for value in self._future_jobs.values()))
+
+    def _checkpoint(self, job):
+        if self.task_persistence is not None:
+            try:
+                self.task_persistence.save_job(job)
+            except (OSError, ValueError, TypeError):
+                warning = "本批恢复记录未能保存，请及时下载并联系管理员。"
+                if warning not in job.setdefault("warnings", []):
+                    job["warnings"].append(warning)
+                logging.warning("Task recovery checkpoint could not be saved")
+
+    def check_cancelled(self, identifier):
+        with self.lock:
+            if self._get(identifier).get("cancel_requested"):
+                raise TaskCancelled("员工已请求停止本批处理。")
+
+    def _settle_cancel(self, identifier):
+        job = self.jobs.get(identifier)
+        if job and job.get("cancel_requested") and not self.task_has_work(identifier):
+            job.update(status="cancelled", error=None,
+                       progress={"message": "本批已停止，原文件保持不变。", "current": 0, "total": 0})
+            job.pop("_prepared_matching", None)
+            job.pop("_cpu_leg", None)
+            job.pop("_parallel_progress", None)
+            self._checkpoint(job)
+
+    def cancel(self, identifier, expected_revision=None):
+        with self.lock:
+            job = self._get(identifier)
+            if (expected_revision is not None and (isinstance(expected_revision, bool)
+                    or expected_revision != job.get("revision", 0))):
+                raise ValueError("任务已在其他页面更新，请刷新后再停止。")
+            if job.get("status") == "cancelled" or job.get("cancel_requested"):
+                return self.snapshot(identifier)
+            if job["status"] not in BUSY:
+                raise ValueError("本批已经结束，无需停止。")
+            job.update(cancel_requested=True, status="cancelling",
+                       progress={"message": "正在停止；已发出的 AI 请求需等待返回或超时，用量仍会记录。", "current": 0, "total": 0})
+            job["revision"] = job.get("revision", 0) + 1
+            for future, owner in list(self._future_jobs.items()):
+                if owner == identifier:
+                    future.cancel()
+            child = job.get("_cpu_future")
+            if child is not None:
+                child.cancel()
+            self._settle_cancel(identifier)
+            return self.snapshot(identifier)
+
+    def _run_task(self, operation, identifier):
+        with cancellation_scope(lambda: self.check_cancelled(identifier)):
+            try:
+                self.check_cancelled(identifier)
+                operation(identifier)
+            except TaskCancelled:
+                pass
 
     def has_active_operations(self):
         with self.lock:
@@ -293,6 +367,8 @@ class JobManager:
 
     def _submit(self, job, operation):
         """Called under the map lock; retain a separate FIFO per resource."""
+        if job.get("cancel_requested"):
+            raise TaskCancelled("员工已请求停止本批处理。")
         stage = ("cpu" if operation == self._process
                  else "export" if operation == self._export else "ai")
         executor = {"cpu": self.pool, "ai": self.ai_pool, "export": self.export_pool}[stage]
@@ -304,9 +380,10 @@ class JobManager:
         operation_token = uuid.uuid4().hex
         job["_pending_operation_token"] = operation_token
         job["_operation_token"] = operation_token
-        future = executor.submit(operation, job["id"])
+        future = executor.submit(self._run_task, operation, job["id"])
         if hasattr(future, "add_done_callback"):
             self._inflight_futures.add(future)
+            self._future_jobs[future] = job["id"]
             def completed(result):
                 try:
                     try:
@@ -321,10 +398,15 @@ class JobManager:
                 finally:
                     with self._operation_condition:
                         self._inflight_futures.discard(result)
+                        self._future_jobs.pop(result, None)
+                        self._settle_cancel(job["id"])
+                        if job["status"] not in BUSY and not self.task_has_work(job["id"]):
+                            self._checkpoint(job)
                         self._operation_condition.notify_all()
             future.add_done_callback(completed)
 
     def _start_operation(self, identifier, status, message):
+        self.check_cancelled(identifier)
         with self.job_operation(identifier, internal=True), self.lock:
             job = self.jobs[identifier]
             queued_at = job.pop("_queued_perf", None)
@@ -342,6 +424,7 @@ class JobManager:
             return job
 
     def _progress(self, identifier, message, current=0, total=1):
+        self.check_cancelled(identifier)
         with self.lock:
             self.jobs[identifier]["progress"] = {"message": message, "current": current, "total": total}
 
@@ -358,6 +441,7 @@ class JobManager:
             if sha256(snapshot_path) != job["_input_digest"]:
                 raise ValueError("读取时源表格发生了变化，请保存表格后重新导入。")
             job["_snapshot_workbook"] = str(snapshot_path)
+            job["_snapshot_digest"] = job["_input_digest"]
             sheet = inspect_workbook(str(snapshot_path), str(Path(job["_work_dir"]) / "workbook"))
             if not sheet["rows"]:
                 raise ValueError("当前工作表的 B 列没有可读取的图片，请使用约定的表格模板。")
@@ -422,6 +506,10 @@ class JobManager:
             raise ValueError("源压缩包发生变化，请重新导入。")
 
     def _apply_match_result(self, job, result):
+        self.check_cancelled(job["id"])
+        bindings = result.get("comparison_bindings")
+        if bindings is not None:
+            job["_comparison_bindings"] = dict(bindings)
         matches = {m["row_id"]: m for m in result["matches"]}
         job["files"] = result["files"]
         job["warnings"].extend(message for message in result.get("warnings", []) if message not in job["warnings"])
@@ -462,7 +550,8 @@ class JobManager:
         def current():
             with self.lock:
                 return (self.jobs.get(identifier) is job and job.get("_operation_token") == token
-                        and job.get("revision", 0) == revision and job.get("status") == "ai_review")
+                        and job.get("revision", 0) == revision and job.get("status") == "ai_review"
+                        and not job.get("cancel_requested"))
         def phase_progress(phase, done=0, total=0, *, finished=False):
             with self.lock:
                 if not current():
@@ -505,8 +594,9 @@ class JobManager:
                 from .matching import match_prepared
                 # Full independent validation proceeds while the provider is
                 # working. Model rankings never omit a competing source.
-                matched = match_prepared(prepared,
-                    lambda message, c=0, t=1: phase_progress("cpu", c, t))
+                with cancellation_scope(lambda: self.check_cancelled(identifier)):
+                    matched = match_prepared(prepared,
+                        lambda message, c=0, t=1: phase_progress("cpu", c, t))
                 self._check_import_sources(job)
                 return matched
             except Exception:
@@ -528,6 +618,7 @@ class JobManager:
                 leg.update(order=self._queue_sequence, queued_at=time.perf_counter())
                 job["_cpu_leg"] = leg
                 verification = self.pool.submit(verify)
+                job["_cpu_future"] = verification
             phase_progress("ai")
             try:
                 result = retrieve(self, identifier, rows, files, progress=progress,
@@ -550,6 +641,7 @@ class JobManager:
                             "候选检索记录未能完整保存，请保留本批任务并联系管理员。",
                             "候选检索状态更新未完成，请联系管理员核对记录。",
                             "候选检索累计用量保存未完成，费用可能不完整。",
+                            "本批 AI 图片准备超过运行内存预算，已继续完整本机核验。",
                         } and warning not in job["warnings"]:
                             job["warnings"].append(warning)
                     job["ai_retrieval"] = {"status": result["status"], "usage": result.get("usage", empty_usage()),
@@ -557,6 +649,7 @@ class JobManager:
                         "message": "AI 查找已结束，等待本机核验。"}
                     job["timings"]["ai_retrieval_seconds"] = round(elapsed_ai, 3)
             matched = verification.result()
+            self.check_cancelled(identifier)
             if not current():
                 return
             # CPU may have finished before the network response. Recheck the
@@ -569,6 +662,7 @@ class JobManager:
                 if not current():
                     return
                 self._apply_match_result(job, matched)
+                job["_comparison_bindings"] = dict(prepared.file_bindings)
                 suggested = {p["row_id"]: p for p in proposals}
                 for row in job["rows"]:
                     proposal = suggested.get(row["id"])
@@ -605,6 +699,7 @@ class JobManager:
                         and job.get("_prepared_matching") is prepared):
                     job.pop("_prepared_matching", None)
                     job.pop("_cpu_leg", None)
+                    job.pop("_cpu_future", None)
                     job.pop("_parallel_progress", None)
 
     def _after_match_ai(self, identifier):
@@ -811,6 +906,7 @@ class JobManager:
                 del history[:-100]
                 job["revision"] = job.get("revision", 0) + 1
             self._plan(job)
+            self._checkpoint(job)
             return self.snapshot(identifier)
 
     def undo(self, identifier):
@@ -826,6 +922,7 @@ class JobManager:
             row.update(action["previous"])
             job["revision"] = job.get("revision", 0) + 1
             self._plan(job)
+            self._checkpoint(job)
             result = self.snapshot(identifier)
             result["last_undone_row_id"] = row["id"]
             return result
@@ -877,6 +974,7 @@ class JobManager:
 
         try:
             from .workbook import write_numbered_workbook
+            self._verify_comparison_sources(job)
             if sha256(job["_workbook_path"]) != job["_input_digest"]:
                 raise ValueError("导入后源表格发生了变化，请重新导入，避免把编号填到错误的记录。")
             if job.get("_source_archive_digest") and sha256(job["_source_path"]) != job["_source_archive_digest"]:
@@ -920,6 +1018,7 @@ class JobManager:
                 digest = hashlib.sha256()
                 with source.open("rb") as src, destination.open("xb") as dst:
                     for chunk in iter(lambda: src.read(4 * 1024 * 1024), b""):
+                        self.check_cancelled(identifier)
                         dst.write(chunk)
                         digest.update(chunk)
                 copied_digest = sha256(destination)
@@ -935,6 +1034,7 @@ class JobManager:
                                 "confirmation": "人工确认" if row["status"] == "confirmed" else "AI复核通过" if row.get("_accepted_by") == "ai" else "自动匹配", "sha256": copied_digest})
             workbook_out = staging / (Path(job["_workbook_path"]).stem + "_已编号.xlsx")
             write_numbered_workbook(job["_snapshot_workbook"], str(workbook_out), job["sheet_name"], assignments)
+            self.check_cancelled(identifier)
             # The plan, rather than files discovered in an output directory,
             # defines every allowed download member.
             job["_export_members"] = [*(f"已编号AI/{entry['output']}" for entry in mapping), workbook_out.name]
@@ -943,6 +1043,7 @@ class JobManager:
             if job.get("_source_archive_digest") and sha256(job["_source_path"]) != job["_source_archive_digest"]:
                 raise ValueError("导出期间源压缩包发生了变化，请重新导入后再处理。")
             verify_ai_comparison_sources()
+            self._verify_comparison_sources(job)
             pending = [{"row": r["row_number"], "number": r["number"], "status": r["status"],
                         "reason_code": r.get("reason_code"), "reason": r["reason"] or "没有已确认的对应文件"}
                        for r in job["rows"] if r["status"] not in ACCEPTED]
@@ -1002,11 +1103,22 @@ class JobManager:
                 except OSError:
                     logging.exception("Could not clean partial export %s", staging)
             with self.job_operation(identifier, internal=True), self.lock:
-                job["status"] = "ready"
-                job["error"] = str(exc)
-                if staging_created and staging and staging.exists():
+                job["status"] = "cancelling" if job.get("cancel_requested") else "ready"
+                job["error"] = None if job.get("cancel_requested") else str(exc)
+                if staging_created and staging and staging.exists() and not job.get("cancel_requested"):
                     job["error"] += f" 未完成的临时结果暂被占用：{staging}。关闭占用它的程序后，重新导入再导出。"
                 job["progress"] = {"message": "导出未完成，可以修正问题后重试", "current": 0, "total": 1}
+
+    def _verify_comparison_sources(self, job, *, check_cancellation=True):
+        """Every automatic uniqueness proof remains bound to its complete inputs."""
+        snapshot = job.get("_snapshot_workbook")
+        if snapshot and sha256(snapshot) != job.get("_snapshot_digest", job.get("_input_digest")):
+            raise ValueError("本批表格快照发生变化，请重新导入。")
+        for source, expected in job.get("_comparison_bindings", {}).items():
+            if check_cancellation:
+                self.check_cancelled(job["id"])
+            if sha256(source) != expected:
+                raise ValueError("本批比较图片或竞争原稿发生变化，请重新导入。")
 
     @staticmethod
     def _export_plan(job):
@@ -1113,6 +1225,7 @@ class JobManager:
                         member._compresslevel = 1 if member.compress_type == zipfile.ZIP_DEFLATED else None
                         with path.open("rb") as source, archive.open(member, "w", force_zip64=True) as destination:
                             for chunk in iter(lambda: source.read(4 * 1024 * 1024), b""):
+                                self.check_cancelled(job["id"])
                                 digest.update(chunk)
                                 destination.write(chunk)
                         if digest.hexdigest() != manifest[relative] or _is_link_or_reparse(path) or not path.resolve().is_relative_to(directory.resolve()):
@@ -1138,6 +1251,7 @@ class JobManager:
             timings["batch_elapsed_seconds"] = round(time.perf_counter() - batch_started, 3)
         self._record_export_timings(job, timings)
         with self.job_operation(job["id"], internal=True), self.lock:
+            self.check_cancelled(job["id"])
             job["output_dir"], job["report"], job["status"] = str(directory), report, "done"
             job["timings"] = timings
             job["error"] = None
@@ -1210,6 +1324,9 @@ class JobManager:
 
     def _fail(self, identifier, exc):
         with self.lock:
+            if self.jobs[identifier].get("cancel_requested"):
+                self.jobs[identifier]["status"] = "cancelling"
+                return
             self.jobs[identifier]["status"] = "error"
             self.jobs[identifier]["error"] = str(exc) or type(exc).__name__
 

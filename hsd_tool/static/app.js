@@ -12,6 +12,8 @@
     resolving: false, starting: false, uploading: false, picking: false, pollTimer: null, pollFailures: 0,
     showDone: true, stopped: false, lastJobError: null,
     forceReview: false, showSummary: false, candidatesOpen: false, history: [],
+    uploadRequest: null, uploadXhr: null, uploadUncertain: false, uploadChecking: false, uploadRetryAllowed: false,
+    uploadRecoveryTimer: null, cancelling: false, authExpired: false, downloading: false, configUnavailable: false,
   };
   const uiMetrics={table_renders:0,detail_renders:0,row_selections:0};
   function uiMeasure(name,start){uiMetrics[name]=(uiMetrics[name]||0)+1;uiMetrics[name+'_ms']=Math.round((performance.now()-start)*100)/100;document.documentElement.dataset.hsdUiMetrics=JSON.stringify(uiMetrics);}
@@ -31,7 +33,8 @@
   const statusNames = {auto:'自动通过', confirmed:'已确认', review:'待确认', unmatched:'未找到', skipped:'已跳过'};
   const matched = (row) => ['auto','confirmed'].includes(row.status) && !!row.file_id;
   const awaiting = (row) => ['review','unmatched'].includes(row.status);
-  const isBusy = () => ['queued','importing','matching','ai_review','exporting'].includes(state.job?.status) || state.starting;
+  const busyStatuses = ['queued','importing','matching','ai_review','exporting','cancelling'];
+  const isBusy = () => busyStatuses.includes(state.job?.status) || state.starting || state.cancelling;
   const fileById = (id) => {ensureIndexes();return filesIndex.get(id);};
   const rowById = (id) => {ensureIndexes();return rowsIndex.get(id);};
   const ownerOf = (id,rowId) => {ensureIndexes();return ownersIndex.get(id)?.find((row)=>row.id!==rowId)||null;};
@@ -49,22 +52,44 @@
       if (!response.ok) {
         const error = new Error(data.error || `操作未完成（${response.status}），请重试。`);
         error.status = response.status;
+        if (loginRequired(error)) requireLogin(error);
         throw error;
       }
       return data;
     } catch (error) {
       if (error.name === 'AbortError') throw new Error('等待超时，请稍后重试。');
-      if (error instanceof TypeError) throw new Error('暂时无法连接本机工具，请确认程序仍在运行。');
+      if (error instanceof TypeError) throw new Error('暂时无法连接服务，请检查网络后重试。');
       throw error;
     } finally { window.clearTimeout(timer); }
   }
 
-  function notice(message) { $('notice-text').textContent = message; $('notice').classList.remove('hidden'); }
+  let noticeAction=null;
+  function notice(message) { $('notice-text').textContent = message; $('notice').classList.remove('hidden');$('notice-action')?.classList.add('hidden');noticeAction=null;if(state.authExpired){noticeAction=()=>window.location.assign('/');$('notice-action').textContent='重新登录';$('notice-action').classList.remove('hidden');} }
+  function actionableNotice(message,label,action) {notice(message);noticeAction=action;$('notice-action').textContent=label;$('notice-action').classList.remove('hidden');}
   function clearNotice() { $('notice').classList.add('hidden'); }
+  function loginRequired(error) {return error.status===401||(error.status===403&&/会话.*失效/.test(error.message));}
+  function requireLogin(error) {
+    state.authExpired=true;clearTimeout(state.pollTimer);clearTimeout(state.uploadRecoveryTimer);
+    setFormBusy(false);['summary-export-button','open-output-button','stop-job-button','confirm-row-button','skip-row-button','undo-button','summary-undo-button','next-task-button','cancelled-next-button'].forEach((id)=>{if($(id))$(id).disabled=true;});
+    actionableNotice(error?.message||'登录已失效。请重新登录后继续本批任务。','重新登录',()=>window.location.assign('/'));
+  }
   let toastTimer;
   function toast(message) { $('toast').textContent=message; $('toast').classList.remove('hidden'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>$('toast').classList.add('hidden'),3500); }
-  function rememberJob(id) { try { if (id) sessionStorage.setItem('hsd-active-job',id); else sessionStorage.removeItem('hsd-active-job'); } catch (_) {} }
+  function rememberJob(id) { try { if (id) {sessionStorage.setItem('hsd-active-job',id);sessionStorage.removeItem('hsd-new-batch');} else sessionStorage.removeItem('hsd-active-job'); } catch (_) {} }
   function storedJob() { try { return sessionStorage.getItem('hsd-active-job'); } catch (_) { return null; } }
+  function rememberUpload(request) {
+    state.uploadRequest=request;
+    try {if(request)sessionStorage.setItem('hsd-pending-upload',JSON.stringify(request));else sessionStorage.removeItem('hsd-pending-upload');}catch(_){}
+  }
+  function storedUpload() {
+    try {const value=JSON.parse(sessionStorage.getItem('hsd-pending-upload')||'null');return /^[0-9a-f-]{36}$/i.test(value?.id||'')?{id:value.id,stopRequested:value.stopRequested===true}:null;}catch(_){return null;}
+  }
+  function newUploadId() {
+    if(window.crypto?.randomUUID)return window.crypto.randomUUID();
+    if(!window.crypto?.getRandomValues)throw new Error('浏览器不支持安全上传，请使用新版 Chrome 或 Edge。');
+    const bytes=window.crypto.getRandomValues(new Uint8Array(16));bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;
+    const hex=[...bytes].map((value)=>value.toString(16).padStart(2,'0')).join('');return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+  }
   function showView(id, step) {
     document.querySelectorAll('.view').forEach((view)=>view.classList.toggle('hidden',view.id !== id));
     document.body.classList.toggle('review-active',id==='review-view');
@@ -83,10 +108,15 @@
     $('number-example').textContent=Number.isInteger(value)&&value>=1&&value<=9999?`HSD${String(value).padStart(4,'0')}`:'请输入 1–9999';
   }
   function setFormBusy(busy) {
-    $('import-form').querySelectorAll('button,input').forEach((element)=>element.disabled=busy);
-    ['workbook-path','source-path','output-path'].forEach((id)=>$(id).disabled=busy||isLan());
-    ['workbook-upload','source-upload'].forEach((id)=>$(id).disabled=busy||!isLan());
-    $('start-button').textContent=state.uploading?'正在上传…':state.starting?'正在创建任务…':isLan()?'上传并自动处理 →':'开始自动处理 →';
+    const locked=busy||state.uploadUncertain||state.authExpired||state.configUnavailable;
+    $('import-form').querySelectorAll('button,input').forEach((element)=>element.disabled=locked);
+    ['workbook-path','source-path','output-path'].forEach((id)=>$(id).disabled=locked||isLan());
+    ['workbook-upload','source-upload'].forEach((id)=>$(id).disabled=locked||!isLan());
+    $('start-number').disabled=locked;
+    $('start-button').disabled=busy||state.authExpired||state.uploadChecking||state.configUnavailable;
+    $('start-button').textContent=state.uploadUncertain?(state.uploadRetryAllowed?'重试本次上传':'查询上传状态'):state.uploading?'正在上传…':state.starting?'正在创建任务…':isLan()?'上传并自动处理 →':'开始自动处理 →';
+    $('stop-upload-button').disabled=!!state.uploadRequest?.stopRequested||state.uploadChecking||state.authExpired;
+    $('stop-upload-button').classList.toggle('hidden',!state.uploading&&!state.uploadUncertain);
     $('shutdown-button').disabled=busy || isBusy();
   }
   function formatBytes(bytes) {
@@ -135,13 +165,15 @@
       if(element.textContent!==text)element.textContent=text;
     }
   }
-  function uploadFiles(workbook,source,start) {
+  function uploadFiles(workbook,source,start,requestId=state.uploadRequest?.id) {
     return new Promise((resolve,reject)=>{
       const data=new FormData();
       data.append('workbook',workbook);data.append('source',source);data.append('start_number',String(start));
       const request=new XMLHttpRequest();
       request.open('POST','/api/jobs/upload');
       request.setRequestHeader('X-HSD-Token',window.HSD_TOKEN||'');
+      if(requestId)request.setRequestHeader('X-HSD-Upload-ID',requestId);
+      state.uploadXhr=request;
       // Large transfers can take longer than 30 minutes; connection and abort
       // events still fail visibly without an artificial browser time ceiling.
       request.timeout=0;
@@ -153,7 +185,7 @@
         if (!result.id) {reject(new Error('上传结果缺少批次编号，请重试。'));return;}
         resolve(result);
       });
-      request.addEventListener('error',()=>reject(new Error('上传连接中断，请确认与主机处于同一局域网后重试。')));
+      request.addEventListener('error',()=>reject(new Error('上传连接中断，正在核对服务器是否已接收。')));
       request.addEventListener('timeout',()=>reject(new Error('上传超时，请检查网络或拆分压缩包后重试。')));
       request.addEventListener('abort',()=>reject(new Error('上传已中止，请重新上传。')));
       renderUploadProgress();request.send(data);
@@ -170,7 +202,8 @@
   }
   async function startJob(event) {
     event.preventDefault();
-    if (state.starting || state.picking) return;
+    if (state.starting || state.picking || state.authExpired || state.configUnavailable) return;
+    if (state.uploadUncertain) {if(!state.uploadRetryAllowed){await recoverUpload();return;}state.uploadUncertain=false;state.uploadRetryAllowed=false;}
     clearNotice();clearFieldErrors();
     const workbook=$('workbook-upload').files?.[0],source=$('source-upload').files?.[0];
     if (isLan()) {
@@ -182,18 +215,109 @@
     }
     const start=Number($('start-number').value);
     if (!Number.isInteger(start)||start<1||start>9999) {fieldError('start-number','请输入 1 到 9999 的整数。');$('start-number').focus();return;}
+    if(isLan()&&!state.uploadRequest){try{rememberUpload({id:newUploadId(),stopRequested:false});}catch(error){notice(error.message);return;}}
     state.starting=true;state.uploading=isLan();setFormBusy(true);
     try {
       const data=isLan()?await uploadFiles(workbook,source,start):await api('/api/jobs',{method:'POST',body:{workbook_path:$('workbook-path').value.trim(),source_path:$('source-path').value.trim(),output_root:$('output-path').value.trim(),start_number:start}});
-      state.job={id:data.id,status:isLan()?'queued':'importing',progress:{message:isLan()?'文件已上传，正在准备处理':'正在读取编号表与 AI 文件',current:0,total:0},rows:[],files:[]};
-      state.filter='awaiting';state.search='';state.selectedRowId=null;state.selectedFileId=null;state.showDone=true;state.pollFailures=0;state.lastJobError=null;
-      state.forceReview=false;state.showSummary=false;state.candidatesOpen=false;state.history=[];
-      $('row-search').value='';rememberJob(data.id);renderJob();schedulePoll(100);
-    } catch(error) {notice(error.message);} finally {state.starting=false;state.uploading=false;$('upload-progress').classList.add('hidden');setFormBusy(false);$('shutdown-button').disabled=isBusy();}
+      await activateUploadedJob(data.id,state.uploadRequest?.stopRequested===true);
+    } catch(error) {
+      if(isLan()&&state.uploadRequest){state.uploadUncertain=true;state.uploading=false;state.uploadXhr=null;if(loginRequired(error)){requireLogin(error);}else await recoverUpload(error.message);}
+      else notice(error.message);
+    } finally {state.starting=false;state.uploading=false;state.uploadXhr=null;if(!state.uploadUncertain)$('upload-progress').classList.add('hidden');setFormBusy(false);$('shutdown-button').disabled=isBusy();}
   }
-  function schedulePoll(delay=1000) {clearTimeout(state.pollTimer);if (!state.stopped) state.pollTimer=setTimeout(pollJob,delay);}
+  async function activateUploadedJob(id,stopRequested=false) {
+    state.job={id,status:isLan()?'queued':'importing',progress:{message:'文件已接收，正在读取本批状态',current:0,total:0},rows:[],files:[]};
+    state.filter='awaiting';state.search='';state.selectedRowId=null;state.selectedFileId=null;state.showDone=true;state.pollFailures=0;state.lastJobError=null;
+    state.forceReview=false;state.showSummary=false;state.candidatesOpen=false;state.history=[];
+    state.starting=false;state.uploading=false;state.uploadUncertain=false;state.uploadRetryAllowed=false;clearTimeout(state.uploadRecoveryTimer);
+    $('row-search').value='';rememberJob(id);rememberUpload(null);clearNotice();renderJob();
+    if(stopRequested)await stopJob();else schedulePoll(100);
+  }
+  function showUploadRecovery(message) {
+    $('upload-progress').classList.remove('hidden');$('upload-progress-label').textContent=state.uploadRequest?.stopRequested?'正在确认停止结果…':'正在核对上传状态…';
+    $('upload-progress-percent').textContent='';$('upload-progress-fill').style.width='';$('upload-progress-fill').classList.add('indeterminate');
+    $('upload-progress-detail').textContent=message;setFormBusy(false);
+  }
+  async function recoverUpload(originalError='') {
+    if(!state.uploadRequest||state.uploadChecking||state.authExpired)return;
+    clearTimeout(state.uploadRecoveryTimer);state.uploadChecking=true;state.uploadUncertain=true;state.uploadRetryAllowed=false;setFormBusy(false);
+    try {
+      const request=state.uploadRequest;
+      const result=await api(`/api/jobs/upload-status/${encodeURIComponent(request.id)}`);
+      if(state.uploadRequest?.id!==request.id)return;
+      if(result.state==='completed'&&result.job_id){await activateUploadedJob(result.job_id,request.stopRequested);return;}
+      if(result.state==='cancelled') {
+        rememberUpload(null);state.uploadUncertain=false;$('upload-progress').classList.add('hidden');
+        notice('服务器已确认本次上传停止，可以重新选择文件。');return;
+      }
+      if(request.stopRequested&&!result.cancellation_requested){
+        await api(`/api/jobs/upload-status/${encodeURIComponent(request.id)}/cancel`,{method:'POST',body:{}});
+        showUploadRecovery('正在向服务器确认本次上传停止，请稍候。');state.uploadRecoveryTimer=setTimeout(()=>recoverUpload(),500);return;
+      }
+      if(result.state==='pending') {
+        showUploadRecovery(result.cancellation_requested?'服务器正在结束本次上传并清理临时文件。':'服务器仍在接收或检查文件，请稍候；不会重复创建任务。');
+        state.uploadRecoveryTimer=setTimeout(()=>recoverUpload(),1500);return;
+      }
+      // Keep the same ID even when nothing is found: a delayed original request
+      // may still arrive. Its retry must never create a second logical batch.
+      if(request.stopRequested){showUploadRecovery('尚未确认服务器停止，请重试停止。');actionableNotice('停止结果尚未确认。','重试停止',()=>retryUploadStop());}
+      else {
+        state.uploadRetryAllowed=!!$('workbook-upload').files?.[0]&&!!$('source-upload').files?.[0];
+        showUploadRecovery(state.uploadRetryAllowed?'当前未发现已受理任务，可重试本次上传，或停止后重新选文件。':'当前未发现已受理任务。请先停止本次上传，再重新选择文件。');
+        if(originalError)notice(originalError);
+      }
+    } catch(error) {
+      state.uploadUncertain=true;
+      if(loginRequired(error))requireLogin(error);
+      else {showUploadRecovery('网络尚未恢复，无法确认是否已受理。请查询状态，避免重复上传。');actionableNotice(error.message,'查询上传状态',()=>recoverUpload());}
+    } finally {state.uploadChecking=false;setFormBusy(false);}
+  }
+  async function stopUpload() {
+    if(!state.uploadRequest||state.uploadRequest.stopRequested||state.authExpired)return;
+    const requestId=state.uploadRequest.id;
+    rememberUpload({...state.uploadRequest,stopRequested:true});state.uploadUncertain=true;state.uploadRetryAllowed=false;
+    // Aborting only stops this browser's transfer. The server must confirm
+    // cancellation separately before another batch can be started.
+    const xhr=state.uploadXhr;state.uploadXhr=null;if(xhr)xhr.abort();
+    showUploadRecovery('已中断浏览器上传，正在向服务器确认本批停止。');
+    try {
+      await api(`/api/jobs/upload-status/${encodeURIComponent(requestId)}/cancel`,{method:'POST',body:{}});
+      if(state.uploadRequest?.id===requestId)await recoverUpload();
+    } catch(error) {
+      if(loginRequired(error))requireLogin(error);
+      else actionableNotice('停止结果尚未确认。'+error.message,'重试停止',()=>retryUploadStop());
+    }
+  }
+  async function retryUploadStop() {
+    if(!state.uploadRequest||state.authExpired)return;
+    const requestId=state.uploadRequest.id;
+    try {await api(`/api/jobs/upload-status/${encodeURIComponent(requestId)}/cancel`,{method:'POST',body:{}});if(state.uploadRequest?.id===requestId)await recoverUpload();}
+    catch(error){if(loginRequired(error))requireLogin(error);else actionableNotice('停止结果尚未确认。'+error.message,'重试停止',()=>retryUploadStop());}
+  }
+  async function stopJob() {
+    if(!state.job||state.cancelling||state.job.status==='cancelled'||state.authExpired)return;
+    const id=state.job.id;state.cancelling=true;renderJob();
+    try {
+      if(!Number.isInteger(state.job.revision)){
+        const current=await api(`/api/jobs/${encodeURIComponent(id)}`);if(state.job?.id!==id)return;acceptJob(current);
+      }
+      if(!busyStatuses.includes(state.job.status)){notice('本批处理已经结束，无需停止。可查看当前结果或处理下一批。');return;}
+      const job=await api(`/api/jobs/${encodeURIComponent(id)}/cancel`,{method:'POST',body:{expected_revision:state.job.revision}});if(state.job?.id===id)acceptJob(job);
+    }
+    catch(error) {
+      if(loginRequired(error))requireLogin(error);
+      else {
+        let reconciled=false;try{const job=await api(`/api/jobs/${encodeURIComponent(id)}`);if(state.job?.id===id){acceptJob(job);reconciled=true;}}catch(_){}
+        if(reconciled&&state.job.status==='cancelled')clearNotice();
+        else if(reconciled&&!busyStatuses.includes(state.job.status))notice('本批处理已经结束，无需停止。可查看当前结果或处理下一批。');
+        else if(reconciled&&state.job.status==='cancelling')notice('服务器已收到停止请求，正在等待本批工作结束。');
+        else notice('停止结果尚未确认，请核对当前状态后重试。'+error.message);
+      }
+    } finally {state.cancelling=false;if(state.job?.id===id){renderJob();if(isBusy())schedulePoll(100);}}
+  }
+  function schedulePoll(delay=1000) {clearTimeout(state.pollTimer);if (!state.stopped&&!state.authExpired) state.pollTimer=setTimeout(pollJob,delay);}
   async function pollJob() {
-    if (!state.job || state.stopped) return;
+    if (!state.job || state.stopped || state.authExpired) return;
     const id=state.job.id;
     try {
       const job=await api(`/api/jobs/${encodeURIComponent(id)}`);
@@ -205,10 +329,12 @@
       if (state.stopped || state.job?.id !== id) return;
       state.pollFailures++;
       notice(`${error.message} ${error.status===404?'请重新导入文件。':'工具会自动重试。'}`);
-      if ([401,403,404].includes(error.status)) {clearTimeout(state.pollTimer);state.job=null;rememberJob(null);showView('import-view',1);notice(error.status===404?'任务已不存在，请重新导入文件。':'员工会话已失效，请刷新页面重新进入。');} else {schedulePoll(Math.min(5000,1000*state.pollFailures));}
+      if(loginRequired(error)){requireLogin(error);return;}
+      if ([403,404].includes(error.status)) {clearTimeout(state.pollTimer);state.job=null;rememberJob(null);showView('import-view',1);notice(error.status===404?'任务已不存在，请重新导入文件。':error.message);} else {schedulePoll(Math.min(5000,1000*state.pollFailures));}
     }
   }
   function acceptJob(job) {
+    if(state.job?.id===job.id&&Number.isInteger(job.revision)&&Number.isInteger(state.job.revision)&&job.revision<state.job.revision)return false;
     const previousStatus=state.job?.status;
     state.job=job;indexedJob=null;countedJob=null;
     if (job.error && job.error !== state.lastJobError && job.status !== 'error') {notice(job.error);state.lastJobError=job.error;}
@@ -223,7 +349,8 @@
   function renderJob() {
     if (!state.job) {showView('import-view',1);return;}
     const job=state.job;
-    if (['queued','importing','matching','ai_review','exporting'].includes(job.status)) {renderProgress();return;}
+    if (busyStatuses.includes(job.status)) {renderProgress();return;}
+    if(job.status==='cancelled'){showView('cancelled-view',1);$('cancelled-message').textContent='服务器已结束本批处理，原文件保持不变；本批不会导出新结果。';return;}
     if (job.status==='error') {$('job-error').textContent=job.error||'文件处理失败，请检查文件是否有效后再试。';showView('error-view',1);return;}
     if (job.status==='done'&&state.showDone) {renderDone();return;}
     if (job.status==='ready' && (state.showSummary || (counts().review===0 && !state.forceReview))) {renderSummary();return;}
@@ -231,6 +358,7 @@
   }
   function renderProgress() {
     const job=state.job;
+    const stopping=job.status==='cancelling'||job.cancel_requested===true;
     const exporting=job.status==='exporting';
     const queued=job.status==='queued';
     const phase=job.progress?.phase;
@@ -246,6 +374,9 @@
     $('progress-fill').classList.toggle('indeterminate',!total);
     $('progress-percent').textContent=total?`${percent}%`:'';
     $('progress-detail').textContent=total?`当前阶段 ${current} / ${total}`:queued?'等待开始':parallel?'两项进度分别计数':'准备中…';
+    $('stop-job-button').disabled=stopping||state.cancelling||state.authExpired;
+    $('stop-job-button').textContent=stopping?'正在停止…':state.cancelling?'正在提交停止请求…':'停止本批';
+    if(stopping){$('processing-eyebrow').textContent='正在停止';$('processing-title').textContent='正在结束本批处理…';$('processing-message').textContent='不再启动后续步骤。已发送的 AI 请求需要等待返回或超时，服务器确认后可处理下一批。';$('progress-percent').textContent='';$('progress-detail').textContent='等待本批工作结束';$('progress-fill').style.width='';$('progress-fill').classList.add('indeterminate');}
   }
   function counts() {
     if(countedJob===state.job&&countedValue)return countedValue;
@@ -274,12 +405,12 @@
     $('summary-output').textContent=isLan()?'导出完成后下载 ZIP 到你的电脑':job.output_target||job.output_root||job.output_dir||'导入时选择的位置';
     $('summary-detail').textContent=pending?`待审核 ${c.review} 项、无法处理 ${c.unmatched} 项、已跳过 ${c.skipped} 项，原始行保持原状，不填写新号。`:'';
     $('summary-detail').classList.toggle('hidden',!pending);
-    $('summary-export-button').disabled=state.resolving||c.matched===0;
+    $('summary-export-button').disabled=state.authExpired||state.resolving||c.matched===0;
     $('summary-browse-button').disabled=state.resolving;
     $('summary-continue-button').classList.toggle('hidden',c.awaiting===0);
-    $('summary-continue-button').disabled=state.resolving;
-    $('summary-new-task-button').disabled=state.resolving;
-    $('summary-undo-button').classList.toggle('hidden',!(job.can_undo??state.history.length));$('summary-undo-button').disabled=state.resolving;
+    $('summary-continue-button').disabled=state.authExpired||state.resolving;
+    $('summary-new-task-button').disabled=state.authExpired||state.resolving;
+    $('summary-undo-button').classList.toggle('hidden',!(job.can_undo??state.history.length));$('summary-undo-button').disabled=state.authExpired||state.resolving;
     renderAiOverview();
   }
   function renderAiOverview() {
@@ -308,7 +439,7 @@
     }
   }
   async function retryAiReview(){
-    if(state.resolving||isBusy()||state.job?.status!=='ready'||state.job.ai_review?.can_retry!==true)return;
+    if(state.authExpired||state.resolving||isBusy()||state.job?.status!=='ready'||state.job.ai_review?.can_retry!==true)return;
     clearNotice();state.job.status='ai_review';state.job.progress={message:'正在准备符合条件的图片复核',current:0,total:0};state.forceReview=false;state.showSummary=false;renderJob();
     try{await api(`/api/jobs/${encodeURIComponent(state.job.id)}/ai-review`,{method:'POST',body:{}});schedulePoll(100);}
     catch(error){state.job.status='ready';try{acceptJob(await api(`/api/jobs/${encodeURIComponent(state.job.id)}`));}catch(_){}notice(error.message);renderJob();if(isBusy())schedulePoll();}
@@ -326,10 +457,10 @@
     $('review-title').textContent=done?'本批记录':'处理疑难项';
     $('review-subtitle').textContent=done?'已导出，仅供查看。':c.awaiting?'对照图片后确认，无法确定可以跳过。':'可以直接查看摘要并导出。';
     $('export-button').textContent=done?'查看导出结果 ↗':'查看结果摘要 →';
-    $('export-button').disabled=state.resolving||(!done&&c.matched===0);
-    $('new-task-button').disabled=state.resolving;
+    $('export-button').disabled=state.authExpired||state.resolving||(!done&&c.matched===0);
+    $('new-task-button').disabled=state.authExpired||state.resolving;
     $('undo-button').classList.toggle('hidden',!(state.job.can_undo ?? state.history.length)||done);
-    $('undo-button').disabled=state.resolving;
+    $('undo-button').disabled=state.authExpired||state.resolving;
     renderStats();
     const warnings=job.warnings||[];
     $('warnings').classList.toggle('hidden',!warnings.length);
@@ -502,13 +633,13 @@
     const row=rowById(state.selectedRowId),file=fileById(state.selectedFileId);
     const already=matched(row||{})&&row.file_id===file?.id;
     const button=$('confirm-row-button');
-    if(button){button.disabled=state.resolving||!file||!!ownerOf(file?.id,row?.id)||already;button.textContent=state.resolving?'正在保存…':already?'此匹配已通过':'确认对应此文件 ✓';}
-    if($('skip-row-button'))$('skip-row-button').disabled=state.resolving||row?.status==='skipped';
+    if(button){button.disabled=state.authExpired||state.resolving||!file||!!ownerOf(file?.id,row?.id)||already;button.textContent=state.resolving?'正在保存…':already?'此匹配已通过':'确认对应此文件 ✓';}
+    if($('skip-row-button'))$('skip-row-button').disabled=state.authExpired||state.resolving||row?.status==='skipped';
     $('review-panel').setAttribute('aria-busy',String(state.resolving));
     $('review-panel').querySelectorAll('[data-candidate-id],#candidate-toggle,#file-search').forEach((item)=>item.disabled=state.resolving);
     ['new-task-button','shutdown-button'].forEach((id)=>{if($(id))$(id).disabled=state.resolving||isBusy();});
-    $('export-button').disabled=state.resolving||isBusy()||(state.job?.status!=='done'&&counts().matched===0);
-    ['undo-button','summary-undo-button'].forEach((id)=>$(id).disabled=state.resolving||isBusy()||!(state.job?.can_undo??state.history.length));
+    $('export-button').disabled=state.authExpired||state.resolving||isBusy()||(state.job?.status!=='done'&&counts().matched===0);
+    ['undo-button','summary-undo-button'].forEach((id)=>$(id).disabled=state.authExpired||state.resolving||isBusy()||!(state.job?.can_undo??state.history.length));
   }
   let manualSearchTimer=null,rowSearchTimer=null;
   function selectCandidate(id){if(state.resolving)return;const scroll=$('review-panel').querySelector('.panel-content');const offset=scroll?.scrollTop||0;state.selectedFileId=id;renderCandidateView();if(scroll)scroll.scrollTop=offset;}
@@ -548,7 +679,7 @@
   }
   function preloadImage(url){if(preloaded.has(url))return;if(preloaded.size>=200)preloaded.delete(preloaded.values().next().value);preloaded.add(url);const preview=new Image();preview.src=url;}
   async function resolveRow(fileId) {
-    if(state.resolving||state.job?.status!=='ready')return;
+    if(state.authExpired||state.resolving||state.job?.status!=='ready')return;
     const rowId=state.selectedRowId;
     const before=rowById(rowId);
     if (!before) return;
@@ -570,7 +701,7 @@
   }
   async function undoLast() {
     const canUndo=state.job?.can_undo??!!state.history.length;
-    if(!canUndo||state.resolving||state.job?.status!=='ready')return;
+    if(state.authExpired||!canUndo||state.resolving||state.job?.status!=='ready')return;
     const rowId=state.history[state.history.length-1];
     rememberPanel();state.resolving=true;clearNotice();setReviewBusy();let updated=false;
     try {
@@ -583,7 +714,7 @@
     }catch(error){updated=await refreshConflict(error);notice(error.message);}finally{state.resolving=false;if(updated)renderJob();else setReviewBusy();}
   }
   async function refreshConflict(error) {
-    if (error.status===409 && state.job) {
+    if (!state.authExpired && state.job && (error.status===409||!error.status||error.status>=500)) {
       try {acceptJob(await api(`/api/jobs/${encodeURIComponent(state.job.id)}`));state.history=[];return true;} catch (_) {}
     }
     return false;
@@ -599,7 +730,7 @@
     });
   }
   async function exportJob() {
-    if(state.resolving||state.job?.status!=='ready'||counts().matched===0)return;
+    if(state.authExpired||state.resolving||state.job?.status!=='ready'||counts().matched===0)return;
     const revision=state.job.revision;
     clearNotice();state.job.status='exporting';state.job.progress={message:'正在生成编号表格与 AI 文件',current:0,total:0};state.showDone=true;renderJob();
     try{await api(`/api/jobs/${encodeURIComponent(state.job.id)}/export`,{method:'POST',body:revision===undefined?{}:{expected_revision:revision}});schedulePoll(100);}
@@ -616,23 +747,48 @@
     } else $('output-directory').textContent=state.job.output_dir||'保存位置尚未返回';
     $('done-summary').textContent=(c.awaiting+c.skipped)?`${c.awaiting+c.skipped} 项未处理或已跳过，原始行保持原状，可查看本批匹配记录。`:'';
     $('done-summary').classList.toggle('hidden',!(c.awaiting+c.skipped));
-    $('open-output-button').disabled=isLan()?!state.job.download_ready:!state.job.output_dir;renderAiOverview();
+    $('open-output-button').disabled=state.authExpired||state.downloading||(isLan()?!state.job.download_ready:!state.job.output_dir);renderAiOverview();
+  }
+  let downloadFeedbackTimer=null;
+  function downloadResponse() {
+    const frame=$('result-download-frame');
+    let text='';try{text=(frame.contentDocument?.body?.textContent||'').trim();}catch(_){text='无法读取下载响应，请检查网络后重试。';}
+    if(!text)return;
+    let message;try{message=JSON.parse(text).error;}catch(_){/* A proxy may return an HTML error document. */}
+    message=message||'下载未能开始，请检查网络后重试。';
+    state.downloading=false;clearTimeout(downloadFeedbackTimer);
+    $('open-output-button').disabled=false;$('open-output-button').textContent='重试下载结果 ZIP ↓';
+    if(/访问码|会话|登录/.test(message))requireLogin(new Error(message));else notice(message);
   }
   async function openOutput() {
+    if(state.authExpired||state.downloading)return;
     if (isLan()) {
       if (!state.job?.download_ready) {notice('结果压缩包尚未就绪，请稍后重试。');return;}
-      window.location.assign(`/api/jobs/${encodeURIComponent(state.job.id)}/download`);
-      toast('已发起下载，请在浏览器下载列表中查看。');return;
+      const id=state.job.id;state.downloading=true;$('open-output-button').disabled=true;$('open-output-button').textContent='正在准备下载…';clearNotice();
+      try {
+        const result=await api(`/api/jobs/${encodeURIComponent(id)}/download-status`);
+        if(state.job?.id!==id)return;
+        if(!result.ready)throw new Error('结果压缩包尚未就绪，请稍后重试。');
+        const frame=$('result-download-frame');frame.onload=()=>{if(state.job?.id===id)downloadResponse();};
+        frame.onerror=()=>{if(state.job?.id!==id)return;state.downloading=false;$('open-output-button').disabled=false;notice('下载连接中断，请检查网络后重试。');};
+        // Let the browser stream the ZIP to disk. Never fetch it as one Blob,
+        // and keep JSON/proxy failures inside this frame instead of leaving UI.
+        frame.src=`/api/jobs/${encodeURIComponent(id)}/download?frame=1`;
+        toast('已发起下载，请在浏览器下载列表中查看。');
+        clearTimeout(downloadFeedbackTimer);downloadFeedbackTimer=setTimeout(()=>{state.downloading=false;if(state.job?.id===id){$('open-output-button').disabled=false;$('open-output-button').textContent='再次下载结果 ZIP ↓';}},2000);
+      } catch(error) {if(state.job?.id!==id)return;state.downloading=false;if(loginRequired(error))requireLogin(error);else notice(error.message);$('open-output-button').disabled=state.authExpired;$('open-output-button').textContent='重试下载结果 ZIP ↓';}
+      return;
     }
     $('open-output-button').disabled=true;
     try {await api(`/api/jobs/${encodeURIComponent(state.job.id)}/open-output`,{method:'POST',body:{}});toast('已打开结果文件夹');} catch(error){notice(error.message);} finally {$('open-output-button').disabled=false;}
   }
   async function resetTask() {
-    if(state.resolving||isBusy())return;
+    if(state.authExpired||state.resolving||isBusy()||state.uploadUncertain)return;
     if(state.job?.status==='ready'&&!await askConfirmation({title:'重新导入一批文件？',description:'当前匹配结果尚未导出。重新导入后需要重新检查匹配。原始文件保持不变。',confirm:'重新导入',cancel:'继续检查'}))return;
     clearTimeout(state.pollTimer);clearTimeout(rowSearchTimer);clearTimeout(manualSearchTimer);state.job=null;indexedJob=null;indexedJobId=null;countedJob=null;preloaded.clear();imageAspects.clear();rowViewState.clear();state.selectedRowId=null;state.selectedFileId=null;state.showDone=true;state.lastJobError=null;
     state.forceReview=false;state.showSummary=false;state.candidatesOpen=false;state.history=[];state.filter='awaiting';state.search='';$('row-search').value='';
-    rememberJob(null);clearNotice();showView('import-view',1);window.scrollTo({top:0,behavior:'smooth'});
+    state.downloading=false;clearTimeout(downloadFeedbackTimer);rememberUpload(null);rememberJob(null);clearNotice();showView('import-view',1);window.scrollTo({top:0,behavior:'smooth'});
+    try{sessionStorage.setItem('hsd-new-batch','true');}catch(_){}
     if (isLan()) {['workbook-upload','source-upload'].forEach((id)=>{$(id).value='';updateUploadSelection(id);});}
   }
   async function shutdown() {
@@ -658,6 +814,8 @@
       ['job-ai-overview','stats-bar','warnings','notice'].forEach((id)=>observer.observe($(id)));
     }
     $('notice-close').addEventListener('click',clearNotice);
+    $('notice-action').addEventListener('click',()=>noticeAction?.());
+    $('stop-upload-button').addEventListener('click',stopUpload);$('stop-job-button').addEventListener('click',stopJob);
     document.querySelectorAll('.browse').forEach((button)=>button.addEventListener('click',()=>pick(button)));
     document.querySelectorAll('[data-source-type]').forEach((button)=>button.addEventListener('click',()=>setSourceType(button.dataset.sourceType)));
     $('start-number').addEventListener('input',updateNumberExample);$('import-form').addEventListener('submit',startJob);
@@ -672,7 +830,7 @@
     $('summary-export-button').addEventListener('click',exportJob);
     $('summary-browse-button').addEventListener('click',()=>{state.forceReview=true;state.showSummary=false;state.filter='all';renderReview();});
     $('summary-continue-button').addEventListener('click',()=>{state.forceReview=true;state.showSummary=false;state.filter='awaiting';selectRow((state.job.rows||[]).find(awaiting)?.id,null,false);renderReview();});
-    ['new-task-button','next-task-button','retry-task-button','summary-new-task-button'].forEach((id)=>$(id).addEventListener('click',resetTask));
+    ['new-task-button','next-task-button','retry-task-button','summary-new-task-button','cancelled-next-button'].forEach((id)=>$(id).addEventListener('click',resetTask));
     $('back-results-button').addEventListener('click',()=>{state.showDone=false;state.forceReview=true;state.showSummary=false;state.filter='all';renderReview();});
     $('shutdown-button').addEventListener('click',shutdown);
     document.addEventListener('click',(event)=>{if(event.target.closest('[data-ai-retry]'))retryAiReview();});
@@ -697,11 +855,14 @@
       $('start-number').value=config.last_start||1;$('app-version').textContent=config.version||'1.0.0';
       if (config.last_source) setSourceType(/\.zip$/i.test(config.last_source)?'zip':'folder');
       updateNumberExample();
-    } catch(error){notice(error.message);}
-    const jobId=isLan()?config?.active_job_id||null:storedJob();
+    } catch(error){if(loginRequired(error))requireLogin(error);else{state.configUnavailable=true;actionableNotice(error.message,'重新连接',()=>window.location.reload());}}
+    if(state.authExpired){setFormBusy(false);return;}
+    if(isLan()&&!state.authExpired){const pending=storedUpload();if(pending){rememberUpload(pending);state.uploadUncertain=true;await recoverUpload();if(state.uploadUncertain||state.job){setFormBusy(false);return;}}}
+    let newBatch=false;try{newBatch=sessionStorage.getItem('hsd-new-batch')==='true';}catch(_){}
+    const jobId=isLan()?(storedJob()||(newBatch?null:config?.active_job_id)||null):storedJob();
     if(jobId) {
       try {const job=await api(`/api/jobs/${encodeURIComponent(jobId)}`);acceptJob(job);renderJob();if(isBusy())schedulePoll();}
-      catch(error){rememberJob(null);if(error.status!==404)notice(error.message);}
+      catch(error){if(loginRequired(error))requireLogin(error);else{rememberJob(null);if(error.status!==404)notice(error.message);}}
     }
     setFormBusy(false);
   }
@@ -739,6 +900,7 @@
       field.addEventListener('drop', (event) => {
         event.preventDefault();
         clear();
+        if(input.disabled||state.starting||state.uploadUncertain)return;
         const files = event.dataTransfer?.files;
         if (!files || !files.length) return;
         try {
