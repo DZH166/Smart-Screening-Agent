@@ -59,8 +59,8 @@ async function main(){
   assert.ok(element('key-batch').classList.contains('key-plain'));assert.equal(element('key-reveal').textContent,'隐藏');
   listeners['key-reveal:click'][0]();
   assert.ok(!element('key-batch').classList.contains('key-plain'));assert.equal(element('key-reveal').textContent,'显示');
-  assert.equal(element('settings-state').textContent,'已启用，导入后自动运行。');assert.ok(element('qualification-state').textContent.includes('仍需人工确认'));assert.ok(element('persistence-state').textContent.includes('DPAPI'));
-  ui.applySettings({...json(initial),key_persistence:'linux_aesgcm'});assert.ok(element('persistence-state').textContent.includes('服务器使用独立主密钥'));assert.ok(!element('persistence-state').textContent.includes('重启后需重新填写'));
+  assert.equal(element('settings-state').textContent,'已启用，导入后自动运行。');assert.ok(element('qualification-state').textContent.includes('仍需人工确认'));assert.ok(element('persistence-state').textContent.includes('这台电脑'));
+  ui.applySettings({...json(initial),key_persistence:'linux_aesgcm'});assert.ok(element('persistence-state').textContent.includes('加密保存在服务器'));assert.ok(!element('persistence-state').textContent.includes('重启后需重新填写'));
   ui.applySettings({...json(initial),enabled:false});assert.match(element('settings-state').textContent,/已关闭 AI/);
   ui.applySettings({...json(initial),configured:false});assert.match(element('settings-state').textContent,/请添加并启用 Key/);
   ui.applySettings({...json(initial),storage_warning:'合成存储异常'});assert.equal(element('storage-warning').textContent,'合成存储异常');assert.ok(!element('storage-warning').classList.contains('hidden'));ready();assert.ok(element('storage-warning').classList.contains('hidden'));
@@ -218,8 +218,9 @@ async function main(){
   retry.resolve({status:200,body:{ok:true}});await retrying;fetchHandler=null;assert.equal(sandbox.window.location.replacements.at(-1),'/admin/login');
 
   const html=fs.readFileSync(path.join(__dirname,'../hsd_tool/static/admin.html'),'utf8'),css=fs.readFileSync(path.join(__dirname,'../hsd_tool/static/admin.css'),'utf8');
-  assert.ok(html.includes('window.HSD_TOKEN = __HSD_TOKEN__'));assert.ok(html.includes('href="/"'));assert.equal((html.match(/<section\b/g)||[]).length,3,'AI settings, Key management and the Key ledger');
-  assert.ok(html.includes('同时由本机独立核验'));assert.ok(html.includes('模型建议不能解除文件硬异常'));assert.ok(html.includes('<summary>使用说明</summary>'));assert.ok(html.includes('原始 XLSX、ZIP、AI 文件和本机路径不会发送'));
+  assert.ok(html.includes('window.HSD_TOKEN = __HSD_TOKEN__'));assert.ok(html.includes('href="/"'));assert.equal((html.match(/<section class="panel\b/g)||[]).length,4,'AI settings, Key management, Key ledger and on-demand help');
+  assert.ok(source.includes('只有通过系统独立核对'));assert.ok(html.includes('AI 建议相同不等于已经确认'));assert.ok(html.includes('原始表格、压缩包、AI 文件和电脑路径不会发送'));
+  assert.ok(html.includes('<details id="admin-help">')&&!html.includes('<details id="admin-help" open'),'help stays closed until requested');
   assert.ok(html.includes('<details id="ledger-details">')&&!html.includes('<details id="ledger-details" open'),'the key ledger is closed until requested');
   assert.ok(html.includes('id="ledger-list"')&&html.includes('id="ledger-state"'),'the key ledger is present');
   const ledgerRow=ui.ledgerHtml({id:'ledger-a',label:'主密钥',api_key:'sk-ledger-visible-value'});

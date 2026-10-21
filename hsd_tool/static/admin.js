@@ -133,8 +133,8 @@
     state.settings = settings;
     if (!state.enableDirty) $('ai-enabled').checked = settings.enabled === true;
     $('settings-state').textContent = !settings.enabled ? '已关闭 AI，使用本机匹配。' : settings.configured ? '已启用，导入后自动运行。' : '请添加并启用 Key，才能使用 AI。';
-    $('qualification-state').textContent = settings.mode === 'validated' ? 'AI 二次复核已进入经验证模式：仅符合全部条件的结果可自动通过，其余仍需人工确认。' : 'AI 二次复核尚未取得条件自动通过资格，复核建议仍需人工确认。AI 查找到的候选只有通过本机独立核验，才能按本机规则自动通过；增加 Key 不会放宽判定。';
-    $('persistence-state').textContent = settings.key_persistence === 'windows_dpapi' ? '主机使用当前 Windows 用户的 DPAPI 加密保存密钥。' : settings.key_persistence === 'linux_aesgcm' ? '服务器使用独立主密钥加密保存 API Key。' : '当前环境只在本次服务运行期间保留密钥，重启后需重新填写。';
+    $('qualification-state').textContent = settings.mode === 'validated' ? '当前 AI 复核已通过使用验证；只有符合全部条件的结果才可自动通过，其余仍需人工确认。' : '当前 AI 复核建议仍需人工确认。AI 找到的图片只有通过系统独立核对，才能自动通过；增加 Key 不会放宽要求。';
+    $('persistence-state').textContent = settings.key_persistence === 'windows_dpapi' ? 'Key 加密保存在这台电脑的当前 Windows 用户下，重启后可继续使用。' : settings.key_persistence === 'linux_aesgcm' ? 'Key 加密保存在服务器上，员工不用重新填写。' : '当前环境只在本次运行期间保留 Key，重启后需重新填写。';
     $('storage-warning').textContent = settings.storage_warning || '';
     $('storage-warning').classList.toggle('hidden', !settings.storage_warning);
   }

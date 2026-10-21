@@ -31,11 +31,6 @@
         </div>
         <p id="settings-state" class="state-line">正在读取设置…</p>
         <div id="storage-warning" class="notice warning hidden" role="alert"></div>
-        <details class="details"><summary>使用说明</summary><div class="detail-body">
-          <p>员工共用主机 Key，无需重复配置。保存成功不代表接口已验证。认证或余额异常修复后，可先停用再启用对应 Key；多个 Key 不增加官方账号额度。</p>
-          <p>启用后发送可处理的表格图片和 AI 预览查找对应，同时由本机独立核验。模型建议不能解除文件硬异常。原始 XLSX、ZIP、AI 文件和本机路径不会发送。</p>
-          <p id="qualification-state"></p><p id="persistence-state"></p>
-        </div></details>
       </section>
       <section class="panel keys-panel" aria-labelledby="keys-heading">
         <div class="section-heading"><div><h2 id="keys-heading">API Key <span id="key-count" class="count"></span></h2><p class="muted">员工共用这些 Key，无需在各自电脑配置。</p></div></div>
@@ -52,6 +47,40 @@
             <div class="ledger-tools"><p class="ledger-warning">仅在展开时读取。默认遮罩，显示后请避免截图或录屏。</p><button id="ledger-refresh" class="button quiet" type="button">重新读取</button></div>
             <p id="ledger-state" class="muted" role="status" aria-live="polite"></p>
             <div id="ledger-list" class="ledger-list"></div>
+          </div>
+        </details>
+      </section>
+      <section class="panel help-panel" aria-labelledby="help-heading">
+        <details id="admin-help">
+          <summary id="help-heading">使用说明与故障排查</summary>
+          <div class="help-body">
+            <section aria-labelledby="usage-heading">
+              <h3 id="usage-heading">怎么使用</h3>
+              <ol>
+                <li><strong>先设置 Key。</strong>每行粘贴一个，点击“添加 Key”，再勾选“启用 DeepSeek”并保存。员工共用这些 Key，不用各自填写。</li>
+                <li><strong>员工上传文件。</strong>选择图片编号表（.xlsx）和 AI 压缩包（.zip），确认本批起始号，再开始处理。已有编号保留；成功匹配的缺号图片按 HSD 加四位数字编号。</li>
+                <li><strong>只处理有疑问的图片。</strong>可靠匹配直接通过；剩余图片按提示确认、换候选或跳过。不需要逐张检查全部图片。</li>
+                <li><strong>确认摘要，再下载。</strong>核对数量后点击“确认并导出”。未处理或跳过的原始行保持原状，不会被当作完成项。请检查下载的 ZIP 能否打开。</li>
+                <li><strong>想中途停止。</strong>点击“停止上传”或“停止本批”，等页面显示已经停止，再处理下一批。已发出的 AI 请求需要等返回或超时，已产生的用量仍会记录。</li>
+                <li><strong>云端结果及时保存。</strong>结果下载到员工电脑，不存 OSS；服务器副本在本批结束或成功修改后保留三天。原浏览器重新登录可找回保留期内同版本任务；换浏览器、清除网站数据或版本升级后不能找回旧批次。</li>
+              </ol>
+            </section>
+            <section aria-labelledby="troubleshooting-heading">
+              <h3 id="troubleshooting-heading">遇到问题怎么办</h3>
+              <ul>
+                <li><strong>网页打不开或要求重新登录。</strong>先检查网络和网址；登录过期就在原浏览器重新登录。大家都打不开时，请联系维护人员检查服务。</li>
+                <li><strong>Key 不可用。</strong>检查是否粘贴完整、DeepSeek 账户是否还有余额。修复后先停用，再启用该 Key。保存成功不代表已经调用成功，增加 Key 也不会增加官方账户额度。</li>
+                <li><strong>上传失败。</strong>按文件旁的提示检查格式和文件是否完整；空间不足时联系维护人员。网络中断先按页面提示核对或重试，避免重复提交。</li>
+                <li><strong>排队或处理较慢。</strong>查看当前阶段和队列位置，先等待，不要反复点击开始。确实不想继续时，使用“停止本批”，不要把“正在停止”当成已经结束。</li>
+                <li><strong>AI 失败或仍有图片待确认。</strong>按页面提示人工处理剩余图片。AI 建议相同不等于已经确认；缺图、颜色差异或相近文件仍可能需要人工判断。</li>
+                <li><strong>下载失败。</strong>留在当前页面按提示重试或重新登录，并检查浏览器下载列表。超过保留期或版本升级后，需要重新上传处理。</li>
+                <li><strong>设置没有保存。</strong>以页面的成功提示为准；提示其他页面改过设置时，点击“刷新设置”，核对后重新保存。不要把按钮点击成功当成设置已经生效。</li>
+              </ul>
+            </section>
+          </div>
+          <div class="help-notes">
+            <p><strong>图片会发到哪里？</strong>启用 AI 后，只发送用于查找和核对的图片预览给 DeepSeek；原始表格、压缩包、AI 文件和电脑路径不会发送。</p>
+            <p id="qualification-state"></p><p id="persistence-state"></p>
           </div>
         </details>
       </section>
