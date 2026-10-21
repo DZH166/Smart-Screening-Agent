@@ -1,4 +1,4 @@
-"""Process-local, thread-safe credential rotation and sanitized diagnostics.
+"""Process-local, thread-safe random credential selection and safe diagnostics.
 
 This pool does not increase concurrency or request budgets. A caller must enforce
 the provider's account limits and the existing per-case retry budget.
@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import secrets
 import threading
 import time
 
@@ -29,7 +30,6 @@ class ApiKeyPool:
         self._clock = clock
         self._lock = threading.RLock()
         self._states = {}
-        self._last_id = None
         self._usage = empty_usage()
         self._cooldown_until = 0
 
@@ -61,8 +61,9 @@ class ApiKeyPool:
         return runtime, keys
 
     def acquire(self, exclude_ids=()):
-        """Return a private credential, or a safe and actionable exception.
+        """Choose uniformly from usable keys, or raise a safe exception.
 
+        Each acquisition is independent; consecutive calls may select one key.
         Authentication/balance suspension persists until explicit disable/enable,
         credential replacement, or process restart. No background retry enables it.
         """
@@ -77,18 +78,17 @@ class ApiKeyPool:
                 # immediately rotate to a different key and evade its limit.
                 raise KeyPoolUnavailable("pool_unavailable")
             excluded = set(exclude_ids)
-            identities = [row["id"] for row in keys]
-            start = ((identities.index(self._last_id) + 1) % len(keys)
-                     if self._last_id in identities else 0)
             now = self._clock()
-            for offset in range(len(keys)):
-                row = keys[(start + offset) % len(keys)]
+            available = []
+            for row in keys:
                 state = self._states[row["id"]]
                 if (row["enabled"] and row["id"] not in excluded and not state["paused"]
                         and state["cooldown_until"] <= now):
-                    self._last_id = row["id"]
-                    return {name: row[name] for name in ("id", "label", "api_key")}
-            raise KeyPoolUnavailable("pool_unavailable")
+                    available.append(row)
+            if not available:
+                raise KeyPoolUnavailable("pool_unavailable")
+            row = secrets.choice(available)
+            return {name: row[name] for name in ("id", "label", "api_key")}
 
     def report(self, key_id, *, code="ok", usage=None):
         """Record one completed attempt; never retain raw provider messages."""

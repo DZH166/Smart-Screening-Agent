@@ -23,18 +23,57 @@ def change(settings, **kwargs):
     return settings.save_pool({"expected_revision": settings.snapshot()["key_revision"], **kwargs})
 
 
-def test_rotation_excludes_attempted_keys_and_is_thread_safe(tmp_path):
-    settings, pool, _ = prepared(tmp_path)
-    first, second, third = [pool.acquire() for _ in range(3)]
-    assert len({first["id"], second["id"], third["id"]}) == 3
-    assert pool.acquire()["id"] == first["id"]
-    assert pool.acquire(exclude_ids=[second["id"], third["id"]])["id"] == first["id"]
+def test_random_selection_offers_every_available_key_and_allows_repeats(tmp_path, monkeypatch):
+    settings, pool, _ = prepared(tmp_path, 10)
+    identities = [row["id"] for row in settings.snapshot()["keys"]]
+    indices = iter([9, 9, 0, 6])
+
+    def choose(rows):
+        assert [row["id"] for row in rows] == identities
+        return rows[next(indices)]
+
+    monkeypatch.setattr("hsd_tool.ai_key_pool.secrets.choice", choose)
+    assert [pool.acquire()["id"] for _ in range(4)] == [identities[i] for i in [9, 9, 0, 6]]
+
+
+def test_random_selection_filters_disabled_paused_and_excluded_keys(tmp_path, monkeypatch):
+    settings, pool, now = prepared(tmp_path, 5)
+    identities = [row["id"] for row in settings.snapshot()["keys"]]
+    change(settings, update=[{"id": identities[0], "enabled": False}])
+    pool.report(identities[1], code="authentication")
+    pool.report(identities[2], code="insufficient_balance")
+    now[0] += 100000  # Time alone never restores authentication/balance failures.
+    offered = []
+
+    def choose(rows):
+        offered.append([row["id"] for row in rows])
+        return rows[-1]
+
+    monkeypatch.setattr("hsd_tool.ai_key_pool.secrets.choice", choose)
+    assert pool.acquire(exclude_ids=[identities[3]])["id"] == identities[4]
+    assert offered == [[identities[4]]]
     with pytest.raises(KeyPoolUnavailable) as error:
-        pool.acquire(exclude_ids=[first["id"], second["id"], third["id"]])
+        pool.acquire(exclude_ids=identities[3:])
     assert error.value.code == "pool_unavailable"
+    assert offered == [[identities[4]]], "Never invoke the selector with no usable key"
+
+
+def test_random_selection_and_accounting_remain_thread_safe(tmp_path):
+    settings, pool, _ = prepared(tmp_path)
+    identities = {row["id"] for row in settings.snapshot()["keys"]}
+    usage = {**empty_usage(), "requests": 1, "successes": 1}
+
+    def request(_):
+        selected = pool.acquire()["id"]
+        pool.report(selected, usage=usage)
+        return selected
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as threads:
-        selections = list(threads.map(lambda _: pool.acquire()["id"], range(90)))
-    assert all(selections.count(row["id"]) == 30 for row in settings.snapshot()["keys"])
+        selections = list(threads.map(request, range(90)))
+    assert set(selections) <= identities and len(selections) == 90
+    snapshot = pool.snapshot()
+    assert snapshot["usage"]["requests"] == snapshot["usage"]["successes"] == 90
+    assert all(row["requests"] == selections.count(row["id"]) for row in snapshot["keys"])
 
 
 @pytest.mark.parametrize("code", ["authentication", "insufficient_balance"])
@@ -108,15 +147,16 @@ def test_usage_known_unknown_usd_and_totals_survive_removal(tmp_path):
     pool.report(first["id"], usage=usage)
     snapshot = pool.snapshot()
     assert snapshot["currency"] == "USD" and snapshot["scope"] == "current_process"
-    assert snapshot["keys"][0]["requests"] == 1
-    assert snapshot["keys"][0]["estimated_usd_upper_bound"] == 0.123
+    selected = next(row for row in snapshot["keys"] if row["id"] == first["id"])
+    assert selected["requests"] == 1
+    assert selected["estimated_usd_upper_bound"] == 0.123
     pool.report(first["id"], code="network_error")
     snapshot = pool.snapshot()
     assert snapshot["usage"]["requests"] == 2
     assert snapshot["usage"]["unknown_usage_requests"] == 1
     assert snapshot["usage"]["estimated_usd"] == 0.123
     assert snapshot["usage"]["estimated_usd_upper_bound"] is None
-    assert snapshot["keys"][0]["usage"]["cost_incomplete"] is True
+    assert next(row for row in snapshot["keys"] if row["id"] == first["id"])["usage"]["cost_incomplete"] is True
     change(settings, remove=[first["id"]])
     assert pool.snapshot()["usage"]["requests"] == 2
 
@@ -163,7 +203,7 @@ def test_rate_limit_applies_to_all_keys_and_newly_added_keys_until_expiry(tmp_pa
     with pytest.raises(KeyPoolUnavailable):
         pool.acquire(exclude_ids=[first["id"]])
     now[0] += 60
-    assert pool.acquire()["id"] != first["id"]
+    assert pool.acquire(exclude_ids=[first["id"]])["id"] != first["id"]
 
 
 def test_removed_inflight_credential_is_not_resurrected_and_charges_still_count(tmp_path):

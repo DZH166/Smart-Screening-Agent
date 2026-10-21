@@ -19,6 +19,13 @@ class Settings:
         return {"enabled": True, "keys": self.keys, "api_key": self.keys[0]["api_key"] if self.keys else ""}
 
 
+@pytest.fixture(autouse=True)
+def controlled_key_selection(monkeypatch):
+    # Fix the random draw so each synthetic transport exercises its intended
+    # failure/retry, independent of production request ordering.
+    monkeypatch.setattr("hsd_tool.ai_key_pool.secrets.choice", lambda rows: rows[0])
+
+
 def manager_and_client(outcomes):
     settings = Settings(len(outcomes))
     manager = SimpleNamespace(ai_settings=settings, ai_debug=AiDebugTrace(), ai_key_pool=ApiKeyPool(settings))
@@ -86,11 +93,15 @@ def test_disabling_key_during_backoff_prevents_reusing_a_stale_credential():
     assert len(next(iter(openers.values())).calls) == 1
 
 
-def test_rotation_occurs_between_cases_and_not_by_sending_parallel_duplicates():
-    manager, client, openers, _ = manager_and_client([[response()], [response()]])
-    client.review(CONTENT, row_id="r2")
-    client.review(CONTENT, row_id="r3")
-    assert [len(opener.calls) for opener in openers.values()] == [1,1]
+@pytest.mark.parametrize("draws,expected_calls", [([1, 0], [1, 1]), ([1, 1], [0, 2])])
+def test_each_case_uses_its_random_key_without_duplicate_requests(monkeypatch, draws, expected_calls):
+    indices = iter(draws)
+    monkeypatch.setattr("hsd_tool.ai_key_pool.secrets.choice", lambda rows: rows[next(indices)])
+    manager, client, openers, _ = manager_and_client([[response(), response()], [response(), response()]])
+    results = [client.review(CONTENT, row_id=row) for row in ("r2", "r3")]
+    assert [len(opener.calls) for opener in openers.values()] == expected_calls
+    assert [result["attempt_history"][0]["key_id"] for result in results] == ["test-key-"+str(i) for i in draws]
+    assert all(result["usage"]["requests"] == 1 for result in results)
 
 
 def test_debug_rejects_unstructured_data_and_reports_all_local_gate_reasons():
