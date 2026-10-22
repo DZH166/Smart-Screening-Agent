@@ -77,6 +77,8 @@ class CloudAccess(LanAccess):
         self.authority = host + (f":{port}" if port not in {None, 443} else "")
         self.origin = "https://" + self.authority
         self.code = self._code(code)
+        self.min_code_length = min_code_length
+        self.access_codes = None
         self.admin_credentials = admin_credentials
         if len(self.code) < min_code_length:
             raise ValueError(f"服务器员工访问码至少需要{min_code_length}位，请通过私有文件配置。")
