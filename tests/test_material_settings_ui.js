@@ -26,7 +26,8 @@ function responseBody(revision = 4, configured = false, enabled = false) {
 }
 
 function harness() {
-  const nodes = new Map(), windowListeners = new Map(), calls = [];
+  const nodes = new Map(), windowListeners = new Map(), calls = [], copied = [];
+  const clipboard = {writeText: async value => {copied.push(value);}};
   function node(id) {
     if (!nodes.has(id)) {
       const classes = new Set(
@@ -34,7 +35,7 @@ function harness() {
       );
       const listeners = new Map();
       nodes.set(id, {
-        id, value: "", textContent: "", checked: false, disabled: false,
+        id, value: "", textContent: "", checked: false, disabled: false, open: false,
         classList: {
           add(...values) { for (const value of values) classes.add(value); },
           remove(...values) { for (const value of values) classes.delete(value); },
@@ -65,7 +66,7 @@ function harness() {
     },
   };
   const sandbox = {
-    window, document: { getElementById: node },
+    window, document: { getElementById: node }, navigator: {clipboard},
     fetch(url, options) {
       const pending = deferred();
       const call = { url, options, pending };
@@ -76,7 +77,7 @@ function harness() {
   // Execute the actual source unchanged, including its normal boot GET.
   vm.runInNewContext(source, sandbox, { filename: "material-settings.js" });
   return {
-    node, calls,
+    node, calls, copied, clipboard,
     emit(name, event = {}) {
       for (const fn of windowListeners.get(name) || []) fn(event);
     },
@@ -342,6 +343,100 @@ test("an old provider snapshot cannot unlock Ark settings", async () => {
   assert.equal(h.node("material-save").disabled, true);
   assert.equal(h.node("material-model").disabled, true);
 });
+
+
+function openKey(h) { h.node("material-key-details").open = true; h.node("material-key-details").emit("toggle"); }
+function keyBody(revision=4) {return {provider:"volcengine_ark",revision,api_key:KEY};}
+
+test("opening the key panel never fetches or reveals a secret", async () => {
+  const h = await harness().ready(responseBody(4,true,false)); openKey(h);
+  assert.equal(h.calls.length,1);
+  assert.equal(h.node("material-key-value").textContent,"••••••••");
+});
+
+test("show is explicit and fresh, hide erases the visible key without another request", async () => {
+  const h = await harness().ready(responseBody(4,true,false)); openKey(h);
+  h.node("material-key-reveal").emit("click");
+  assert.equal(h.calls[1].url,"/api/admin/material-key?revision=4");
+  assert.equal(h.calls[1].options.cache,"no-store");
+  assert.equal(h.node("material-key-reveal").disabled,true);
+  h.node("material-key-reveal").emit("click"); assert.equal(h.calls.length,2);
+  assert.ok(!h.displayedText().includes(KEY));
+  await h.reply(1,keyBody()); assert.equal(h.node("material-key-value").textContent,KEY);
+  h.node("material-key-reveal").emit("click");
+  assert.equal(h.node("material-key-value").textContent,"••••••••"); assert.equal(h.calls.length,2);
+  h.node("material-key-reveal").emit("click"); await h.reply(2,keyBody());
+  assert.equal(h.calls.length,3);
+});
+
+test("copy fetches a fresh key but leaves its text masked", async () => {
+  const h = await harness().ready(responseBody(4,true,false)); openKey(h);
+  h.node("material-key-copy").emit("click"); await h.reply(1,keyBody());
+  assert.deepEqual(h.copied,[KEY]); assert.match(h.node("material-message").textContent,/已复制/);
+  assert.ok(!h.displayedText().includes(KEY));
+});
+
+test("copy success waits for clipboard acknowledgement", async () => {
+  const h = await harness().ready(responseBody(4,true,false)); openKey(h);
+  const d=deferred(); h.clipboard.writeText=()=>d.promise;
+  h.node("material-key-copy").emit("click"); await h.reply(1,keyBody());
+  assert.ok(!/已复制/.test(h.node("material-message").textContent));
+  assert.equal(h.node("material-key-copy").disabled,true);
+  d.resolve(); await flush(); assert.match(h.node("material-message").textContent,/已复制/);
+});
+
+test("clipboard failure never echoes its exception or claims success", async () => {
+  const h = await harness().ready(responseBody(4,true,false)); openKey(h);
+  h.clipboard.writeText=async()=>{throw new Error(KEY);};
+  h.node("material-key-copy").emit("click"); await h.reply(1,keyBody());
+  assert.match(h.node("material-message").textContent,/复制未完成/);
+  assert.ok(!h.displayedText().includes(KEY)); assert.ok(!/已复制/.test(h.node("material-message").textContent));
+});
+
+for (const action of ["material-key-copy","material-key-reveal"]) {
+  test(`closing the panel suppresses a late ${action} response`, async()=>{
+    const h=await harness().ready(responseBody(4,true,false)); openKey(h);
+    h.node(action).emit("click"); h.node("material-key-details").open=false;
+    h.node("material-key-details").emit("toggle"); await h.reply(1,keyBody());
+    assert.ok(!h.displayedText().includes(KEY)); assert.deepEqual(h.copied,[]);
+  });
+}
+
+for (const status of [401,403,409]) {
+  test(`${status} on a key read never exposes a secret and requires recovery`,async()=>{
+    const h=await harness().ready(responseBody(4,true,false)); openKey(h);
+    h.node("material-key-copy").emit("click"); await h.reply(1,{error:"synthetic rejection"},status);
+    assert.ok(!h.displayedText().includes(KEY)); assert.equal(h.node("material-save").disabled,true);
+    assert.equal(h.node("material-key-copy").disabled,true);
+    assert.deepEqual(h.copied,[]);
+  });
+}
+
+test("leaving and BFCache recovery ignore a late plaintext response",async()=>{
+  const h=await harness().ready(responseBody(4,true,false)); openKey(h);
+  h.node("material-key-copy").emit("click"); h.emit("pagehide");
+  h.emit("pageshow",{persisted:true}); await h.reply(2,responseBody(5,true,false));
+  await h.reply(1,keyBody()); assert.ok(!h.displayedText().includes(KEY)); assert.deepEqual(h.copied,[]);
+  assert.equal(h.node("material-key-details").open,false);
+});
+
+test("refresh and mutation erase any displayed key before awaiting their response",async()=>{
+  const h=await harness().ready(responseBody(4,true,false)); openKey(h);
+  h.node("material-key-reveal").emit("click"); await h.reply(1,keyBody());
+  h.node("material-refresh").emit("click"); assert.ok(!h.displayedText().includes(KEY));
+  await h.reply(2,responseBody(4,true,false)); openKey(h);
+  h.node("material-key-reveal").emit("click"); await h.reply(3,keyBody());
+  h.submit(); assert.ok(!h.displayedText().includes(KEY));
+  await h.reply(4,responseBody(5,true,false));
+});
+
+for (const bad of [{...keyBody(),provider:"fal"},{...keyBody(),revision:9},{...keyBody(),api_key:"short"}]) {
+  test(`invalid reveal response ${JSON.stringify(Object.keys(bad))} is never displayed or copied`,async()=>{
+    const h=await harness().ready(responseBody(4,true,false)); openKey(h);
+    h.node("material-key-copy").emit("click"); await h.reply(1,bad);
+    assert.ok(!h.displayedText().includes(KEY)); assert.deepEqual(h.copied,[]);
+  });
+}
 
 async function main() {
   let failures = 0;

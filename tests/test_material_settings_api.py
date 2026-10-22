@@ -141,3 +141,55 @@ def test_model_only_edit_keeps_secret_and_no_jobs_are_started(settings_app):
     assert not result.json["validation_ready"] and not c.app.config["HSD_MANAGER"].jobs
     page = get(c, browser, "/admin/material").data
     assert '火山方舟'.encode() in page and b'fal API Key' not in page
+
+
+def test_reveal_requires_admin_page_token_and_valid_origin(settings_app):
+    c = settings_app
+    browser = c.app.test_client()
+    path = "/api/admin/material-key?revision=1"
+    assert get(c, browser, path).status_code == 401
+    if c.mode != "local":
+        assert call(c, browser, "/api/lan/login", payload={"code": "synthetic-admin-settings-employee-code"}).status_code == 200
+        assert get(c, browser, path).status_code == 401
+    login_admin(c, browser)
+    assert post(c, browser, {"action": "set_config", "api_key": KEY, "expected_revision": 0}).status_code == 200
+    for options in ({"token": None}, {"token": "wrong"}, {"origin": "https://wrong.invalid"}):
+        rejected = call(c, browser, path, method="GET", **options)
+        assert rejected.status_code == 403 and KEY.encode() not in rejected.data
+    result = get(c, browser, path)
+    assert result.status_code == 200
+    assert result.json == {"provider": "volcengine_ark", "revision": 1, "api_key": KEY}
+    assert result.headers["Cache-Control"] == "no-store"
+    assert "Access-Control-Allow-Origin" not in result.headers
+    assert KEY.encode() not in get(c, browser).data
+    assert call(c, browser, "/admin/logout", payload={}).status_code == 200
+    assert get(c, browser, path).status_code == 401
+
+
+@pytest.mark.parametrize("query", ["", "?revision=true", "?revision=-1", "?revision=1&revision=1",
+    "?revision=0&other=1", "?revision=" + "9" * 40])
+def test_bad_reveal_query_is_rejected_without_a_secret(settings_app, query):
+    c = settings_app
+    browser = c.app.test_client()
+    login_admin(c, browser)
+    assert get(c, browser, "/api/admin/material-key" + query).status_code == 400
+
+
+def test_reveal_is_readonly_and_cannot_return_a_rotated_or_removed_key(settings_app):
+    c = settings_app
+    browser = c.app.test_client()
+    login_admin(c, browser)
+    store = c.app.config["HSD_MATERIAL_SETTINGS"]
+    store.save_ark_key(KEY, model_id=MODEL, expected_revision=0)
+    before = store.path.read_bytes()
+    assert get(c, browser, "/api/admin/material-key?revision=1").json["api_key"] == KEY
+    assert store.path.read_bytes() == before and store.snapshot()["revision"] == 1
+    second = "synthetic-second-ark-key-not-real"
+    store.save_ark_key(second, expected_revision=1)
+    stale = get(c, browser, "/api/admin/material-key?revision=1")
+    assert stale.status_code == 409 and KEY.encode() not in stale.data and second.encode() not in stale.data
+    assert get(c, browser, "/api/admin/material-key?revision=2").json["api_key"] == second
+    store.remove_ark_key(expected_revision=2)
+    missing = get(c, browser, "/api/admin/material-key?revision=3")
+    assert missing.status_code == 400 and second.encode() not in missing.data
+    assert c.app.config["HSD_MANAGER"].jobs == {}

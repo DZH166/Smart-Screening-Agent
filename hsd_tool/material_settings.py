@@ -2,6 +2,8 @@
 
 Only an administrator API may call ``save``. Public snapshots never contain a
 credential or suffix; ``runtime`` is process-only and must not be serialized.
+The explicitly authorized ``admin_key`` is for the separate authenticated,
+non-cacheable administrator reveal endpoint only.
 There is deliberately no environment-key or session-only fallback.
 """
 from __future__ import annotations
@@ -167,6 +169,17 @@ class MaterialSettings:
         with self._lock:
             return {"provider": PROVIDER, "model_id": self._model_id,
                     "enabled": self._enabled, "ark_key": self._ark_key, "revision": self._revision}
+
+    def admin_key(self, expected_revision: int) -> dict:
+        """Explicit admin-only disclosure; never use in settings snapshots."""
+        if type(expected_revision) is not int or expected_revision < 0:
+            raise ValueError("配置版本不正确，请刷新后重试。")
+        with self._lock:
+            if expected_revision != self._revision:
+                raise MaterialSettingsConflict("配置已更新，请刷新后重新查看。")
+            if not self._ark_key:
+                raise ValueError("尚未保存火山方舟 Key。")
+            return {"provider": PROVIDER, "revision": self._revision, "api_key": self._ark_key}
 
     def _write(self, record):
         if self._server_store is not None:

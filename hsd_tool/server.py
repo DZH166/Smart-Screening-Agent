@@ -412,6 +412,25 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
     def material_settings_get():
         return jsonify(material_settings_snapshot())
 
+    @app.get("/api/admin/material-key")
+    def material_key_get():
+        # Admin session is enforced before routing; require the page token too.
+        # No credential belongs in a query string, log, or regular snapshot.
+        provided = request.headers.get("X-HSD-Token", "")
+        if not secrets.compare_digest(provided.encode(), token.encode()):
+            return jsonify(error="会话已失效，请重新打开管理员页面。"), 403
+        origin = request.headers.get("Origin")
+        if origin and origin != request.host_url.rstrip("/"):
+            return jsonify(error="请求来源不匹配。"), 403
+        values = request.args.getlist("revision")
+        if (set(request.args) != {"revision"} or len(values) != 1
+                or not values[0].isascii() or not values[0].isdigit() or len(values[0]) > 16):
+            raise ValueError("配置版本不正确，请刷新后重试。")
+        try:
+            return jsonify(material_settings.admin_key(int(values[0])))
+        except MaterialSettingsConflict:
+            raise Conflict("配置已在其他页面更新，请刷新后重新查看。") from None
+
     @app.post("/api/admin/material-settings")
     def material_settings_save():
         if request.headers.get("Origin") != request.host_url.rstrip("/"):

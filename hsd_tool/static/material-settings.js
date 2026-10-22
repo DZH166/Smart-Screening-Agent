@@ -4,6 +4,13 @@
   let revision = null, configured = false, pending = false, authenticated = true;
   let committedEnabled = false;
   let generation = 0;
+  let keyShown = false, keyReading = false, keyEpoch = 0;
+  function clearKeyView(close = true) {
+    keyEpoch++; keyReading = false; keyShown = false;
+    el("material-key-value").textContent = "••••••••";
+    el("material-key-reveal").textContent = "显示 Key";
+    if (close) el("material-key-details").open = false;
+  }
   function message(text, error = false) {
     const target = el("material-message");
     target.textContent = text;
@@ -11,15 +18,17 @@
     target.classList.toggle("warning", error);
   }
   function controls() {
-    const blocked = pending || !authenticated || revision === null;
+    const blocked = pending || keyReading || !authenticated || revision === null;
     for (const id of ["material-key", "material-model", "material-save", "material-enabled", "material-enable-save"])
       el(id).disabled = blocked;
     el("material-remove").disabled = blocked || !configured;
-    el("material-refresh").disabled = pending;
+    el("material-refresh").disabled = pending || keyReading;
+    for (const id of ["material-key-reveal", "material-key-copy"])
+      el(id).disabled = blocked || !configured;
     el("material-save").textContent = "保存配置";
   }
-  async function call(method = "GET", payload = null, current = generation) {
-    const response = await fetch("/api/admin/material-settings", {
+  async function call(method = "GET", payload = null, current = generation, path = "/api/admin/material-settings") {
+    const response = await fetch(path, {
       method, credentials: "same-origin", cache: "no-store",
       headers: {"X-HSD-Token": window.HSD_TOKEN, ...(payload ? {"Content-Type": "application/json"} : {})},
       ...(payload ? {body: JSON.stringify(payload)} : {})
@@ -28,7 +37,9 @@
       if (current === generation) {
         authenticated = false; revision = null;
         el("material-key").value = "";
+        clearKeyView();
         el("material-login").classList.remove("hidden");
+        message("登录已失效，请重新登录管理员页面。", true);
         controls();
       }
       throw new Error("登录已失效，请重新登录管理员页面。");
@@ -54,7 +65,8 @@
     controls();
   }
   async function load() {
-    if (pending) return;
+    if (pending || keyReading) return;
+    clearKeyView();
     const current = ++generation;
     pending = true; controls();
     try { const data = await call(); if (current === generation && authenticated) {render(data); message("");} }
@@ -62,7 +74,8 @@
     finally { if (current === generation) {pending = false; controls();} }
   }
   async function save(payload) {
-    if (pending || revision === null || !authenticated) return;
+    if (pending || keyReading || revision === null || !authenticated) return;
+    clearKeyView();
     const current = ++generation;
     pending = true; controls();
     try {
@@ -77,6 +90,42 @@
     }
     finally { if (current === generation) {pending = false; controls();} }
   }
+  async function keyAction(copy) {
+    if (pending || keyReading || revision === null || !authenticated || !configured || !el("material-key-details").open) return;
+    if (!copy && keyShown) {clearKeyView(false); controls(); return;}
+    const current = generation, epoch = ++keyEpoch;
+    const active = () => current === generation && epoch === keyEpoch && authenticated && el("material-key-details").open;
+    keyReading = true; controls();
+    let copying = false;
+    try {
+      // Fresh, revision-bound read for every show/copy; never cache in attributes.
+      const data = await call("GET", null, current, `/api/admin/material-key?revision=${revision}`);
+      if (!active()) return;
+      if (data.provider !== "volcengine_ark" || data.revision !== revision ||
+          typeof data.api_key !== "string" || data.api_key.length < 10 || data.api_key.length > 512 ||
+          !/^[\x21-\x7e]+$/.test(data.api_key)) throw new Error("invalid_key_response");
+      if (copy) {
+        if (!navigator.clipboard?.writeText) {
+          message("当前浏览器无法自动复制，请显示 Key 后手动复制。", true); return;
+        }
+        copying = true;
+        await navigator.clipboard.writeText(data.api_key);
+        if (active()) message("Key 已复制。");
+      } else {
+        el("material-key-value").textContent = data.api_key;
+        el("material-key-reveal").textContent = "隐藏 Key";
+        keyShown = true;
+      }
+    } catch (error) {
+      if (active()) {
+        clearKeyView(false);
+        if (error.status === 409) revision = null;
+        message(error.status ? error.message : copying ? "复制未完成，请显示 Key 后手动复制。" : "无法读取 Key，请刷新设置后重试。", true);
+      }
+    } finally { if (current === generation && epoch === keyEpoch) {keyReading = false; controls();} }
+    // Error clearing invalidates this read; refresh control state explicitly.
+    if (current === generation) controls();
+  }
   el("material-form").addEventListener("submit", (event) => {
     event.preventDefault();
     const key = el("material-key").value.trim();
@@ -89,7 +138,10 @@
   el("material-enable-form").addEventListener("submit", (event) => {event.preventDefault(); save({action: "set_enabled", enabled: el("material-enabled").checked});});
   el("material-remove").addEventListener("click", () => save({action: "remove_key"}));
   el("material-refresh").addEventListener("click", load);
-  window.addEventListener("pagehide", () => {generation++; authenticated = false; el("material-key").value = "";});
+  el("material-key-reveal").addEventListener("click", () => keyAction(false));
+  el("material-key-copy").addEventListener("click", () => keyAction(true));
+  el("material-key-details").addEventListener("toggle", () => {if (!el("material-key-details").open) {clearKeyView(false); controls();}});
+  window.addEventListener("pagehide", () => {generation++; authenticated = false; el("material-key").value = ""; clearKeyView(); controls();});
   window.addEventListener("pageshow", (event) => {if (event.persisted) {generation++; pending = false; authenticated = true; revision = null; load();}});
   load();
 })();
