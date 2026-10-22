@@ -145,3 +145,5 @@
     grid-template-columns: 1fr
   }
 }
+
+#material-form>label:not(:first-child){margin-top:16px}.material-actions{display:flex;gap:12px;align-items:center;margin-top:16px;flex-wrap:wrap}#material-form>.muted{margin-top:6px}

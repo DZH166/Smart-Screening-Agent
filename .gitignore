@@ -34,6 +34,7 @@ instance.json
 tests/.admin-password
 /图片编辑/
 material_settings.json
+material_volcengine_settings.json
 .material-settings-*.tmp
 employee_access/
 access_codes.json

@@ -418,8 +418,10 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
             raise ValueError("请求来源不匹配。")
         payload = request.get_json()
         action = payload.get("action")
-        allowed = {"set_key": {"api_key"}, "remove_key": set(), "set_enabled": {"enabled"}}
-        if not isinstance(action, str) or action not in allowed or set(payload) != allowed[action] | {"action", "expected_revision"}:
+        allowed = {"set_config": {"api_key", "model_id"}, "remove_key": set(), "set_enabled": {"enabled"}}
+        if (payload.get("provider") != "volcengine_ark" or not isinstance(action, str)
+                or action not in allowed
+                or set(payload) != allowed[action] | {"action", "provider", "expected_revision"}):
             raise ValueError("素材设置格式不正确。")
         update = {name: payload[name] for name in allowed[action]}
         update["expected_revision"] = payload["expected_revision"]

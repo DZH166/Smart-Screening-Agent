@@ -12,7 +12,8 @@ from hsd_tool.ai_settings import AiSettings
 from hsd_tool.material_settings import MaterialSettings, MaterialSettingsConflict
 
 
-KEY = "synthetic-fal-id:synthetic-fal-secret-not-real"
+MODEL = "doubao-seedream-synthetic-test"
+KEY = "synthetic-ark-id:synthetic-ark-secret-not-real"
 SECOND = "synthetic-second-id:synthetic-second-secret-not-real"
 
 
@@ -34,43 +35,43 @@ def test_encrypted_roundtrip_snapshot_is_closed_and_private_runtime_only(tmp_pat
     settings = settings_at(tmp_path)
     assert settings.snapshot() == {
         "enabled": False, "configured": False, "key_persistence": "windows_dpapi",
-        "revision": 0, "warning": ""}
-    result = settings.save({"api_key": KEY, "enabled": True, "expected_revision": 0})
+        "revision": 0, "warning": "", "provider": "volcengine_ark", "model_id": ""}
+    result = settings.save({"api_key": KEY, "model_id": MODEL, "enabled": True, "expected_revision": 0})
     assert result["enabled"] and result["configured"] and result["revision"] == 1
     assert KEY not in json.dumps(result) and KEY[-8:] not in json.dumps(result)
     assert KEY not in settings.path.read_text("utf-8")
     assert set(json.loads(settings.path.read_text("utf-8"))) == {
-        "version", "enabled", "revision", "encrypted_fal_key"}
+        "version", "provider", "enabled", "revision", "model_id", "encrypted_ark_key"}
     restored = settings_at(tmp_path)
-    assert restored.runtime() == {"enabled": True, "fal_key": KEY, "revision": 1}
+    assert restored.runtime() == {"provider": "volcengine_ark", "model_id": MODEL, "enabled": True, "ark_key": KEY, "revision": 1}
     assert restored.snapshot() == result
     assert not list(tmp_path.glob(".material-settings-*.tmp"))
 
 
 def test_same_settings_are_noop_and_blank_input_preserves_secret(tmp_path):
     settings = settings_at(tmp_path)
-    settings.save_fal_key(KEY, expected_revision=0)
+    settings.save_ark_key(KEY, expected_revision=0, model_id=MODEL)
     before = settings.path.read_bytes()
     result = settings.save({"api_key": "", "expected_revision": 1})
     assert result["revision"] == 1 and settings.path.read_bytes() == before
     settings.set_enabled(True, expected_revision=1)
-    assert settings.runtime() == {"enabled": True, "fal_key": KEY, "revision": 2}
+    assert settings.runtime() == {"provider": "volcengine_ark", "model_id": MODEL, "enabled": True, "ark_key": KEY, "revision": 2}
 
 
 def test_delete_disables_then_new_key_does_not_silently_enable(tmp_path):
     settings = settings_at(tmp_path)
-    settings.save({"api_key": KEY, "enabled": True, "expected_revision": 0})
-    result = settings.remove_fal_key(expected_revision=1)
+    settings.save({"api_key": KEY, "model_id": MODEL, "enabled": True, "expected_revision": 0})
+    result = settings.remove_ark_key(expected_revision=1)
     assert not result["enabled"] and not result["configured"] and result["revision"] == 2
-    assert settings_at(tmp_path).runtime()["fal_key"] == ""
-    assert json.loads(settings.path.read_text("utf-8"))["encrypted_fal_key"] == ""
-    settings.save_fal_key(SECOND, expected_revision=2)
+    assert settings_at(tmp_path).runtime()["ark_key"] == ""
+    assert json.loads(settings.path.read_text("utf-8"))["encrypted_ark_key"] == ""
+    settings.save_ark_key(SECOND, expected_revision=2, model_id=MODEL)
     assert settings.runtime()["enabled"] is False
 
 
 def test_stale_page_cannot_replace_delete_or_toggle_key(tmp_path):
     settings = settings_at(tmp_path)
-    settings.save_fal_key(KEY, expected_revision=0)
+    settings.save_ark_key(KEY, expected_revision=0, model_id=MODEL)
     before = settings.path.read_bytes()
     for change in ({"api_key": SECOND}, {"clear_key": True}, {"enabled": True}):
         with pytest.raises(MaterialSettingsConflict) as error:
@@ -78,7 +79,7 @@ def test_stale_page_cannot_replace_delete_or_toggle_key(tmp_path):
         assert error.value.code == "revision_conflict"
         assert KEY not in str(error.value)
         assert settings.path.read_bytes() == before
-    assert settings.runtime()["fal_key"] == KEY
+    assert settings.runtime()["ark_key"] == KEY
 
 
 @pytest.mark.parametrize("payload", [
@@ -95,13 +96,13 @@ def test_stale_page_cannot_replace_delete_or_toggle_key(tmp_path):
 ])
 def test_invalid_save_preserves_existing_runtime_and_file(tmp_path, payload):
     settings = settings_at(tmp_path)
-    settings.save({"api_key": KEY, "enabled": True, "expected_revision": 0})
+    settings.save({"api_key": KEY, "model_id": MODEL, "enabled": True, "expected_revision": 0})
     before = settings.path.read_bytes()
     with pytest.raises(ValueError) as error:
         settings.save(payload)
     assert KEY not in str(error.value) and SECOND not in str(error.value)
     assert settings.path.read_bytes() == before
-    assert settings.runtime() == {"enabled": True, "fal_key": KEY, "revision": 1}
+    assert settings.runtime() == {"provider": "volcengine_ark", "model_id": MODEL, "enabled": True, "ark_key": KEY, "revision": 1}
 
 
 def test_enabling_without_key_rejected_without_creating_file(tmp_path):
@@ -111,20 +112,71 @@ def test_enabling_without_key_rejected_without_creating_file(tmp_path):
     assert not settings.path.exists() and settings.snapshot()["revision"] == 0
 
 
-def test_no_session_or_environment_fallback_without_protection(tmp_path):
-    settings = MaterialSettings(tmp_path, protector=None, environ={
-        "FAL_KEY": KEY, "FAL_API_KEY": KEY, "DEEPSEEK_API_KEY": KEY})
-    assert settings.snapshot()["key_persistence"] == "unavailable"
-    assert settings.runtime()["fal_key"] == ""
+def test_legacy_fal_file_is_not_read_migrated_or_modified(tmp_path):
+    legacy = tmp_path / "material_settings.json"
+    content = json.dumps({"version": 1, "enabled": True, "revision": 17,
+                          "encrypted_fal_key": base64.b64encode(FakeProtector().encrypt(
+                              b"HSD-MATERIAL-FAL-1\x00" + KEY.encode())).decode()})
+    legacy.write_text(content, encoding="utf8")
+    settings = settings_at(tmp_path)
+    assert not settings.snapshot()["configured"] and not settings.snapshot()["enabled"]
+    settings.save_ark_key(SECOND, model_id=MODEL, expected_revision=0)
+    assert settings.path.name == "material_volcengine_settings.json"
+    assert legacy.read_text("utf8") == content
+    assert settings.runtime()["ark_key"] == SECOND
+
+
+def test_key_only_can_be_saved_but_cannot_enable_until_model_selected(tmp_path):
+    settings = settings_at(tmp_path)
+    settings.save_ark_key(KEY, expected_revision=0)
+    before = settings.path.read_bytes()
+    with pytest.raises(ValueError, match="模型 ID"):
+        settings.set_enabled(True, expected_revision=1)
+    assert settings.path.read_bytes() == before
+    settings.save({"model_id": MODEL, "expected_revision": 1})
+    settings.set_enabled(True, expected_revision=2)
+    assert settings_at(tmp_path).runtime()["model_id"] == MODEL
+    result = settings.remove_ark_key(expected_revision=3)
+    assert not result["enabled"] and not result["configured"] and result["model_id"] == ""
+
+
+@pytest.mark.parametrize("model", [None, 2, True, "https://example.invalid/model", "模型昵称",
+    "doubao-seedream-test\n", "ep-abc def", "doubao-seedream-" + "a" * 128, KEY])
+def test_invalid_model_never_changes_key_or_leaks_input(tmp_path, model):
+    settings = settings_at(tmp_path)
+    settings.save_ark_key(KEY, model_id=MODEL, expected_revision=0)
+    before = settings.path.read_bytes()
     with pytest.raises(ValueError) as error:
-        settings.save_fal_key(KEY, expected_revision=0)
+        settings.save({"model_id": model, "expected_revision": 1})
+    assert KEY not in str(error.value)
+    assert settings.path.read_bytes() == before
+
+
+def test_fal_ciphertext_cannot_be_relabelled_as_ark_or_enabled(tmp_path):
+    settings = settings_at(tmp_path)
+    settings.save_ark_key(KEY, model_id=MODEL, expected_revision=0)
+    record = json.loads(settings.path.read_text("utf8"))
+    record["encrypted_ark_key"] = base64.b64encode(FakeProtector().encrypt(
+        b"HSD-MATERIAL-FAL-1\x00" + KEY.encode())).decode()
+    settings.path.write_text(json.dumps(record), encoding="utf8")
+    restored = settings_at(tmp_path)
+    assert not restored.snapshot()["configured"] and restored.snapshot()["warning"]
+
+
+def test_no_session_or_environment_arklback_without_protection(tmp_path):
+    settings = MaterialSettings(tmp_path, protector=None, environ={
+        "ARK_KEY": KEY, "ARK_API_KEY": KEY, "DEEPSEEK_API_KEY": KEY})
+    assert settings.snapshot()["key_persistence"] == "unavailable"
+    assert settings.runtime()["ark_key"] == ""
+    with pytest.raises(ValueError) as error:
+        settings.save_ark_key(KEY, expected_revision=0, model_id=MODEL)
     assert KEY not in str(error.value) and not settings.path.exists()
-    assert settings.runtime()["fal_key"] == ""
+    assert settings.runtime()["ark_key"] == ""
 
 
 def test_encryption_failure_keeps_old_key_and_hides_protector_exception(tmp_path):
     settings = settings_at(tmp_path)
-    settings.save_fal_key(KEY, expected_revision=0)
+    settings.save_ark_key(KEY, expected_revision=0, model_id=MODEL)
     before = settings.path.read_bytes()
 
     class Broken(FakeProtector):
@@ -133,14 +185,14 @@ def test_encryption_failure_keeps_old_key_and_hides_protector_exception(tmp_path
 
     settings._protector = Broken()
     with pytest.raises(ValueError) as error:
-        settings.save_fal_key(SECOND, expected_revision=1)
+        settings.save_ark_key(SECOND, expected_revision=1, model_id=MODEL)
     assert SECOND not in str(error.value)
-    assert settings.path.read_bytes() == before and settings.runtime()["fal_key"] == KEY
+    assert settings.path.read_bytes() == before and settings.runtime()["ark_key"] == KEY
 
 
 def test_replace_failure_keeps_file_runtime_and_cleans_temporary(tmp_path, monkeypatch):
     settings = settings_at(tmp_path)
-    settings.save({"api_key": KEY, "enabled": True, "expected_revision": 0})
+    settings.save({"api_key": KEY, "model_id": MODEL, "enabled": True, "expected_revision": 0})
     before = settings.path.read_bytes()
 
     def fail(*args, **kwargs):
@@ -151,13 +203,13 @@ def test_replace_failure_keeps_file_runtime_and_cleans_temporary(tmp_path, monke
         settings.save({"api_key": SECOND, "enabled": False, "expected_revision": 1})
     assert SECOND not in str(error.value)
     assert settings.path.read_bytes() == before
-    assert settings.runtime() == {"enabled": True, "fal_key": KEY, "revision": 1}
+    assert settings.runtime() == {"provider": "volcengine_ark", "model_id": MODEL, "enabled": True, "ark_key": KEY, "revision": 1}
     assert not list(tmp_path.glob(".material-settings-*.tmp"))
 
 
 def test_local_hardlinked_settings_are_not_read_or_replaced(tmp_path):
     settings = settings_at(tmp_path)
-    settings.save_fal_key(KEY, expected_revision=0)
+    settings.save_ark_key(KEY, expected_revision=0, model_id=MODEL)
     linked = tmp_path / "other.json"
     try:
         os.link(settings.path, linked)
@@ -167,16 +219,16 @@ def test_local_hardlinked_settings_are_not_read_or_replaced(tmp_path):
     restored = settings_at(tmp_path)
     assert not restored.snapshot()["configured"] and restored.snapshot()["warning"]
     with pytest.raises(ValueError):
-        settings.save_fal_key(SECOND, expected_revision=1)
+        settings.save_ark_key(SECOND, expected_revision=1, model_id=MODEL)
     assert settings.path.read_bytes() == before and linked.read_bytes() == before
-    assert settings.runtime()["fal_key"] == KEY
+    assert settings.runtime()["ark_key"] == KEY
 
 
 @pytest.mark.parametrize("failure", ["json", "oversized", "fields", "version_bool", "revision_bool",
                                      "ciphertext", "domain", "enabled_empty"])
 def test_corrupt_storage_fails_closed_without_echoing_content(tmp_path, failure):
     settings = settings_at(tmp_path)
-    settings.save_fal_key(KEY, expected_revision=0)
+    settings.save_ark_key(KEY, expected_revision=0, model_id=MODEL)
     record = json.loads(settings.path.read_text("utf-8"))
     if failure == "json":
         content = KEY
@@ -190,30 +242,30 @@ def test_corrupt_storage_fails_closed_without_echoing_content(tmp_path, failure)
         elif failure == "revision_bool":
             record["revision"] = True
         elif failure == "ciphertext":
-            record["encrypted_fal_key"] = "!!!not-base64!!!"
+            record["encrypted_ark_key"] = "!!!not-base64!!!"
         elif failure == "domain":
-            record["encrypted_fal_key"] = base64.b64encode(
+            record["encrypted_ark_key"] = base64.b64encode(
                 FakeProtector().encrypt(KEY.encode())).decode()
         else:
-            record.update(enabled=True, encrypted_fal_key="")
+            record.update(enabled=True, encrypted_ark_key="")
         content = json.dumps(record)
     settings.path.write_text(content, encoding="utf-8")
     restored = settings_at(tmp_path)
-    assert restored.runtime() == {"enabled": False, "fal_key": "", "revision": 0}
+    assert restored.runtime() == {"provider": "volcengine_ark", "model_id": "", "enabled": False, "ark_key": "", "revision": 0}
     assert restored.snapshot()["warning"] and KEY not in json.dumps(restored.snapshot())
     assert settings.path.read_text("utf-8") == content
 
 
-def test_fal_and_deepseek_ciphertext_are_not_interchangeable(tmp_path):
+def test_ark_and_deepseek_ciphertext_are_not_interchangeable(tmp_path):
     deepseek = AiSettings(tmp_path, protector=FakeProtector(), environ={})
     deepseek.save({"api_key": KEY, "enabled": True})
     original = deepseek.path.read_bytes()
     material = settings_at(tmp_path)
-    material.save_fal_key(SECOND, expected_revision=0)
+    material.save_ark_key(SECOND, expected_revision=0, model_id=MODEL)
     assert deepseek.path.read_bytes() == original
     assert deepseek.runtime()["api_key"] == KEY
     record = json.loads(material.path.read_text("utf-8"))
-    record["encrypted_fal_key"] = json.loads(original)["keys"][0]["encrypted_api_key"]
+    record["encrypted_ark_key"] = json.loads(original)["keys"][0]["encrypted_api_key"]
     material.path.write_text(json.dumps(record), encoding="utf-8")
     assert settings_at(tmp_path).snapshot()["configured"] is False
 
@@ -245,11 +297,11 @@ def test_linux_store_integration_with_real_aes_and_synthetic_file_io(tmp_path, m
 
     monkeypatch.setattr(credential_store, "LinuxCredentialStore", SyntheticStore)
     settings = MaterialSettings(tmp_path, credential_key_file="synthetic", environ={})
-    result = settings.save({"api_key": KEY, "enabled": True, "expected_revision": 0})
+    result = settings.save({"api_key": KEY, "model_id": MODEL, "enabled": True, "expected_revision": 0})
     assert result["key_persistence"] == "linux_aesgcm"
     assert KEY not in settings.path.read_text("utf-8")
     restored = MaterialSettings(tmp_path, environ={"HSD_CREDENTIAL_KEY_FILE": "synthetic"})
-    assert restored.runtime() == {"enabled": True, "fal_key": KEY, "revision": 1}
+    assert restored.runtime() == {"provider": "volcengine_ark", "model_id": MODEL, "enabled": True, "ark_key": KEY, "revision": 1}
 
 
 def test_explicit_linux_store_cannot_be_overridden_by_session_or_test_protector(tmp_path):
@@ -260,9 +312,9 @@ def test_explicit_linux_store_cannot_be_overridden_by_session_or_test_protector(
 @pytest.mark.skipif(os.name != "nt", reason="actual Windows CurrentUser DPAPI")
 def test_windows_dpapi_actual_roundtrip(tmp_path):
     settings = MaterialSettings(tmp_path, environ={})
-    settings.save({"api_key": KEY, "enabled": True, "expected_revision": 0})
+    settings.save({"api_key": KEY, "model_id": MODEL, "enabled": True, "expected_revision": 0})
     assert KEY not in settings.path.read_text("utf-8")
-    assert MaterialSettings(tmp_path, environ={}).runtime()["fal_key"] == KEY
+    assert MaterialSettings(tmp_path, environ={}).runtime()["ark_key"] == KEY
 
 
 @pytest.mark.skipif(os.name != "posix", reason="actual Linux openat/private file permissions")
@@ -275,10 +327,10 @@ def test_linux_actual_roundtrip_permissions_and_master_rotation(tmp_path):
     key_file.write_bytes(os.urandom(32))
     key_file.chmod(0o600)
     settings = MaterialSettings(data, credential_key_file=key_file, environ={})
-    settings.save({"api_key": KEY, "enabled": True, "expected_revision": 0})
+    settings.save({"api_key": KEY, "model_id": MODEL, "enabled": True, "expected_revision": 0})
     assert stat.S_IMODE(settings.path.stat().st_mode) == 0o600
     restored = MaterialSettings(data, credential_key_file=key_file, environ={})
-    assert restored.runtime()["fal_key"] == KEY
+    assert restored.runtime()["ark_key"] == KEY
     before = settings.path.read_bytes()
     key_file.write_bytes(os.urandom(32))
     with pytest.raises(ValueError):
@@ -297,7 +349,7 @@ def test_linux_unsafe_settings_never_overwritten_or_enabled(tmp_path, unsafe):
     key_file.write_bytes(os.urandom(32))
     key_file.chmod(0o600)
     settings = MaterialSettings(data, credential_key_file=key_file, environ={})
-    settings.save_fal_key(KEY, expected_revision=0)
+    settings.save_ark_key(KEY, expected_revision=0, model_id=MODEL)
     if unsafe == "symlink":
         target = data / "original.json"
         settings.path.rename(target)
@@ -315,5 +367,5 @@ def test_linux_unsafe_settings_never_overwritten_or_enabled(tmp_path, unsafe):
         restored = MaterialSettings(data, credential_key_file=key_file, environ={})
         assert not restored.snapshot()["configured"] and restored.snapshot()["warning"]
     with pytest.raises(ValueError):
-        settings.save_fal_key(SECOND, expected_revision=1)
-    assert settings.runtime()["fal_key"] == KEY
+        settings.save_ark_key(SECOND, expected_revision=1, model_id=MODEL)
+    assert settings.runtime()["ark_key"] == KEY

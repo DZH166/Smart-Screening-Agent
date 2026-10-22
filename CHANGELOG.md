@@ -1,5 +1,12 @@
 # 版本记录
 
+## v1.15.1 — 2026-10-22
+
+- 用户取消fal，管理员素材配置改用火山引擎「火山方舟」：独立API Key、图片模型ID、保存/删除和验证开关，帮助默认收起。
+- 新配置独立加密，不读取、迁移或修改旧fal文件；旧页面及其他provider提交拒绝，保留管理员权限、CSRF、版本冲突及保存失败保护。
+- 保存不发出模型请求或发送图片；员工Demo、现有DeepSeek、匹配、编号、访问码及导出保持。正式素材提取仍待真实接口及样图验证。
+- 本版为Linux网页交付；验证记录见[火山方舟配置核对](docs/material-volcengine-settings-verification.md)。
+
 ## v1.15.0 — 2026-10-22
 
 - 将`codex/admin-access-codes`的新增员工访问码与`deepseek-pro`已进入主线的v1.14.0/1导航合并到main，保留全部提交历史。`codex/random-deepseek-keys`及素材Demo/配置提交已包含在主线，核对后保留，不重复移植。

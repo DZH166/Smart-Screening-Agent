@@ -18,31 +18,34 @@
     <a id="material-login" class="button primary hidden" href="/admin/login">重新登录</a>
     <main>
       <section class="panel">
-        <div class="section-heading"><h2>效果验证准备</h2></div>
-        <p>先验证真实图片效果，再开放正式素材提取。员工现有的“demo内测”仍是示例演示。</p>
-        <p id="material-deepseek" class="state-line">正在读取 DeepSeek 状态…</p>
-        <p class="muted">识别设计位置沿用本实例的 DeepSeek 配置。图片分割、去水印修补需要另外配置 fal。</p>
-      </section>
-      <section class="panel">
-        <div class="section-heading"><h2>fal 图片处理</h2><button id="material-remove" class="button quiet" type="button" disabled>删除配置</button></div>
-        <p id="material-fal" class="state-line">正在读取设置…</p>
+        <div class="section-heading"><h2>火山引擎 · 火山方舟</h2></div>
+        <p>填写图片处理服务配置，供后续素材效果验证使用。</p>
+        <p id="material-ark" class="state-line">正在读取设置…</p>
         <form id="material-form" autocomplete="off">
           <label for="material-key">API Key</label>
-          <div class="add-input"><input id="material-key" type="password" autocomplete="new-password" spellcheck="false" aria-describedby="material-key-help" placeholder="粘贴 fal API Key" disabled><button id="material-save" class="button primary" type="submit" disabled>保存 Key</button></div>
-          <p id="material-key-help" class="muted">加密保存在本服务器，不回显；员工不用配置。保存成功不代表真实接口和图片效果已经验证。</p>
+          <input id="material-key" type="password" autocomplete="new-password" spellcheck="false" aria-describedby="material-key-help" placeholder="粘贴火山方舟 API Key" disabled>
+          <p id="material-key-help" class="muted">加密保存，不回显。已有配置时留空，可保留原 Key。</p>
+          <label for="material-model">图片模型 ID</label>
+          <input id="material-model" type="text" autocomplete="off" spellcheck="false" maxlength="128" aria-describedby="material-model-help" placeholder="从火山方舟复制 Model ID 或 ep- 开头的接入点 ID" disabled>
+          <p id="material-model-help" class="muted">先在火山方舟开通图片模型，再复制对应 ID。不要填写模型昵称。</p>
+          <div class="material-actions"><button id="material-save" class="button primary" type="submit" disabled>保存配置</button><button id="material-remove" class="button quiet" type="button" disabled>删除配置</button></div>
         </form>
         <form id="material-enable-form">
-          <div class="section-heading"><label class="enable-control"><input id="material-enabled" type="checkbox" disabled><span>允许使用此 Key 进行素材处理验证</span></label><button id="material-enable-save" class="button secondary" type="submit" disabled>保存开关</button></div>
+          <div class="section-heading"><label class="enable-control"><input id="material-enabled" type="checkbox" disabled><span>允许后续素材效果验证</span></label><button id="material-enable-save" class="button secondary" type="submit" disabled>保存开关</button></div>
         </form>
       </section>
-      <section class="panel">
-        <details><summary>本轮验证会做什么</summary>
+      <section class="panel help-panel">
+        <details><summary>怎么填写与常见问题</summary>
           <ol>
-            <li>使用选定的素材图片，比较完整设计、文字、颜色、边缘、水印和展平效果，以及真实耗时。</li>
-            <li>素材图片及必要局部由服务器发送给 DeepSeek 和 fal。fal 处理时使用其临时媒体服务；本项目不接入阿里云 OSS。</li>
-            <li>目标为长边4096像素透明PNG。放大后的像素尺寸不代表细节已经还原，修补也可能改变原有内容，需要真实样图核对。</li>
-            <li>不设调用费用上限。正式效果通过验证后，再开放员工真实提取；现有图号助手规则保持。</li>
+            <li>打开<a href="https://ark.volcengine.com/region:cn-beijing/apiKey" target="_blank" rel="noopener noreferrer">火山方舟控制台</a>创建 API Key。这里使用方舟 API Key，不填写云账号的 AK/SK，也不填写 DeepSeek Key。</li>
+            <li>开通所需图片模型，复制 Model ID 或自己的推理接入点 ID，粘贴到上方。Key 需要有该模型的使用权限。</li>
+            <li>保存后输入框会清空 Key，这是正常保护。想更换 Key，重新粘贴并保存；删除配置会同时关闭验证开关。</li>
+            <li>提示“其他页面已更新”时，先刷新再修改；保存结果不明确时，也先刷新核对。</li>
+            <li>保存及开关操作只管理配置，不发送图片、不调用计费接口。真实接口和图片效果仍需另行验证，员工“demo内测”继续为示例演示。</li>
           </ol>
+          <p id="material-deepseek" class="muted">正在读取 DeepSeek 状态…</p>
+          <p class="muted">图片服务固定使用火山方舟北京接口；现有 DeepSeek 配置独立保留。本项目不接入 OSS，不设置调用费用上限。</p>
+          <p class="muted"><a href="https://console.volcengine.com/ark/region:cn-beijing/docs/image-generation-api" target="_blank" rel="noopener noreferrer">火山方舟官方图片接口说明</a></p>
         </details>
       </section>
     </main>

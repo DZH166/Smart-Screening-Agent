@@ -8,7 +8,8 @@ const vm = require("node:vm");
 const source = fs.readFileSync(
   path.join(__dirname, "../hsd_tool/static/material-settings.js"), "utf8"
 );
-const KEY = "synthetic-fal-credential-for-ui-only";
+const MODEL = "doubao-seedream-synthetic-test";
+const KEY = "synthetic-ark-credential-for-ui-only";
 const flush = () => new Promise(setImmediate);
 
 function deferred() {
@@ -19,7 +20,7 @@ function deferred() {
 
 function responseBody(revision = 4, configured = false, enabled = false) {
   return {
-    settings: { revision, configured, enabled, warning: "", key_persistence: "linux_aesgcm" },
+    settings: { provider: "volcengine_ark", model_id: configured ? MODEL : "", revision, configured, enabled, warning: "", key_persistence: "linux_aesgcm" },
     deepseek: { enabled: true, configured: true },
   };
 }
@@ -88,6 +89,7 @@ function harness() {
     async ready(body = responseBody()) { await this.reply(0, body); return this; },
     submit(key = KEY) {
       node("material-key").value = key;
+      node("material-model").value = MODEL;
       node("material-form").emit("submit");
     },
     payload(index) { return JSON.parse(calls[index].options.body); },
@@ -112,14 +114,14 @@ test("boot reads only safe settings and renders configuration after the response
   await h.ready();
   assert.equal(h.node("material-key").disabled, false);
   assert.equal(h.node("material-remove").disabled, true);
-  assert.match(h.node("material-fal").textContent, /尚未配置/);
+  assert.match(h.node("material-ark").textContent, /尚未配置/);
   assert.match(h.node("material-deepseek").textContent, /已启用/);
   assert.equal(h.node("material-enabled").checked, false);
   h.node("material-refresh").emit("click");
   await h.reply(1, responseBody(8, true, true));
   assert.equal(h.node("material-enabled").checked, true);
   assert.equal(h.node("material-remove").disabled, false);
-  assert.match(h.node("material-fal").textContent, /尚待验证/);
+  assert.match(h.node("material-ark").textContent, /尚待验证/);
   assert.ok(!h.calls.some(({ url }) => /ledger|debug|usage/.test(url)));
 });
 
@@ -127,12 +129,12 @@ test("save clears the Key immediately, awaits acknowledgement and prevents dupli
   const h = await harness().ready();
   h.submit();
   assert.equal(h.node("material-key").value, "", "clear secret before the first await");
-  assert.deepEqual(h.payload(1), { action: "set_key", api_key: KEY, expected_revision: 4 });
+  assert.deepEqual(h.payload(1), { action: "set_config", api_key: KEY, model_id: MODEL, provider: "volcengine_ark", expected_revision: 4 });
   assert.equal(h.calls[1].options.method, "POST");
   assert.equal(h.calls[1].options.headers["Content-Type"], "application/json");
   assert.equal(h.node("material-save").disabled, true);
   assert.ok(!/已保存/.test(h.node("material-message").textContent));
-  assert.match(h.node("material-fal").textContent, /尚未配置/);
+  assert.match(h.node("material-ark").textContent, /尚未配置/);
   h.submit("synthetic-second-key-ui-only");
   h.node("material-enabled").checked = true;
   h.node("material-enable-form").emit("submit");
@@ -145,7 +147,7 @@ test("save clears the Key immediately, awaits acknowledgement and prevents dupli
   assert.equal(h.node("material-key").value, "");
   assert.ok(!h.displayedText().includes(KEY));
   h.node("material-enable-form").emit("submit");
-  assert.deepEqual(h.payload(2), { action: "set_enabled", enabled: false, expected_revision: 5 });
+  assert.deepEqual(h.payload(2), { action: "set_enabled", enabled: false, provider: "volcengine_ark", expected_revision: 5 });
   await h.reply(2, responseBody(6, true, false));
 });
 
@@ -204,9 +206,9 @@ test("pagehide clears the Key and a late GET cannot restore settings", async () 
   h.node("material-key").value = KEY;
   h.emit("pagehide");
   assert.equal(h.node("material-key").value, "");
-  const before = h.node("material-fal").textContent;
+  const before = h.node("material-ark").textContent;
   await h.reply(0, responseBody(99, true, true));
-  assert.equal(h.node("material-fal").textContent, before);
+  assert.equal(h.node("material-ark").textContent, before);
   assert.equal(h.node("material-enabled").checked, false);
   assert.equal(h.node("material-save").disabled, true);
 });
@@ -216,7 +218,7 @@ test("pagehide suppresses a late successful POST", async () => {
   h.submit();
   h.emit("pagehide");
   await h.reply(1, responseBody(5, true, true));
-  assert.match(h.node("material-fal").textContent, /尚未配置/);
+  assert.match(h.node("material-ark").textContent, /尚未配置/);
   assert.ok(!/已保存/.test(h.node("material-message").textContent));
   assert.equal(h.node("material-enabled").checked, false);
   assert.equal(h.node("material-save").disabled, true);
@@ -246,7 +248,7 @@ for (const oldReturnsFirst of [true, false]) {
     if (oldReturnsFirst) {
       await h.reply(0, responseBody(2, true, true));
       assert.equal(h.node("material-save").disabled, true, "old completion must not finish the new load");
-      assert.ok(!/已加密保存/.test(h.node("material-fal").textContent));
+      assert.ok(!/已加密保存/.test(h.node("material-ark").textContent));
       await h.reply(1, responseBody(20, true, false));
     } else {
       await h.reply(1, responseBody(20, true, false));
@@ -310,6 +312,35 @@ test("an uncertain failed save restores the switch and requires a refresh before
   h.node("material-enable-form").emit("submit");
   assert.equal(h.payload(3).expected_revision, 8);
   await h.reply(3, responseBody(9, true, true));
+});
+
+test("an existing Key can be kept while editing the model", async () => {
+  const h = await harness().ready(responseBody(4, true, false));
+  h.node("material-model").value = "ep-synthetic-image";
+  h.node("material-form").emit("submit");
+  assert.equal(h.payload(1).api_key, "");
+  assert.equal(h.payload(1).model_id, "ep-synthetic-image");
+  assert.equal(h.payload(1).provider, "volcengine_ark");
+  assert.equal(h.node("material-model").disabled, true);
+  await h.reply(1, {...responseBody(5, true, false), settings: {...responseBody(5, true, false).settings, model_id:"ep-synthetic-image"}});
+  assert.equal(h.node("material-model").value, "ep-synthetic-image");
+});
+
+test("a model is required before a configuration submission", async () => {
+  const h = await harness().ready();
+  h.node("material-key").value = KEY;
+  h.node("material-form").emit("submit");
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.node("material-key").value, "");
+  assert.match(h.node("material-message").textContent, /模型 ID/);
+});
+
+test("an old provider snapshot cannot unlock Ark settings", async () => {
+  const h = harness();
+  const body = responseBody(); delete body.settings.provider;
+  await h.reply(0, body);
+  assert.equal(h.node("material-save").disabled, true);
+  assert.equal(h.node("material-model").disabled, true);
 });
 
 async function main() {

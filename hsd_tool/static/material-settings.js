@@ -12,11 +12,11 @@
   }
   function controls() {
     const blocked = pending || !authenticated || revision === null;
-    for (const id of ["material-key", "material-save", "material-enabled", "material-enable-save"])
+    for (const id of ["material-key", "material-model", "material-save", "material-enabled", "material-enable-save"])
       el(id).disabled = blocked;
     el("material-remove").disabled = blocked || !configured;
     el("material-refresh").disabled = pending;
-    el("material-save").textContent = "保存 Key";
+    el("material-save").textContent = "保存配置";
   }
   async function call(method = "GET", payload = null, current = generation) {
     const response = await fetch("/api/admin/material-settings", {
@@ -42,11 +42,14 @@
     return data;
   }
   function render(data) {
+    if (data.settings.provider !== "volcengine_ark" || typeof data.settings.model_id !== "string")
+      throw new Error("配置版本已更新，请刷新页面后重试。");
     revision = data.settings.revision;
     configured = data.settings.configured;
     committedEnabled = data.settings.enabled;
     el("material-enabled").checked = committedEnabled;
-    el("material-fal").textContent = data.settings.warning || (configured ? "已加密保存 Key · 真实接口及图片效果尚待验证" : "尚未配置 fal Key");
+    el("material-model").value = data.settings.model_id || "";
+    el("material-ark").textContent = data.settings.warning || (configured ? (data.settings.model_id ? "配置已保存 · 真实接口及图片效果尚待验证" : "Key 已保存，请补充图片模型 ID") : "尚未配置火山方舟 Key");
     el("material-deepseek").textContent = data.deepseek.enabled && data.deepseek.configured ? "DeepSeek 已启用，沿用现有 Key" : "请先在管理员首页配置并启用 DeepSeek";
     controls();
   }
@@ -63,7 +66,7 @@
     const current = ++generation;
     pending = true; controls();
     try {
-      const data = await call("POST", {...payload, expected_revision: revision}, current);
+      const data = await call("POST", {...payload, provider: "volcengine_ark", expected_revision: revision}, current);
       if (current === generation && authenticated) {render(data); message("设置已保存。真实接口及图片效果仍需验证。");}
     } catch (error) {
       if (current === generation) {
@@ -78,8 +81,10 @@
     event.preventDefault();
     const key = el("material-key").value.trim();
     el("material-key").value = "";
-    if (!key) {message("请先填写 fal API Key。", true); return;}
-    save({action: "set_key", api_key: key});
+    const model = el("material-model").value.trim();
+    if (!key && !configured) {message("请先填写火山方舟 API Key。", true); return;}
+    if (!model) {message("请先填写图片模型 ID。", true); return;}
+    save({action: "set_config", api_key: key, model_id: model});
   });
   el("material-enable-form").addEventListener("submit", (event) => {event.preventDefault(); save({action: "set_enabled", enabled: el("material-enabled").checked});});
   el("material-remove").addEventListener("click", () => save({action: "remove_key"}));
