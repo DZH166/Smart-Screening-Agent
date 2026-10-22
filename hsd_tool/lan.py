@@ -32,6 +32,8 @@ class LanAccess:
             raise ValueError("局域网输出目录必须位于素材目录之外。")
         self.output_root.mkdir(parents=True, exist_ok=True)
         self.code = self._code(code if code is not None else DEFAULT_CODE)
+        self.min_code_length = 1
+        self.access_codes = None
         self._attempts = defaultdict(deque)
         self._lock = threading.Lock()
 
@@ -64,7 +66,14 @@ class LanAccess:
             if len(attempts) >= 10:
                 return None
             attempts.append(now)
-            valid = isinstance(supplied, str) and secrets.compare_digest(supplied.encode(), self.code.encode())
+            valid_shape = (isinstance(supplied, str) and 1 <= len(supplied) <= 64
+                           and all(33 <= ord(character) <= 126 for character in supplied))
+            if self.access_codes is not None:
+                # The same per-address budget covers every configured code.
+                # Verification errors fail closed; never retry via the old code.
+                valid = valid_shape and self.access_codes.verify(supplied)
+            else:
+                valid = valid_shape and secrets.compare_digest(supplied.encode("ascii"), self.code.encode("ascii"))
             if valid:
                 attempts.clear()
             return valid

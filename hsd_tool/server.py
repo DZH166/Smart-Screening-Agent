@@ -21,6 +21,7 @@ from . import admin_auth
 from .cloud_tasks import CloudTaskStore, UploadClaims, upload_id
 from . import material_demo
 from .material_settings import MaterialSettings, MaterialSettingsConflict
+from .access_codes import AccessCodeStore, AccessCodesConflict
 
 
 class EmployeeUploadRequest(Request):
@@ -114,6 +115,17 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
     app.config["HSD_MANAGER"] = manager
     material_settings = MaterialSettings(manager.ai_settings.path.parent)
     app.config["HSD_MATERIAL_SETTINGS"] = material_settings
+    access_codes = None
+    if lan:
+        try:
+            access_codes = AccessCodeStore(manager.ai_settings.path.parent / "employee_access",
+                                          min_length=lan.min_code_length,
+                                          bootstrap_code=lan.code)
+        except BaseException:
+            manager.close()
+            raise
+        lan.access_codes = access_codes
+    app.config["HSD_ACCESS_CODES"] = access_codes
     claims = CloudTaskStore(manager, cloud.origin) if cloud else UploadClaims()
     app.config["HSD_UPLOAD_CLAIMS"] = claims
     if cloud:
@@ -187,10 +199,10 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
                 return jsonify(error="请求必须使用 JSON 对象。"), 400
         if lan and request.endpoint == "lan_login":
             return None
-        admin_area = request.path in {"/admin", "/admin/material"} or request.path.startswith("/api/admin/")
+        admin_area = request.path in {"/admin", "/admin/material", "/admin/access-codes"} or request.path.startswith("/api/admin/")
         material_admin_static = (request.endpoint == "static" and
             Path(str((request.view_args or {}).get("filename", "")).replace("\\", "/")).name.split(":", 1)[0].rstrip(" .").casefold()
-            in {"material-settings.html", "material-settings.js"})
+            in {"material-settings.html", "material-settings.js", "access-codes.html", "access-codes.js", "access-codes.css"})
         protected_static = (request.endpoint == "static" and
             Path(str((request.view_args or {}).get("filename", "")).replace("\\", "/")).name.split(":", 1)[0].rstrip(" .").casefold()
             in {"admin.html", "admin.js", "admin.css"})
@@ -459,6 +471,33 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
     @app.get("/api/admin/keys")
     def admin_key_settings():
         return jsonify(settings=manager.ai_config(), pool=manager.ai_key_pool.snapshot())
+
+    @app.get("/admin/access-codes")
+    def admin_access_codes_page():
+        return (static / "access-codes.html").read_text("utf-8").replace("__HSD_TOKEN__", json.dumps(token))
+
+    def access_codes_snapshot():
+        if access_codes is None:
+            return {"supported": False, "revision": 0, "min_length": 1, "max_length": 64, "codes": []}
+        return {"supported": True, **access_codes.snapshot()}
+
+    @app.get("/api/admin/access-codes")
+    def admin_access_codes_get():
+        if request.args:
+            raise ValueError("访问码设置不接受查询参数。")
+        return jsonify(access_codes_snapshot())
+
+    @app.post("/api/admin/access-codes")
+    def admin_access_codes_save():
+        if request.headers.get("Origin") != request.host_url.rstrip("/"):
+            return jsonify(error="请求来源不匹配。"), 403
+        if access_codes is None:
+            raise ValueError("当前是本机模式，无需访问码；启用员工入口后再设置。")
+        try:
+            access_codes.save(request.get_json())
+        except AccessCodesConflict:
+            raise Conflict("访问码设置已在其他页面更新，请刷新后再保存。") from None
+        return jsonify(access_codes_snapshot())
 
     @app.post("/api/admin/settings")
     def admin_processing_settings():
