@@ -15,7 +15,6 @@
   <div class="app-shell">
     <header class="app-header">
       <div class="brand"><strong>HSD 图号助手</strong></div>
-      <a class="material-demo-entry" href="/material-demo/" target="_blank" rel="noopener" title="在新窗口打开素材提取演示">素材提取（demo内测）<span aria-hidden="true"> ↗</span></a>
       <nav class="steps" aria-label="操作步骤">
         <span class="step active" data-step="1"><i>1</i>导入</span><span class="step-line"></span>
         <span class="step" data-step="2"><i>2</i>处理</span><span class="step-line"></span>
@@ -31,6 +30,12 @@
         </div>
       </details>
     </header>
+    <div class="app-body">
+      <aside class="app-nav" aria-label="功能选择">
+        <p class="app-nav-title">功能</p>
+        <a class="app-nav-item active" href="/" aria-current="page"><span class="app-nav-name">图号助手</span><span class="app-nav-hint">图片编号</span></a>
+        <a class="app-nav-item" href="/material-demo/"><span class="app-nav-name">素材提取</span><span class="app-nav-hint">内测演示</span></a>
+      </aside>
     <main id="main-content">
       <div id="notice" class="notice hidden" role="alert"><span id="notice-text"></span><button id="notice-action" class="text-button hidden" type="button"></button><button id="notice-close" class="icon-button" type="button" aria-label="关闭提示">×</button></div>
       <section id="import-view" class="view">
@@ -84,6 +89,7 @@
       <section id="error-view" class="view hidden"><div class="done-card card"><div class="error-symbol" aria-hidden="true">!</div><h1>本批处理未完成</h1><p id="job-error" class="subtitle"></p><button id="retry-task-button" type="button" class="button button-primary">返回导入并调整</button></div></section>
       <section id="cancelled-view" class="view hidden"><div class="done-card card"><h1>本批已停止</h1><p id="cancelled-message" class="subtitle">服务器已结束本批处理，原文件保持不变。</p><button id="cancelled-next-button" type="button" class="button button-primary">处理下一批</button></div></section>
     </main>
+    </div>
     <footer class="app-footer"><span>HSD 图号助手 <span id="app-version">1.8.0</span></span></footer>
   </div>
   <dialog id="confirm-dialog"><form method="dialog"><div class="dialog-icon" aria-hidden="true">↗</div><h2 id="dialog-title">确认导出</h2><p id="dialog-description"></p><div class="dialog-actions"><button value="cancel" class="button button-secondary">返回检查</button><button value="confirm" id="dialog-confirm" class="button button-primary">确认导出</button></div></form></dialog>
