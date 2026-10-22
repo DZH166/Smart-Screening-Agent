@@ -22,17 +22,12 @@
     <a id="admin-login" class="button primary login-link hidden" href="/admin/login">重新登录</a>
     <div class="admin-body">
       <aside class="admin-nav" aria-label="管理功能">
-        <p class="admin-nav-title">共享</p>
-        <a class="admin-nav-item active" href="#shared-ai"><span class="admin-nav-name">AI 与 Key</span><span class="admin-nav-hint">两个功能共用</span></a>
-        <a class="admin-nav-item" href="#shared-ledger"><span class="admin-nav-name">Key 账本</span><span class="admin-nav-hint">查看或复制</span></a>
-        <p class="admin-nav-title">功能</p>
-        <a class="admin-nav-item" href="#numbering"><span class="admin-nav-name">图号助手</span><span class="admin-nav-hint">编号规则固定</span></a>
-        <a class="admin-nav-item" href="/admin/material"><span class="admin-nav-name">素材提取</span><span class="admin-nav-hint">fal 与效果验证</span></a>
-        <p class="admin-nav-title">帮助</p>
-        <a class="admin-nav-item" href="#help"><span class="admin-nav-name">说明与排查</span></a>
+        <a class="admin-nav-item active" href="#keys"><span class="admin-nav-name">Key 账本</span></a>
+        <a class="admin-nav-item" href="#functions"><span class="admin-nav-name">功能区</span></a>
+        <a class="admin-nav-item" href="#help"><span class="admin-nav-name">帮助</span></a>
       </aside>
     <main>
-      <section class="panel settings-panel" id="shared-ai" aria-labelledby="settings-heading">
+      <section class="panel settings-panel" id="keys" aria-labelledby="settings-heading">
         <div class="section-heading">
           <h2 id="settings-heading">AI 处理</h2>
           <form id="enable-form">
@@ -61,10 +56,21 @@
           </div>
         </details>
       </section>
-      <section class="admin-note" id="numbering">
-        <h2>图号助手</h2>
-        <p>使用“共享”里的 DeepSeek 设置与 Key，不单独配置。编号规则固定：A 列编号、B 列图片，缺号行按 HSD 加四位流水号；素材提取与图号助手读的是同一份 DeepSeek Key，改一次两边同时生效。</p>
-        <p><a href="/">返回图片编号</a></p>
+      <section class="admin-note" id="functions">
+        <h2>功能区</h2>
+        <p>每个功能单独进入；DeepSeek 只有一份配置，图号助手与素材提取共用。</p>
+        <div class="function-grid">
+          <a class="function-card" href="/">
+            <strong>图号助手</strong>
+            <span>图片编号：A 列编号、B 列图片，缺号按 HSD 加四位流水号</span>
+            <em>打开功能 →</em>
+          </a>
+          <a class="function-card" href="/admin/material">
+            <strong>素材提取</strong>
+            <span>fal 图片处理与效果验证，DeepSeek 与图号助手共用</span>
+            <em>打开设置 →</em>
+          </a>
+        </div>
       </section>
       <section class="panel help-panel" id="help" aria-labelledby="help-heading">
         <details id="admin-help">

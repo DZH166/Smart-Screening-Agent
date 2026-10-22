@@ -102,3 +102,46 @@
     flex: 0 0 auto
   }
 }
+
+.function-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 10px
+}
+.function-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  border: 1px solid #dce2ea;
+  border-radius: 9px;
+  background: #fff;
+  color: #18243a;
+  text-decoration: none;
+  transition: border-color .12s, background .12s
+}
+.function-card:hover {
+  border-color: #b9c9e6;
+  background: #f7faff
+}
+.function-card strong {
+  font-size: 15px
+}
+.function-card span {
+  font-size: 13px;
+  color: #57657a;
+  line-height: 1.5
+}
+.function-card em {
+  margin-top: 2px;
+  font-size: 13px;
+  font-style: normal;
+  font-weight: 600;
+  color: #3156a5
+}
+@media (max-width: 760px) {
+  .function-grid {
+    grid-template-columns: 1fr
+  }
+}
