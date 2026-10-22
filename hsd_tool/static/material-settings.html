@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>素材提取设置 · 智筛 Agent</title>
+  <link rel="stylesheet" href="/static/admin.css">
+  <script>window.HSD_TOKEN = __HSD_TOKEN__;</script>
+  <script src="/static/material-settings.js" defer></script>
+</head>
+<body>
+  <div class="admin-shell">
+    <header class="admin-header">
+      <div><a class="back-link" href="/admin">← 返回管理员页面</a><h1>素材提取设置</h1></div>
+      <button id="material-refresh" class="button secondary" type="button">刷新设置</button>
+    </header>
+    <div id="material-message" class="notice hidden" role="status" aria-live="polite"></div>
+    <a id="material-login" class="button primary hidden" href="/admin/login">重新登录</a>
+    <main>
+      <section class="panel">
+        <div class="section-heading"><h2>效果验证准备</h2></div>
+        <p>先验证真实图片效果，再开放正式素材提取。员工现有的“demo内测”仍是示例演示。</p>
+        <p id="material-deepseek" class="state-line">正在读取 DeepSeek 状态…</p>
+        <p class="muted">识别设计位置沿用本实例的 DeepSeek 配置。图片分割、去水印修补需要另外配置 fal。</p>
+      </section>
+      <section class="panel">
+        <div class="section-heading"><h2>fal 图片处理</h2><button id="material-remove" class="button quiet" type="button" disabled>删除配置</button></div>
+        <p id="material-fal" class="state-line">正在读取设置…</p>
+        <form id="material-form" autocomplete="off">
+          <label for="material-key">API Key</label>
+          <div class="add-input"><input id="material-key" type="password" autocomplete="new-password" spellcheck="false" aria-describedby="material-key-help" placeholder="粘贴 fal API Key" disabled><button id="material-save" class="button primary" type="submit" disabled>保存 Key</button></div>
+          <p id="material-key-help" class="muted">加密保存在本服务器，不回显；员工不用配置。保存成功不代表真实接口和图片效果已经验证。</p>
+        </form>
+        <form id="material-enable-form">
+          <div class="section-heading"><label class="enable-control"><input id="material-enabled" type="checkbox" disabled><span>允许使用此 Key 进行素材处理验证</span></label><button id="material-enable-save" class="button secondary" type="submit" disabled>保存开关</button></div>
+        </form>
+      </section>
+      <section class="panel">
+        <details><summary>本轮验证会做什么</summary>
+          <ol>
+            <li>使用选定的素材图片，比较完整设计、文字、颜色、边缘、水印和展平效果，以及真实耗时。</li>
+            <li>素材图片及必要局部由服务器发送给 DeepSeek 和 fal。fal 处理时使用其临时媒体服务；本项目不接入阿里云 OSS。</li>
+            <li>目标为长边4096像素透明PNG。放大后的像素尺寸不代表细节已经还原，修补也可能改变原有内容，需要真实样图核对。</li>
+            <li>不设调用费用上限。正式效果通过验证后，再开放员工真实提取；现有图号助手规则保持。</li>
+          </ol>
+        </details>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

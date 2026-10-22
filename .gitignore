@@ -33,3 +33,5 @@ instance.json
 /task_records/
 tests/.admin-password
 /图片编辑/
+material_settings.json
+.material-settings-*.tmp

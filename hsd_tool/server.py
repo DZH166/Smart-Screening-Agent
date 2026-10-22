@@ -20,6 +20,7 @@ from . import __version__
 from . import admin_auth
 from .cloud_tasks import CloudTaskStore, UploadClaims, upload_id
 from . import material_demo
+from .material_settings import MaterialSettings, MaterialSettingsConflict
 
 
 class EmployeeUploadRequest(Request):
@@ -111,6 +112,8 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
     token = token or secrets.token_urlsafe(32)
     app.config["HSD_TOKEN"] = token
     app.config["HSD_MANAGER"] = manager
+    material_settings = MaterialSettings(manager.ai_settings.path.parent)
+    app.config["HSD_MATERIAL_SETTINGS"] = material_settings
     claims = CloudTaskStore(manager, cloud.origin) if cloud else UploadClaims()
     app.config["HSD_UPLOAD_CLAIMS"] = claims
     if cloud:
@@ -184,14 +187,17 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
                 return jsonify(error="请求必须使用 JSON 对象。"), 400
         if lan and request.endpoint == "lan_login":
             return None
-        admin_area = request.path == "/admin" or request.path.startswith("/api/admin/")
+        admin_area = request.path in {"/admin", "/admin/material"} or request.path.startswith("/api/admin/")
+        material_admin_static = (request.endpoint == "static" and
+            Path(str((request.view_args or {}).get("filename", "")).replace("\\", "/")).name.split(":", 1)[0].rstrip(" .").casefold()
+            in {"material-settings.html", "material-settings.js"})
         protected_static = (request.endpoint == "static" and
             Path(str((request.view_args or {}).get("filename", "")).replace("\\", "/")).name.split(":", 1)[0].rstrip(" .").casefold()
             in {"admin.html", "admin.js", "admin.css"})
         # The admin area authenticates itself: an operator may open it from
         # another computer on the LAN with the account/password, without the
         # employee access code. Employee-only paths still require that code.
-        admin_entry = (admin_area or protected_static
+        admin_entry = (admin_area or protected_static or material_admin_static
                        or request.endpoint in {"admin_login_page", "admin_login", "admin_logout"})
         if remote and not session.get("lan_authenticated") and not admin_entry:
             if request.endpoint in {"index", "material_demo_redirect", "material_demo_page"} and request.method == "GET":
@@ -215,9 +221,9 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
         if remote and (request.endpoint in {"pick", "open_output", "shutdown"}
                        or (request.endpoint == "save_ai_settings")):
             return jsonify(error="此操作只能在主机上完成。"), 403
-        if admin_area or (cloud and protected_static):
+        if admin_area or material_admin_static or (cloud and protected_static):
             if not admin_auth.authenticated(session):
-                if request.path.startswith("/api/admin/") or protected_static:
+                if request.path.startswith("/api/admin/") or protected_static or material_admin_static:
                     return jsonify(error="请先登录管理员分区。"), 401
                 return (static / "admin-login.html").read_text("utf-8")
         if lan:
@@ -379,6 +385,39 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
     @app.get("/admin")
     def admin_page():
         return (static / "admin.html").read_text("utf-8").replace("__HSD_TOKEN__", json.dumps(token))
+
+    @app.get("/admin/material")
+    def material_settings_page():
+        return (static / "material-settings.html").read_text("utf-8").replace("__HSD_TOKEN__", json.dumps(token))
+
+    def material_settings_snapshot():
+        existing = manager.ai_config()
+        return {"settings": material_settings.snapshot(),
+                "deepseek": {"enabled": existing["enabled"], "configured": existing["configured"]},
+                "validation_ready": False}
+
+    @app.get("/api/admin/material-settings")
+    def material_settings_get():
+        return jsonify(material_settings_snapshot())
+
+    @app.post("/api/admin/material-settings")
+    def material_settings_save():
+        if request.headers.get("Origin") != request.host_url.rstrip("/"):
+            raise ValueError("请求来源不匹配。")
+        payload = request.get_json()
+        action = payload.get("action")
+        allowed = {"set_key": {"api_key"}, "remove_key": set(), "set_enabled": {"enabled"}}
+        if not isinstance(action, str) or action not in allowed or set(payload) != allowed[action] | {"action", "expected_revision"}:
+            raise ValueError("素材设置格式不正确。")
+        update = {name: payload[name] for name in allowed[action]}
+        update["expected_revision"] = payload["expected_revision"]
+        if action == "remove_key":
+            update["clear_key"] = True
+        try:
+            material_settings.save(update)
+        except MaterialSettingsConflict:
+            raise Conflict("素材设置已在其他页面更新，请刷新后再保存。") from None
+        return jsonify(material_settings_snapshot())
 
     @app.get("/admin/login")
     def admin_login_page():
