@@ -446,6 +446,7 @@ class ArkMaterialProvider:
         prompt = ("清理整张图片，仅去掉外加水印、污点和设计之外的无关信息。保持原图画布比例、构图、"
                   "所有完整设计的数量、位置、大小和间距不变，不移动、不放大、不拆分，不单独生成图层。"
                   "保留每个设计的人物、文字、装饰和内部底板；设计自身文字、签名不视为水印。"
+                  "将设计外部背景设为真正透明（PNG Alpha 通道），保留设计内部底板；不要用白底或棋盘格图案假装透明。"
                   "尽量保留原配色、形状及细节，不增艳、改字、添加渐变、描边或新图案；无法看清处不要凭空重画。"
                   + location + ("补充要求：" + instructions.strip() if instructions.strip() else ""))
         parsed, usage, request_id = self._submit(

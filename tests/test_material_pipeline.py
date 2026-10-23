@@ -81,6 +81,8 @@ def test_cleanup_requests_single_whole_canvas_preserves_composition_and_opaque_o
     assert body["layer_decomposition"] is False
     assert "stream" not in body and "background" not in body
     assert "不拆分" in body["prompt"] and "数量、位置" in body["prompt"]
+    assert "PNG Alpha 通道" in body["prompt"] and "保留设计内部底板" in body["prompt"]
+    assert "不要用白底或棋盘格图案假装透明" in body["prompt"]
     w, h = map(int, body["size"].split("x"))
     assert 921600 <= w * h <= 4624220 and abs(w / h - 2) < .01
     assert result.rectangular_crops and len(result.layers) == 1
@@ -232,6 +234,15 @@ def test_disabled_locator_fails_before_charged_cleanup():
     with pytest.raises(ArkProviderError, match="DeepSeek"):
         p.extract(image())
     assert not ark.calls and not ds.calls
+
+
+def test_pipeline_preserves_real_transparency_without_claiming_opaque_crop_is_transparent():
+    p, _, _ = make_pipeline(ark_transport=Transport(api_image(image(transparent=True))))
+    result = p.extract(image())
+    with Image.open(io.BytesIO(result.layers[0].png)) as first:
+        assert first.getchannel("A").getextrema()[0] == 0
+    assert not any("未做透明抠图" in warning for warning in result.layers[0].warnings)
+    assert any("未做透明抠图" in warning for warning in result.layers[1].warnings)
 
 
 def test_late_locator_unknown_preserves_cleanup_charge_and_never_replays():
