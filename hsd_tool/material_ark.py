@@ -46,6 +46,7 @@ MAX_OUTPUT_PIXELS = 8_000_000
 MAX_TOTAL_OUTPUT_PIXELS = 80_000_000
 MAX_RESPONSE_BYTES = 128 * 1024 * 1024
 MAX_LAYERS = 16
+CLEAN_TARGET_PIXELS = 2048 * 2048  # Native 2K canvas; preserve aspect ratio.
 _MODEL = re.compile(r"(?:doubao-seedream-5-0-(?:pro|flash)-[A-Za-z0-9._-]+|ep-[A-Za-z0-9][A-Za-z0-9_-]*)\Z")
 _REQUEST_ID = re.compile(r"[A-Za-z0-9._:-]{1,160}\Z")
 _RETRYABLE_RATE_CODES = frozenset({
@@ -432,7 +433,7 @@ class ArkMaterialProvider:
             raise ArkProviderError("invalid_instructions", "处理要求过长，请简要描述。")
         image, source_size, data_uri, notes = _input(image_bytes, decomposition=False)
         area = image.width * image.height
-        factor = math.sqrt(min(4_194_304, max(921_600, area)) / area)
+        factor = math.sqrt(CLEAN_TARGET_PIXELS / area)
         width, height = max(15, math.ceil(image.width * factor)), max(15, math.ceil(image.height * factor))
         location = ""
         if bounds is not None:
@@ -443,11 +444,12 @@ class ArkMaterialProvider:
                 raise ArkProviderError("invalid_bounds", "标记的修改位置超出素材范围。")
             location = (f"只修改像素范围<bbox>{bounds['x']} {bounds['y']} "
                         f"{bounds['x'] + bounds['width']} {bounds['y'] + bounds['height']}</bbox>，其他区域保持原样。")
-        prompt = ("清理整张图片，仅去掉外加水印、污点和设计之外的无关信息。保持原图画布比例、构图、"
-                  "所有完整设计的数量、位置、大小和间距不变，不移动、不放大、不拆分，不单独生成图层。"
-                  "保留每个设计的人物、文字、装饰和内部底板；设计自身文字、签名不视为水印。"
+        prompt = ("清理整张图片的外加水印、污点及无关信息。彻底去除背景和人物脸部、皮肤、衣服、装饰上覆盖的"
+                  "重复、斜向、半透明水印字样与印记，按周围纹理谨慎修复，不留残影；设计自身文字、签名不视为水印。"
+                  "保持原图比例、构图及完整设计的数量、位置、大小、间距；不移动、不拆分，不单独生成图层。"
+                  "保留人物、文字、装饰和内部底板，原配色不变，不改字、不增艳或添加图案。"
+                  "输出高清图像画质和清晰度，保持线条、轮廓、五官和纹理清楚，避免模糊、涂抹、锯齿；看不清的内容不要编造。"
                   "将设计外部背景设为真正透明（PNG Alpha 通道），保留设计内部底板；不要用白底或棋盘格图案假装透明。"
-                  "尽量保留原配色、形状及细节，不增艳、改字、添加渐变、描边或新图案；无法看清处不要凭空重画。"
                   + location + ("补充要求：" + instructions.strip() if instructions.strip() else ""))
         parsed, usage, request_id = self._submit(
             {"model": self.model_id, "image": data_uri, "prompt": prompt,
@@ -463,6 +465,8 @@ class ArkMaterialProvider:
                 raise ArkProviderError("invalid_bounds", "图片服务改变了整图比例，请检查结果后再处理。")
             if not output.getchannel("A").getbbox():
                 raise ArkProviderError("empty_layer", "图片服务返回了空白图片。")
+            if output.width * output.height < width * height * .9:
+                notes.append("图片服务返回尺寸低于高清目标，细节可能不足；可框选单个设计重新处理。")
             notes.append("清理可能改变文字、配色或细节，请对照原图确认。")
             encoded = _encode(output)
             layer = ArkLayer(encoded, "清理后的整图", "", {"x": 0, "y": 0,

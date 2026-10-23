@@ -84,7 +84,7 @@ def test_cleanup_requests_single_whole_canvas_preserves_composition_and_opaque_o
     assert "PNG Alpha 通道" in body["prompt"] and "保留设计内部底板" in body["prompt"]
     assert "不要用白底或棋盘格图案假装透明" in body["prompt"]
     w, h = map(int, body["size"].split("x"))
-    assert 921600 <= w * h <= 4624220 and abs(w / h - 2) < .01
+    assert 4194304 <= w * h <= 4624220 and abs(w / h - 2) < .01
     assert result.rectangular_crops and len(result.layers) == 1
     with Image.open(io.BytesIO(result.base_png)) as im:
         assert im.getchannel("A").getextrema() == (255, 255)
@@ -110,6 +110,31 @@ def test_clean_accepts_opaque_edit_with_valid_local_bounds():
                        bounds={"x": 10, "y": 10, "width": 100, "height": 100})
     assert result.rectangular_crops
     assert "<bbox>10 10 110 110</bbox>" in json.loads(t.calls[0][0].data)["prompt"]
+
+
+@pytest.mark.parametrize("size", [(64, 64), (1600, 100), (100, 1600), (3200, 2400)])
+def test_cleanup_requests_native_hd_with_valid_area_and_preserved_ratio(size):
+    png = image(size)
+    t = Transport(api_image(png))
+    result = ArkMaterialProvider(KEY, MODEL, transport=t).clean(png)
+    payload = json.loads(t.calls[0][0].data)
+    width, height = map(int, payload["size"].split("x"))
+    assert 4194304 <= width * height <= 4624220
+    assert abs((width / height) / (size[0] / size[1]) - 1) < .01
+    assert payload["layer_decomposition"] is False and len(t.calls) == 1
+    # A low-resolution paid reply is preserved with a warning, never silently
+    # described as native HD or automatically sent again.
+    assert any("低于高清目标" in note for note in result.warnings) == (size[0] * size[1] < width * height * .9)
+
+
+def test_cleanup_prompt_targets_overlay_watermarks_and_preserves_design_content():
+    t = Transport(api_image(image()))
+    ArkMaterialProvider(KEY, MODEL, transport=t).clean(image())
+    prompt = json.loads(t.calls[0][0].data)["prompt"]
+    assert "高清图像画质和清晰度" in prompt and "五官和纹理清楚" in prompt
+    assert "人物脸部、皮肤、衣服、装饰上覆盖" in prompt and "半透明水印" in prompt
+    assert "不留残影" in prompt and "设计自身文字、签名不视为水印" in prompt
+    assert len(prompt) <= 300
 
 
 @pytest.mark.parametrize("box", [[-1, 0, 400, 1000], [0, 0, 1001, 1000], [0, 0, 0, 1000],
