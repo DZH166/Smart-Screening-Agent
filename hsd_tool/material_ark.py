@@ -18,6 +18,7 @@ import base64
 import binascii
 from dataclasses import dataclass, field
 import io
+import http.client
 import json
 import math
 import re
@@ -116,6 +117,9 @@ class ArkResult:
     base_png: bytes = field(repr=False)
     base_size: tuple[int, int]
     request_id: str = ""
+    attempts: tuple[dict, ...] = ()
+    provider_usage: dict = field(default_factory=dict)
+    rectangular_crops: bool = False
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -370,7 +374,7 @@ class ArkMaterialProvider:
             if _cancelled(check_cancel):
                 raise ArkCancelled(settled=error.settled, usage=error.usage, request_id=error.request_id) from None
             raise
-        except (OSError, TimeoutError, socket.timeout, urllib.error.URLError):
+        except (OSError, TimeoutError, socket.timeout, urllib.error.URLError, http.client.HTTPException):
             if _cancelled(check_cancel):
                 raise ArkCancelled(settled=False) from None
             raise ArkProviderError("submission_unknown", "图片服务连接中断或超时，结果未确认，未自动重复提交。", settled=False) from None
@@ -412,6 +416,60 @@ class ArkMaterialProvider:
             # before receiving settlement/known usage just to make Stop look fast.
             raise ArkCancelled(usage=usage, request_id=request_id)
         return parsed, usage, request_id
+
+    def clean(self, image_bytes: bytes, *, instructions="", bounds=None,
+              check_cancel: Callable | None = None) -> ArkResult:
+        """Clean one complete canvas; no decomposition or invented separate items.
+
+        Seedream 5.0 flash/pro do not support upstream streaming (official API,
+        checked 2026-10-23). Callers emit honest start/wait/returned stage events.
+        Rectangular crops preserve these returned pixels, including any opaque
+        background; merely converting a PNG to RGBA is not background removal.
+        """
+        if _cancelled(check_cancel):
+            raise ArkCancelled()
+        if not isinstance(instructions, str) or len(instructions) > 1000:
+            raise ArkProviderError("invalid_instructions", "处理要求过长，请简要描述。")
+        image, source_size, data_uri, notes = _input(image_bytes, decomposition=False)
+        area = image.width * image.height
+        factor = math.sqrt(min(4_194_304, max(921_600, area)) / area)
+        width, height = max(15, math.ceil(image.width * factor)), max(15, math.ceil(image.height * factor))
+        location = ""
+        if bounds is not None:
+            if (not isinstance(bounds, dict) or set(bounds) != {"x", "y", "width", "height"}
+                    or not all(type(v) is int for v in bounds.values())
+                    or bounds["x"] < 0 or bounds["y"] < 0 or bounds["width"] <= 0 or bounds["height"] <= 0
+                    or bounds["x"] + bounds["width"] > image.width or bounds["y"] + bounds["height"] > image.height):
+                raise ArkProviderError("invalid_bounds", "标记的修改位置超出素材范围。")
+            location = (f"只修改像素范围<bbox>{bounds['x']} {bounds['y']} "
+                        f"{bounds['x'] + bounds['width']} {bounds['y'] + bounds['height']}</bbox>，其他区域保持原样。")
+        prompt = ("清理整张图片，仅去掉外加水印、污点和设计之外的无关信息。保持原图画布比例、构图、"
+                  "所有完整设计的数量、位置、大小和间距不变，不移动、不放大、不拆分，不单独生成图层。"
+                  "保留每个设计的人物、文字、装饰和内部底板；设计自身文字、签名不视为水印。"
+                  "尽量保留原配色、形状及细节，不增艳、改字、添加渐变、描边或新图案；无法看清处不要凭空重画。"
+                  + location + ("补充要求：" + instructions.strip() if instructions.strip() else ""))
+        parsed, usage, request_id = self._submit(
+            {"model": self.model_id, "image": data_uri, "prompt": prompt,
+             "layer_decomposition": False, "size": f"{width}x{height}",
+             "output_format": "png", "response_format": "b64_json", "watermark": False}, check_cancel)
+        try:
+            data = parsed.get("data")
+            if not isinstance(data, list) or len(data) != 1 or not isinstance(data[0], dict) or "error" in data[0]:
+                raise ArkProviderError("invalid_response", "图片服务没有返回一张完整的清理图片。")
+            output = _decode(_image_field(data[0]), output=True)
+            _size(data[0], output)
+            if abs(output.width / output.height / (image.width / image.height) - 1) > .015:
+                raise ArkProviderError("invalid_bounds", "图片服务改变了整图比例，请检查结果后再处理。")
+            if not output.getchannel("A").getbbox():
+                raise ArkProviderError("empty_layer", "图片服务返回了空白图片。")
+            notes.append("清理可能改变文字、配色或细节，请对照原图确认。")
+            encoded = _encode(output)
+            layer = ArkLayer(encoded, "清理后的整图", "", {"x": 0, "y": 0,
+                             "width": source_size[0], "height": source_size[1]}, 1, tuple(notes))
+            return ArkResult((layer,), usage, tuple(notes), encoded, output.size, request_id,
+                             rectangular_crops=True)
+        except ArkProviderError as error:
+            raise ArkProviderError(error.code, error.message, usage=usage, request_id=request_id) from None
 
     def extract(self, image_bytes: bytes, *, instructions="", check_cancel: Callable | None = None) -> ArkResult:
         if _cancelled(check_cancel):

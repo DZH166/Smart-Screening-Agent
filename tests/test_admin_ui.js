@@ -61,7 +61,7 @@ async function main(){
   assert.ok(!element('key-batch').classList.contains('key-plain'));assert.equal(element('key-reveal').textContent,'显示');
   assert.equal(element('settings-state').textContent,'已启用，导入后自动运行。');assert.ok(element('qualification-state').textContent.includes('仍需人工确认'));assert.ok(element('persistence-state').textContent.includes('这台电脑'));
   ui.applySettings({...json(initial),key_persistence:'linux_aesgcm'});assert.ok(element('persistence-state').textContent.includes('加密保存在服务器'));assert.ok(!element('persistence-state').textContent.includes('重启后需重新填写'));
-  ui.applySettings({...json(initial),enabled:false});assert.match(element('settings-state').textContent,/已关闭 AI/);
+  ui.applySettings({...json(initial),enabled:false});assert.equal(element('settings-state').textContent,'图号助手使用本机匹配；素材提取需启用 DeepSeek。');
   ui.applySettings({...json(initial),configured:false});assert.match(element('settings-state').textContent,/请添加并启用 Key/);
   ui.applySettings({...json(initial),storage_warning:'合成存储异常'});assert.equal(element('storage-warning').textContent,'合成存储异常');assert.ok(!element('storage-warning').classList.contains('hidden'));ready();assert.ok(element('storage-warning').classList.contains('hidden'));
 
@@ -218,7 +218,11 @@ async function main(){
   retry.resolve({status:200,body:{ok:true}});await retrying;fetchHandler=null;assert.equal(sandbox.window.location.replacements.at(-1),'/admin/login');
 
   const html=fs.readFileSync(path.join(__dirname,'../hsd_tool/static/admin.html'),'utf8'),css=fs.readFileSync(path.join(__dirname,'../hsd_tool/static/admin.css'),'utf8');
-  assert.ok(html.includes('window.HSD_TOKEN = __HSD_TOKEN__'));assert.ok(html.includes('href="/"'));assert.equal((html.match(/<section class="panel\b/g)||[]).length,5,'AI settings, Key management, Key ledger, separate functions and on-demand help');
+  assert.ok(html.includes('window.HSD_TOKEN = __HSD_TOKEN__'));assert.ok(html.includes('href="/"'));assert.equal((html.match(/<section class="panel\b/g)||[]).length,7,'DeepSeek controls and ledger, Ark and access configuration, functions and help');
+  assert.ok(html.indexOf('id="material-config-heading"')<html.indexOf('id="functions"'),'Ark configuration is under Key ledger');
+  const functions=html.slice(html.indexOf('id="functions"'),html.indexOf('id="help"'));assert.equal((functions.match(/class="function-card"/g)||[]).length,2);assert.ok(!functions.includes('/admin/access-codes'));assert.ok(html.indexOf('id="access-config-heading"')<html.indexOf('id="functions"'));
+  assert.match(html,/<a class="function-card" href="\/#material">/,'material function opens employee workspace');
+  assert.ok(html.includes('DeepSeek · 图号匹配与素材裁剪'));
   assert.ok(html.includes('data-admin-section="keys"')&&html.includes('data-admin-section="functions"')&&html.includes('data-admin-section="help"'),'admin sections are navigated independently');
   assert.ok(source.includes('只有通过系统独立核对'));assert.ok(html.includes('AI 建议相同不等于已经确认'));assert.ok(html.includes('原始表格、压缩包、AI 文件和电脑路径不会发送'));
   assert.ok(html.includes('<details id="admin-help">')&&!html.includes('<details id="admin-help" open'),'help stays closed until requested');

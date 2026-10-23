@@ -96,7 +96,7 @@ function harness(){
     fetch:async(url,options={})=>{requests.push({url,options});return fetchHandler(url,options);},console,
   };
   const source=fs.readFileSync(path.join(staticDir,'app.js'),'utf8');
-  const exposure='  window.testUI={state,init,renderJob,renderTable,renderPanel,renderCandidateView,selectRow,counts,filteredRows,resolveRow,undoLast,pollJob,schedulePoll,acceptJob,renderSummary,configureAccess,preloadImage,preloadNeighbours,cacheSnapshot:()=>({preloaded:[...preloaded],aspects:imageAspects.size,rowViews:rowViewState.size})};';
+  const exposure='  window.testUI={state,init,renderJob,renderTable,renderPanel,renderCandidateView,selectRow,counts,filteredRows,resolveRow,undoLast,pollJob,schedulePoll,acceptJob,renderSummary,configureAccess,preloadImage,preloadNeighbours,bulkCandidates,openBulkReview,selectBulkAll,confirmBulkRows,cacheSnapshot:()=>({preloaded:[...preloaded],aspects:imageAspects.size,rowViews:rowViewState.size})};';
   assert.match(source,/  init\(\)\.catch\([^\n]+\);/,'test seam must replace only bootstrap');
   vm.runInNewContext(source.replace(/  init\(\)\.catch\([^\n]+\);/,exposure),sandbox);
   return {ui:window.testUI,document,window,requests,timers,preload,advance,setFetch(handler){fetchHandler=handler;},loadAI(){vm.runInNewContext(fs.readFileSync(path.join(staticDir,'ai-settings.js'),'utf8'),sandbox);},node:id=>document.getElementById(id)};
@@ -107,6 +107,18 @@ const clone=(value)=>JSON.parse(JSON.stringify(value));
 const flush=async()=>{for(let i=0;i<8;i++)await Promise.resolve();};
 
 async function main(){
+  {
+  // Batch human confirmation preserves explicit selection, candidate identity and atomic save.
+  const bulk=harness(),bj=job(4);bj.rows.forEach(row=>row.bulk_confirm_eligible=true);bj.rows[2].bulk_confirm_eligible=false;bj.rows[3].status='auto';bj.rows[3].file_id='f3';bulk.ui.state.job=bj;bulk.ui.selectRow('r0','g0',false);bulk.ui.openBulkReview();
+  assert.equal(bulk.ui.state.bulk.items.length,2);assert.equal(bulk.ui.state.bulk.selected.size,0);assert.equal(bulk.node('batch-review-submit').disabled,true);assert.ok(bulk.node('batch-review-grid').textContent.includes('候选0.ai'));
+  bulk.ui.selectBulkAll(true);assert.equal(bulk.ui.state.bulk.selected.size,2);
+  let save;bulk.setFetch(()=>new Promise(resolve=>save=resolve));const saving=bulk.ui.confirmBulkRows();assert.equal(bulk.ui.state.resolving,true);assert.equal(bulk.ui.state.job.rows[0].status,'review');
+  const payload=JSON.parse(bulk.requests[0].options.body);assert.deepEqual(payload,{expected_revision:1,items:[{row_id:'r0',file_id:'g0'},{row_id:'r1',file_id:'f1'}]});
+  const saved=clone(bj);saved.revision=2;saved.can_undo=true;for(const item of payload.items){const row=saved.rows.find(row=>row.id===item.row_id);row.status='confirmed';row.file_id=item.file_id;}save(response(saved));await saving;assert.equal(bulk.ui.state.job.rows[0].status,'confirmed');assert.equal(bulk.ui.state.bulk,null);
+  const conflict=harness();conflict.ui.state.job=clone(bj);conflict.ui.openBulkReview();conflict.ui.selectBulkAll(true);conflict.ui.state.job.revision=9;await conflict.ui.confirmBulkRows();assert.equal(conflict.requests.length,0);assert.match(conflict.node('batch-review-error').textContent,/已经更新/);
+  const collision=harness(),cj=clone(bj);cj.rows[1].candidates[0].file_id='f0';collision.ui.state.job=cj;assert.equal(collision.ui.bulkCandidates().length,0,'competing same file cannot be batch confirmed');
+
+  }
   // A changed row must not recreate unaffected rows or their loaded images.
   const h=harness(),ui=h.ui;ui.state.job=job();ui.selectRow('r0',null,false);ui.renderTable();
   const original=h.node('rows-body').children[1];h.document.querySelector('.table-scroll').scrollTop=83;

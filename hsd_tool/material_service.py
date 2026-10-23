@@ -39,6 +39,20 @@ _TERMINAL = {"ready", "cancelled", "error"}
 _MAX_PIXELS = 36_000_000
 _MAX_FILES = 100
 _RETENTION = 3 * 86400
+_STAGES = {
+    "queued": ("排队", "等待开始处理"),
+    "preparing": ("准备图片", "正在检查图片"),
+    "cleanup": ("清理整图", "正在清理水印和杂质，等待图片服务返回"),
+    "locating": ("识别设计范围", "正在识别完整设计的位置，等待识别服务返回"),
+    "cropping": ("裁剪素材", "正在按设计范围裁剪素材"),
+    "saving": ("保存素材", "正在保存本张图片的结果"),
+    "source_done": ("本张已完成", "本张素材已生成，继续处理其余图片"),
+    "source_error": ("本张未完成", "本张处理遇到问题，继续处理其余图片"),
+    "cancelling": ("正在停止", "已发出的请求返回或超时后，本批才会停止"),
+    "cancelled": ("已停止", "未发送的图片不再处理"),
+    "done": ("处理完成", "可选中素材批量确认后下载"),
+    "error": ("处理未完成", "请查看提示后重试或联系管理员"),
+}
 
 
 def _canonical(value):
@@ -101,7 +115,7 @@ def _png(image):
 class MaterialManager:
     """A single provider queue with response-bound leases and graceful drain."""
 
-    def __init__(self, data_dir, settings, *, cloud=False, provider_factory=None,
+    def __init__(self, data_dir, settings, *, cloud=False, provider_factory=None, ai_settings=None, ai_key_pool=None,
                  quality_hook=None, clock=time.time):
         self.data_dir = Path(data_dir).absolute()
         self.root = checked_path(self.data_dir / "material_tasks", self.data_dir)
@@ -112,6 +126,8 @@ class MaterialManager:
             checked_path(path, self.root).mkdir(mode=0o700, exist_ok=True)
         self.settings, self.cloud, self.clock = settings, bool(cloud), clock
         self.provider_factory = provider_factory
+        self.ai_settings = ai_settings
+        self.ai_key_pool = ai_key_pool
         self.quality_hook = quality_hook
         self.lock = threading.RLock()
         self.jobs, self.leases, self.futures = {}, {}, {}
@@ -119,7 +135,9 @@ class MaterialManager:
         self._closed = False
         self._key = self._load_key()
         implementation = hashlib.sha256(__version__.encode())
-        for name in ("material_service.py", "material_ark.py", "material_quality.py"):
+        for name in ("material_service.py", "material_ark.py", "material_quality.py", "material_pipeline.py", "material_locate.py"):
+            if not Path(__file__).with_name(name).exists():
+                continue
             implementation.update(name.encode()); implementation.update(Path(__file__).with_name(name).read_bytes())
         self.implementation = implementation.hexdigest()
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="hsd-material")
@@ -167,6 +185,9 @@ class MaterialManager:
             temporary.unlink(missing_ok=True)
 
     def _save(self, job, *, touch=False):
+        job["update_seq"] = job.get("update_seq", 0) + 1
+        job["updated_at"] = self.clock()
+        job["progress"]["updated_at"] = job["updated_at"]
         if touch and job["status"] in _TERMINAL:
             job["settled_at"] = self.clock()
             job["expires_at"] = job["settled_at"] + _RETENTION
@@ -178,9 +199,27 @@ class MaterialManager:
         self._write(self._directory(job["id"]) / "manifest.json",
                     _canonical({"payload": payload, "hmac_sha256": signature}))
 
+    def _progress(self, job, stage, *, current=None, total=None, source_id=None):
+        """Only real work boundaries advance the stream; waiting is not percent."""
+        phase, message = _STAGES[stage]
+        previous = job.get("progress", {})
+        now = self.clock()
+        job["progress"] = {"stage_code": stage, "phase": phase, "message": message,
+                           "current": previous.get("current", 0) if current is None else current,
+                           "total": previous.get("total", len(job["sources"])) if total is None else total,
+                           "source_id": source_id if source_id is not None else previous.get("source_id"),
+                           "started_at": now, "updated_at": now,
+                           "indeterminate": stage in {"cleanup", "locating", "cancelling"}}
+        # A short, private stage history survives reconnects and is never model
+        # chain-of-thought. It contains no credentials or upstream response text.
+        history = job.setdefault("stage_history", [])
+        history.append({"stage_code": stage, "at": now,
+                        "source_id": job["progress"]["source_id"]})
+        del history[:-800]
+
     def _read(self, directory):
         path = self._private(directory / "manifest.json")
-        if path.stat().st_size > 4 * 1024 * 1024:
+        if path.stat().st_size > 16 * 1024 * 1024:
             raise ValueError("素材任务记录过大。")
         envelope = json.loads(path.read_text("utf-8"))
         if set(envelope) != {"payload", "hmac_sha256"}:
@@ -209,6 +248,7 @@ class MaterialManager:
                 if job["status"] in _BUSY:
                     job.update(status="error", error="上次处理被中断，未自动重复调用。请检查已有结果后重新处理。",
                                revision=job["revision"] + 1)
+                    self._progress(job, "error")
                     for source in job["sources"]:
                         if source["status"] == "processing":
                             unknown = any(attempt["state"] in {"submitted", "unknown"} and
@@ -326,6 +366,7 @@ class MaterialManager:
                            "settled_at": None, "expires_at": None, "sources": sources,
                            "items": [], "warnings": [], "error": "", "cancel_requested": False,
                            "attempts": [], "upload_id": str(upload_request_id)}
+                    self._progress(job, "queued")
                     self.jobs[identifier] = job
                     self._save(job)
                     if before_submit:
@@ -347,13 +388,33 @@ class MaterialManager:
             raise ValueError("素材服务尚未配置，请联系管理员。")
         if not config.get("enabled"):
             raise ValueError("素材处理尚未开启，请联系管理员开启后再试。")
+        if not self._deepseek_available():
+            raise ValueError("素材范围识别需要可用的 DeepSeek 服务，请联系管理员配置并开启。")
         return config
+
+    def _deepseek_available(self):
+        # Explicit injected providers are isolated controls; production always
+        # requires the actual enabled credential runtime, not a UI-only flag.
+        if self.provider_factory is not None and self.ai_settings is None:
+            return True
+        if self.ai_settings is None:
+            return False
+        runtime = self.ai_settings.runtime()
+        if not runtime.get("enabled") or not runtime.get("api_key"):
+            return False
+        if runtime.get("via_gateway"):
+            # The legacy gateway only understands numbering requests and must
+            # never receive a new material image payload by accidental reuse.
+            return False
+        if self.ai_key_pool is not None:
+            return any(row.get("status") == "available" for row in self.ai_key_pool.snapshot().get("keys", ()))
+        return True
 
     def _provider(self, config):
         if self.provider_factory:
             return self.provider_factory(config)
-        from .material_ark import ArkMaterialProvider
-        return ArkMaterialProvider(config["ark_key"], config["model_id"])
+        from .material_pipeline import MaterialPipelineProvider
+        return MaterialPipelineProvider(config, self.ai_settings, key_pool=self.ai_key_pool)
 
     def _check(self, job):
         if job.get("cancel_requested"):
@@ -378,12 +439,37 @@ class MaterialManager:
                 job["attempts"].append(attempt); self._save(job)
             try:
                 kwargs = {"instructions": instructions, "check_cancel": lambda: self._check(job)}
+                if getattr(provider, "supports_progress", False):
+                    def progress(stage_code, _message=""):
+                        stage = {"prepare": "preparing", "locate": "locating", "crop": "cropping",
+                                 "complete": "saving"}.get(stage_code, stage_code)
+                        if stage not in _STAGES:
+                            return
+                        with self.lock:
+                            if not job.get("cancel_requested"):
+                                self._progress(job, stage, source_id=source_id)
+                                self._save(job)
+                    def record(update):
+                        with self.lock:
+                            calls = attempt.setdefault("pipeline_attempts", [])
+                            identifier = str(update.get("id", ""))
+                            existing = next((row for row in calls if row["id"] == identifier), None)
+                            data = {key: deepcopy(update[key]) for key in
+                                    ("id", "provider", "operation", "number", "state", "usage", "request_id", "settled", "code")
+                                    if key in update}
+                            if existing is None:
+                                calls.append(data)
+                            else:
+                                existing.update(data)
+                            self._save(job)
+                    kwargs.update(on_progress=progress, on_attempt=record)
                 if edit:
                     result = provider.edit(raw, bounds=bounds, **kwargs)
                 else:
                     result = provider.extract(raw, **kwargs)
                 attempt.update(state="returned", usage=dict(getattr(result, "usage", {}) or {}),
                                request_id=str(getattr(result, "request_id", "")))
+                attempt["provider_usage"] = deepcopy(getattr(result, "provider_usage", {}) or {})
                 with self.lock:
                     self._save(job)
                 return result
@@ -391,6 +477,7 @@ class MaterialManager:
                 settled = bool(getattr(exc, "settled", False))
                 attempt.update(state="cancelled" if settled else "unknown", usage=dict(getattr(exc, "usage", {}) or {}),
                                settled=settled, request_id=str(getattr(exc, "request_id", "")))
+                attempt["provider_usage"] = deepcopy(getattr(exc, "provider_usage", {}) or {})
                 if not settled:
                     job["warnings"].append("本机已结束等待，但上游请求和扣费状态尚未确定；本次未重复提交。")
                 with self.lock:
@@ -402,6 +489,7 @@ class MaterialManager:
                                usage=dict(getattr(exc, "usage", {}) or {}),
                                request_id=str(getattr(exc, "request_id", "")),
                                code=str(getattr(exc, "code", "processing_failed"))[:80])
+                attempt["provider_usage"] = deepcopy(getattr(exc, "provider_usage", {}) or {})
                 with self.lock:
                     self._save(job)
                 if number or not retry:
@@ -413,12 +501,14 @@ class MaterialManager:
             if job["cancel_requested"]:
                 job["status"] = "cancelled"
                 job["revision"] += 1
-                job["progress"]["message"] = "本批已停止，排队中的图片未发送。"
+                self._progress(job, "cancelled")
                 for source in job["sources"]:
                     if source["status"] == "queued":
                         source["status"] = "cancelled"
                 self._save(job, touch=True); return
             job["status"] = "processing"; job["revision"] += 1
+            job["run_started_at"] = self.clock()
+            self._progress(job, "preparing")
             self._save(job)
         try:
             provider = self._provider(self._runtime())
@@ -427,8 +517,7 @@ class MaterialManager:
                 self._check(job)
                 with self.lock:
                     source["status"] = "processing"
-                    job["progress"] = {"phase": "提取素材", "current": index, "total": len(sources),
-                                       "message": "正在拆分完整设计，请稍候"}
+                    self._progress(job, "preparing", current=index, total=len(sources), source_id=source["id"])
                     self._save(job)
                 try:
                     original = self._source_path(job, source).read_bytes()
@@ -461,17 +550,23 @@ class MaterialManager:
                                           edit=bool(old_item), bounds=edit_bounds, source_id=source["id"])
                     self._check(job)
                     self._source_path(job, source)
+                    with self.lock:
+                        self._check(job)
+                        self._progress(job, "saving", source_id=source["id"])
+                        self._save(job)
                     new_items = self._outputs(job, source, result, raw, offset, corrected=bool(redo))
                     if old_item:
                         for item in new_items:
                             item["bounds"] = deepcopy(old_item["bounds"])
                     with self.lock:
+                        self._check(job)
                         if redo and redo.get("item_id"):
                             for old in job["items"]:
                                 if old["id"] == redo["item_id"]:
                                     old["status"] = "superseded"
                         job["items"].extend(new_items)
                         source.update(status="done", error="", submission_unknown=False)
+                        self._progress(job, "source_done", current=index + 1, total=len(sources), source_id=source["id"])
                         job["revision"] += 1
                         self._save(job)
                 except TaskCancelled:
@@ -480,20 +575,25 @@ class MaterialManager:
                     with self.lock:
                         # Never return upstream exception text (may contain a
                         # credential, base64 request or internal filesystem path).
-                        source.update(status="error", error=self._public_error(exc),
-                                      submission_unknown=getattr(exc, "settled", True) is False)
+                        unknown = (getattr(exc, "settled", True) is False or
+                                   any(attempt.get("source_id") == source["id"] and attempt["state"] == "unknown"
+                                       for attempt in job["attempts"]))
+                        message = ("接口返回中断，是否扣费尚未确定；未自动重发。请联系管理员核对后再重做。"
+                                   if unknown else self._public_error(exc))
+                        source.update(status="error", error=message, submission_unknown=unknown)
+                        self._progress(job, "source_error", current=index + 1, total=len(sources), source_id=source["id"])
                         job["revision"] += 1
                         self._save(job)
             with self.lock:
+                self._check(job)
                 job["status"] = "ready" if any(s["status"] == "done" for s in job["sources"]) else "error"
                 job["error"] = "" if job["status"] == "ready" else "本批未能生成素材，请查看图片旁的原因后重试。"
-                job["progress"] = {"phase": "处理完成", "current": len(sources), "total": len(sources),
-                                   "message": "请处理标记的疑难素材，其余可直接下载"}
+                self._progress(job, "done" if job["status"] == "ready" else "error", current=len(sources), total=len(sources))
                 job["revision"] += 1; self._save(job, touch=True)
         except TaskCancelled:
             with self.lock:
                 job["status"] = "cancelled"
-                job["progress"]["message"] = "本批已停止，未发送的图片不再处理。"
+                self._progress(job, "cancelled")
                 for source in job["sources"]:
                     if source["status"] in {"queued", "processing"}:
                         if source["status"] == "processing" and job["attempts"] and job["attempts"][-1]["state"] == "unknown":
@@ -504,6 +604,7 @@ class MaterialManager:
         except Exception as exc:
             with self.lock:
                 job["status"] = "error"; job["error"] = self._public_error(exc)
+                self._progress(job, "error")
                 job["revision"] += 1; self._save(job, touch=True)
 
     @staticmethod
@@ -511,8 +612,11 @@ class MaterialManager:
         if getattr(exc, "settled", True) is False:
             return "接口返回中断，是否扣费尚未确定；未自动重发。请联系管理员核对后再重做。"
         return {"authentication": "素材服务的 Key 无效，请联系管理员。",
+                "deepseek_unavailable": "DeepSeek 暂不可用，请联系管理员检查 Key、开关或稍后重试。",
+                "invalid_decision": "未能可靠确定设计范围，请在原图框选后重试。",
+                "empty_crop": "识别范围内没有有效图案，请重新框选完整设计。",
                 "provider_auth": "素材服务的 Key 或模型权限不正确，请联系管理员检查。",
-                "unsupported_model": "当前图片模型不支持素材拆分，请联系管理员更换模型。",
+                "unsupported_model": "当前图片模型不支持整图清理，请联系管理员更换模型。",
                 "provider_busy": "素材服务暂时繁忙，请稍后重试。",
                 "missing_alpha": "没有生成有效透明背景，请调整范围或联系管理员。",
                 "invalid_image": "素材服务无法读取这张图片，请更换图片或缩小范围。",
@@ -522,21 +626,29 @@ class MaterialManager:
 
     def _outputs(self, job, source, result, raw, offset, *, corrected):
         layers = list(getattr(result, "layers", ()))
-        if not layers or len(layers) > 16:
+        rectangular = getattr(result, "rectangular_crops", False) is True
+        if not layers or len(layers) > (128 if rectangular else 16):
             raise ValueError("素材服务未返回有效设计。")
         warnings_common = list(getattr(result, "warnings", ()) or ())
-        if len(layers) >= 16:
+        if len(layers) >= (128 if rectangular else 16):
             warnings_common.append("本图设计较多，可能还有漏提取；请查看原图并框选补提取。")
         items = []
         for layer in layers:
+            self._check(job)
             image = _decode(layer.png)
             alpha = image.getchannel("A")
-            if alpha.getextrema()[0] == 255 or not alpha.getbbox():
+            if (not rectangular and alpha.getextrema()[0] == 255) or not alpha.getbbox():
                 raise ValueError("素材没有有效透明背景，未生成可下载结果。")
             bounds = dict(getattr(layer, "bounds", {}) or {})
             quality = {"auto_ready": False, "warnings": ["请核对文字、配色和设计是否完整；修补细节可能与原图不同。"], "evidence": {}}
-            if self.quality_hook:
+            if self.quality_hook and not rectangular:
                 quality = self.quality_hook(raw, layer.png, bounds, corrected=corrected)
+            # Rectangular image proposals have no validated automatic quality
+            # qualification. Neither model certainty nor a pixel check replaces
+            # the employee's explicit single/batch decision.
+            if rectangular:
+                quality["auto_ready"] = False
+                quality["evidence"] = {"version": "material-rectangular-crop-1", "scope": "unverified_generated_content"}
             notices = list(dict.fromkeys(warnings_common + list(getattr(layer, "warnings", ()) or ()) +
                                         list(quality.get("warnings", ()))))
             original_size = image.size
@@ -556,6 +668,7 @@ class MaterialManager:
                           "warnings": notices, "width": image.width, "height": image.height,
                           "native_width": original_size[0], "native_height": original_size[1],
                           "bounds": bounds, "sha256": hashlib.sha256(content).hexdigest(),
+                          "rectangular_crop": rectangular,
                           "evidence": quality.get("evidence", {})})
         return items
 
@@ -597,12 +710,17 @@ class MaterialManager:
 
     def config(self, owner):
         setting = self.settings.snapshot()
+        deepseek_available = self._deepseek_available()
         with self.lock:
             own = [job for job in self.jobs.values() if job["owner"] == str(owner or "local") and
                    (not self.cloud or job.get("expires_at") is None or job["expires_at"] > self.clock())]
             own.sort(key=lambda job: job["created_at"])
-            return {"available": bool(setting["enabled"] and setting["configured"] and setting["model_id"]),
+            return {"available": bool(setting["enabled"] and setting["configured"] and setting["model_id"] and deepseek_available),
                     "enabled": setting["enabled"], "configured": setting["configured"],
+                    "deepseek_available": deepseek_available,
+                    "unavailable_reason": ("请联系管理员配置并开启素材图片服务。" if not (
+                        setting["enabled"] and setting["configured"] and setting["model_id"]) else
+                        "识别设计范围需要可用的 DeepSeek 服务，请联系管理员配置并开启。" if not deepseek_available else ""),
                     "active_job_id": own[-1]["id"] if own else None,
                     "retention_days": 3 if self.cloud else None}
 
@@ -619,6 +737,12 @@ class MaterialManager:
         with self.lock:
             job = self._get(identifier, owner)
             result = {key: deepcopy(job[key]) for key in ("id", "revision", "status", "progress", "warnings", "error")}
+            result["update_seq"] = job.get("update_seq", 0)
+            result["can_undo_batch"] = bool(job.get("batch_undo") and
+                                           job["batch_undo"]["revision"] == job["revision"] and job["status"] not in _BUSY)
+            end = self.clock() if job["status"] in _BUSY else job.get("settled_at") or self.clock()
+            result["progress"]["elapsed_seconds"] = max(0, int(end - job["progress"].get("started_at", job["created_at"])))
+            result["progress"]["task_elapsed_seconds"] = max(0, int(end - job.get("run_started_at", job["created_at"])))
             result["sources"] = []
             for source in job["sources"]:
                 row = {key: deepcopy(value) for key, value in source.items() if key != "sha256"}
@@ -662,8 +786,84 @@ class MaterialManager:
                 raise KeyError("找不到此素材。")
             self._source_path(job, self._source(job, item["source_id"]))
             self._item_path(job, item)
-            item["status"] = "confirmed" if payload["action"] == "confirm" else "skipped"
-            job["revision"] += 1; self._save(job, touch=True)
+            candidate = deepcopy(job)
+            changed = next(row for row in candidate["items"] if row["id"] == item["id"])
+            changed["status"] = "confirmed" if payload["action"] == "confirm" else "skipped"
+            changed["review"] = {"method": "employee_single", "action": payload["action"], "at": self.clock()}
+            candidate.pop("batch_undo", None)
+            candidate["revision"] += 1
+            self._save(candidate, touch=True)
+            self.jobs[identifier] = candidate
+            return self.snapshot(identifier, owner)
+
+    def resolve_batch(self, identifier, owner, payload):
+        """One explicit employee decision, committed atomically after checks."""
+        with self.lease(identifier, owner), self.lock:
+            if not isinstance(payload, dict) or set(payload) != {"expected_revision", "item_ids"}:
+                raise ValueError("请选择需要确认的素材。")
+            job = self._get(identifier, owner); self._editable(job, payload["expected_revision"])
+            identifiers = payload["item_ids"]
+            if (not isinstance(identifiers, list) or not identifiers or len(identifiers) > len(job["items"])
+                    or any(not isinstance(value, str) or not _ID.fullmatch(value) for value in identifiers)
+                    or len(set(identifiers)) != len(identifiers)):
+                raise ValueError("请选择不重复的待确认素材。")
+            items = {row["id"]: row for row in job["items"]}
+            verified_sources = set()
+            for item_id in identifiers:
+                item = items.get(item_id)
+                if item is None:
+                    raise KeyError("所选素材不存在，请刷新后重试。")
+                if item["status"] != "needs_review":
+                    raise Conflict("所选素材状态已改变，请重新选择待确认素材。")
+                if item["source_id"] not in verified_sources:
+                    self._source_path(job, self._source(job, item["source_id"]))
+                    verified_sources.add(item["source_id"])
+                self._item_path(job, item)
+            candidate = deepcopy(job)
+            at, group = self.clock(), secrets.token_hex(16)
+            selected = set(identifiers)
+            previous = []
+            for item in candidate["items"]:
+                if item["id"] in selected:
+                    previous.append({"id": item["id"], "status": item["status"], "review": item.get("review")})
+                    item.update(status="confirmed", review={"method": "employee_batch", "action": "confirm", "at": at, "group": group})
+            candidate["revision"] += 1
+            candidate["batch_undo"] = {"revision": candidate["revision"], "items": previous, "group": group}
+            candidate.setdefault("review_actions", []).append({"method": "employee_batch", "at": at, "group": group, "item_ids": identifiers})
+            self._save(candidate, touch=True)
+            self.jobs[identifier] = candidate
+            return self.snapshot(identifier, owner)
+
+    def undo_batch(self, identifier, owner, payload):
+        with self.lease(identifier, owner), self.lock:
+            if not isinstance(payload, dict) or set(payload) != {"expected_revision"}:
+                raise ValueError("撤销参数无效。")
+            job = self._get(identifier, owner); self._editable(job, payload["expected_revision"])
+            undo = job.get("batch_undo")
+            if not undo or undo["revision"] != job["revision"]:
+                raise Conflict("这次批量确认已不能直接撤销，请逐项更正。")
+            current = {row["id"]: row for row in job["items"]}
+            for previous in undo["items"]:
+                item = current.get(previous["id"])
+                if item is None or item["status"] != "confirmed" or item.get("review", {}).get("group") != undo["group"]:
+                    raise Conflict("素材已改变，未撤销任何确认。")
+                self._source_path(job, self._source(job, item["source_id"]))
+                self._item_path(job, item)
+            candidate = deepcopy(job)
+            restore = {row["id"]: row for row in undo["items"]}
+            for item in candidate["items"]:
+                if item["id"] in restore:
+                    previous = restore[item["id"]]
+                    item["status"] = previous["status"]
+                    if previous["review"] is None:
+                        item.pop("review", None)
+                    else:
+                        item["review"] = previous["review"]
+            candidate.pop("batch_undo")
+            candidate.setdefault("review_actions", []).append({"method": "employee_batch_undo", "at": self.clock(), "group": undo["group"]})
+            candidate["revision"] += 1
+            self._save(candidate, touch=True)
+            self.jobs[identifier] = candidate
             return self.snapshot(identifier, owner)
 
     def redo(self, identifier, owner, payload):
@@ -699,8 +899,9 @@ class MaterialManager:
                 if source["status"] != "error":
                     raise ValueError("请先框出要补提取的范围。")
             self._runtime()
+            job.pop("batch_undo", None)
             job.update(status="queued", cancel_requested=False, error="", settled_at=None, expires_at=None)
-            job["progress"] = {"phase": "排队", "current": 0, "total": 1, "message": "等待重做当前素材"}
+            self._progress(job, "queued", current=0, total=1, source_id=source["id"])
             job["revision"] += 1; self._save(job)
             self.futures[identifier] = self.executor.submit(self._run, identifier, deepcopy(payload))
             return self.snapshot(identifier, owner)
@@ -712,7 +913,7 @@ class MaterialManager:
                 raise Conflict("处理进度已更新，请刷新后再停止。")
             if job["status"] in _BUSY:
                 job.update(cancel_requested=True, status="cancelling")
-                job["progress"]["message"] = "正在停止；已发送的请求返回或超时后，本批才会停止。"
+                self._progress(job, "cancelling")
                 job["revision"] += 1; self._save(job)
             return self.snapshot(identifier, owner)
 

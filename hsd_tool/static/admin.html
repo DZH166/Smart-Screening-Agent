@@ -31,7 +31,7 @@
       <div class="admin-section" data-admin-section="keys">
       <section class="panel settings-panel" id="keys" aria-labelledby="settings-heading">
         <div class="section-heading">
-          <h2 id="settings-heading">AI 处理</h2>
+          <h2 id="settings-heading">DeepSeek · 图号匹配与素材裁剪</h2>
           <form id="enable-form">
             <label class="enable-control"><input id="ai-enabled" type="checkbox" disabled><span>启用 DeepSeek</span></label>
             <button id="enable-save" class="button secondary" type="submit" disabled>保存</button>
@@ -58,6 +58,12 @@
           </div>
         </details>
       </section>
+      <section class="panel" aria-labelledby="material-config-heading">
+        <div class="section-heading"><div><h2 id="material-config-heading">火山方舟 · 素材清理</h2><p class="muted">Seedream 清理整图；DeepSeek 使用上方的 Key 识别裁剪范围。</p></div><a class="button secondary" href="/admin/material">管理 Key 与模型 →</a></div>
+      </section>
+      <section class="panel" aria-labelledby="access-config-heading">
+        <div class="section-heading"><div><h2 id="access-config-heading">员工访问码 · 登录管理</h2><p class="muted">统一管理员工进入网站使用的访问码。</p></div><a class="button secondary" href="/admin/access-codes">管理访问码 →</a></div>
+      </section>
       </div>
       <section class="panel hidden" id="functions" data-admin-section="functions">
         <h2>功能区</h2>
@@ -67,15 +73,10 @@
             <span>上传表格与 AI 文件，自动匹配并编号</span>
             <em>打开功能 →</em>
           </a>
-          <a class="function-card" href="/admin/material">
+          <a class="function-card" href="/#material">
             <strong>素材提取</strong>
-            <span>配置火山方舟 Key、图片模型与开关</span>
-            <em>打开设置 →</em>
-          </a>
-          <a class="function-card" href="/admin/access-codes">
-            <strong>员工访问码</strong>
-            <span>增加、停用或删除员工登录码</span>
-            <em>打开设置 →</em>
+            <span>清理整图、识别设计范围，裁剪为单张 PNG</span>
+            <em>打开功能 →</em>
           </a>
         </div>
       </section>
@@ -91,7 +92,7 @@
                 <li><strong>只处理有疑问的图片。</strong>可靠匹配直接通过；剩余图片按提示确认、换候选或跳过。不需要逐张检查全部图片。</li>
                 <li><strong>确认摘要，再下载。</strong>核对数量后点击“确认并导出”。未处理或跳过的原始行保持原状，不会被当作完成项。请检查下载的 ZIP 能否打开。</li>
                 <li><strong>想中途停止。</strong>点击“停止上传”或“停止本批”，等页面显示已经停止，再处理下一批。已发出的 AI 请求需要等返回或超时，已产生的用量仍会记录。</li>
-                <li><strong>提取透明素材。</strong>在“功能区”配置火山方舟 Key 与图片模型，启用素材提取。员工在左侧切换到“素材提取”，选择图片后开始；核对标出的疑难项，再下载 PNG 或 ZIP。漏提取时从原图框选补提，局部不满意可标记修改。</li>
+                <li><strong>提取素材。</strong>在“Key 账本”配置火山方舟图片模型与 DeepSeek，启用素材提取。员工选择图片后可实时查看清理、识别、裁剪进度；可勾选多张结果批量确认，再下载 PNG 或 ZIP。矩形裁剪不等于透明抠图，漏提取时可以框选补提。</li>
                 <li><strong>云端结果及时保存。</strong>结果下载到员工电脑，不存 OSS；服务器副本在本批结束或成功修改后保留三天。原浏览器重新登录可找回保留期内同版本任务；换浏览器、清除网站数据或版本升级后不能找回旧批次。</li>
               </ol>
             </section>
@@ -109,7 +110,7 @@
             </section>
           </div>
           <div class="help-notes">
-            <p><strong>图片会发到哪里？</strong>图号助手发送用于查找和核对的图片预览给 DeepSeek，原始表格、压缩包、AI 文件和电脑路径不会发送。素材提取会把员工选择的图片及修改要求发送给火山方舟。两个服务的 Key 分开设置。</p>
+            <p><strong>图片会发到哪里？</strong>图号助手发送用于查找和核对的图片预览给 DeepSeek，原始表格、压缩包、AI 文件和电脑路径不会发送。素材提取将所选图片与修改要求交给火山方舟清理，再由 DeepSeek 识别清理图中的完整设计范围。两个服务的 Key 分开设置。</p>
             <p id="qualification-state"></p><p id="persistence-state"></p>
           </div>
         </details>

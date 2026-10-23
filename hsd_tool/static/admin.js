@@ -132,7 +132,7 @@
   function applySettings(settings) {
     state.settings = settings;
     if (!state.enableDirty) $('ai-enabled').checked = settings.enabled === true;
-    $('settings-state').textContent = !settings.enabled ? '已关闭 AI，使用本机匹配。' : settings.configured ? '已启用，导入后自动运行。' : '请添加并启用 Key，才能使用 AI。';
+    $('settings-state').textContent = !settings.enabled ? '图号助手使用本机匹配；素材提取需启用 DeepSeek。' : settings.configured ? '已启用，导入后自动运行。' : '请添加并启用 Key，才能使用 AI。';
     $('qualification-state').textContent = settings.mode === 'validated' ? '当前 AI 复核已通过使用验证；只有符合全部条件的结果才可自动通过，其余仍需人工确认。' : '当前 AI 复核建议仍需人工确认。AI 找到的图片只有通过系统独立核对，才能自动通过；增加 Key 不会放宽要求。';
     $('persistence-state').textContent = settings.key_persistence === 'windows_dpapi' ? 'Key 加密保存在这台电脑的当前 Windows 用户下，重启后可继续使用。' : settings.key_persistence === 'linux_aesgcm' ? 'Key 加密保存在服务器上，员工不用重新填写。' : '当前环境只在本次运行期间保留 Key，重启后需重新填写。';
     $('storage-warning').textContent = settings.storage_warning || '';

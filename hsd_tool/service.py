@@ -909,6 +909,67 @@ class JobManager:
             self._checkpoint(job)
             return self.snapshot(identifier)
 
+    @staticmethod
+    def _batch_review_problem(row, selected):
+        if row.get("status") != "review" or row.get("issue"):
+            return "此项需要单独处理。"
+        failures = set((row.get("evidence") or {}).get("failed_checks", []))
+        if failures.intersection({"duplicate_preview", "ownership_conflict", "source_issue", "incomplete_candidate_validation"}):
+            return "文件归属或预览有异常，请单独核对。"
+        if row.get("reason_code") in {"ownership_or_number_conflict", "invalid_number", "number_exhausted", "retrieval_conflict"}:
+            return "文件或编号冲突，请单独处理。"
+        if not selected or selected.get("issue") or selected.get("page_count", 1) != 1 or not selected.get("preview_path"):
+            return "候选文件需要单独检查。"
+        return ""
+
+    def resolve_batch(self, identifier, items):
+        """One explicit employee action, committed atomically and undone as a group."""
+        with self.job_operation(identifier):
+            job = self._get(identifier)
+            if job["status"] != "ready":
+                raise ValueError("当前任务不能批量确认。")
+            if not isinstance(items, list) or not 1 <= len(items) <= 500:
+                raise ValueError("请选择需要确认的记录。")
+            rows = {row["id"]: row for row in job["rows"]}
+            files = {file["id"]: file for file in job["files"]}
+            seen_rows, seen_files, changes = set(), set(), []
+            for item in items:
+                if not isinstance(item, dict) or set(item) != {"row_id", "file_id"} or not all(isinstance(v, str) for v in item.values()):
+                    raise ValueError("批量确认参数无效。")
+                row, selected = rows.get(item["row_id"]), files.get(item["file_id"])
+                if row is None or row["id"] in seen_rows or item["file_id"] in seen_files:
+                    raise ValueError("选择中有重复记录或相同文件，请先调整。")
+                problem = self._batch_review_problem(row, selected)
+                if problem:
+                    raise ValueError(f"第 {row['row_number']} 行：{problem}")
+                if any(other["id"] != row["id"] and other.get("_status") in ACCEPTED and other.get("_file_id") == item["file_id"] for other in job["rows"]):
+                    raise ValueError("所选文件已被其他记录使用，请单独核对。")
+                if not Path(selected["preview_path"]).is_file():
+                    raise ValueError("候选预览已丢失，请重新导入。")
+                if not selected.get("source_sha256") or sha256(selected["source_path"]) != selected["source_sha256"]:
+                    raise ValueError("原文件发生变化，请重新导入。")
+                seen_rows.add(row["id"]); seen_files.add(item["file_id"])
+                changes.append({"row_id": row["id"], "previous": {key: row.get(key) for key in
+                    ("_status", "_file_id", "_reason", "_reason_code", "_accepted_by")}, "file_id": item["file_id"]})
+            self._verify_comparison_sources(job)
+            trial = dict(job, rows=copy.deepcopy(job["rows"]))
+            trial_rows = {row["id"]: row for row in trial["rows"]}
+            for change in changes:
+                trial_rows[change["row_id"]].update(_status="confirmed", _file_id=change["file_id"],
+                    _reason="员工批量确认对应关系。", _reason_code="user_batch_confirmed", _accepted_by="human")
+            self._plan(trial)
+            if any(trial_rows[row_id]["status"] != "confirmed" for row_id in seen_rows):
+                raise ValueError("所选记录存在编号或文件冲突，本次没有确认任何记录。")
+            if any(old["status"] in ACCEPTED and new["status"] not in ACCEPTED for old, new in zip(job["rows"], trial["rows"])):
+                raise ValueError("本次确认会影响已有对应关系，请单独处理。")
+            job["rows"], job["stats"] = trial["rows"], trial["stats"]
+            history = job.setdefault("_history", [])
+            history.append({"rows": [{"row_id": change["row_id"], "previous": change["previous"]} for change in changes]})
+            del history[:-100]
+            job["revision"] = job.get("revision", 0) + 1
+            self._checkpoint(job)
+            return self.snapshot(identifier)
+
     def undo(self, identifier):
         with self.job_operation(identifier):
             job = self._get(identifier)
@@ -918,13 +979,16 @@ class JobManager:
             if not history:
                 raise ValueError("没有可撤销的操作。")
             action = history.pop()
-            row = next(r for r in job["rows"] if r["id"] == action["row_id"])
-            row.update(action["previous"])
+            actions = action.get("rows", [action])
+            for change in actions:
+                row = next(r for r in job["rows"] if r["id"] == change["row_id"])
+                row.update(change["previous"])
             job["revision"] = job.get("revision", 0) + 1
             self._plan(job)
             self._checkpoint(job)
             result = self.snapshot(identifier)
-            result["last_undone_row_id"] = row["id"]
+            result["last_undone_row_id"] = actions[0]["row_id"]
+            result["last_undone_count"] = len(actions)
             return result
 
     def export(self, identifier, expected_revision=None):
@@ -1337,6 +1401,13 @@ class JobManager:
             result["output_root"] = job["_output_root"]
             result["can_undo"] = job["status"] == "ready" and bool(job.get("_history"))
             result["revision"] = job.get("revision", 0)
+            files = {file["id"]: file for file in job["files"]}
+            for row in result["rows"]:
+                candidates = row.get("candidates") or []
+                candidate_id = row.get("file_id") or (candidates[0].get("file_id") if candidates else None)
+                problem = self._batch_review_problem(row, files.get(candidate_id))
+                row["bulk_confirm_eligible"] = not bool(problem)
+                row["bulk_confirm_reason"] = problem
             if job["status"] == "queued":
                 order = job.get("_queue_order", float("inf"))
                 stage = self._stage_for(job)

@@ -41,6 +41,7 @@ def application(tmp_path):
     manager.quality_hook = None
     provider = Provider()
     manager.provider_factory = lambda config: provider
+    manager.ai_settings = None  # Isolated provider control; never calls either real API.
     yield app, manager, provider
     provider.release.set(); manager.close(); app.config["HSD_MANAGER"].close()
 
@@ -170,6 +171,7 @@ def test_cloud_material_owner_recovers_after_relogin_and_restart(tmp_path, monke
         material = app.config["HSD_MATERIAL_MANAGER"]
         material.settings, material.quality_hook = Settings(), None
         material.provider_factory = lambda config: provider
+        material.ai_settings = None  # Synthetic provider, no real external requests.
         return app
     app = make_app(); client = app.test_client(); cloud_login(client)
     identifier = None

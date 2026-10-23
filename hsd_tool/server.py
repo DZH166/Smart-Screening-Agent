@@ -8,10 +8,11 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from datetime import timedelta
 from pathlib import Path
 
-from flask import Flask, Request, current_app, g, jsonify, redirect, request, send_file, session
+from flask import Flask, Request, Response, current_app, g, jsonify, redirect, request, send_file, session
 from werkzeug.exceptions import BadRequest, Conflict, RequestEntityTooLarge
 
 from .service import JobManager
@@ -119,8 +120,10 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
     material_settings = MaterialSettings(manager.ai_settings.path.parent)
     app.config["HSD_MATERIAL_SETTINGS"] = material_settings
     material_manager = MaterialManager(data_dir, material_settings, cloud=bool(cloud),
-                                       quality_hook=quality_hook)
+                                       quality_hook=quality_hook, ai_settings=manager.ai_settings,
+                                       ai_key_pool=manager.ai_key_pool)
     app.config["HSD_MATERIAL_MANAGER"] = material_manager
+    material_streams = threading.BoundedSemaphore(2)
     material_claims = UploadClaims()
     material_manager.restore_upload_claims(material_claims)
     app.config["HSD_MATERIAL_UPLOAD_CLAIMS"] = material_claims
@@ -498,7 +501,10 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
         if action == "remove_key":
             update["clear_key"] = True
         try:
-            material_settings.save(update)
+            with material_manager.lock:
+                if material_manager.has_active_operations():
+                    raise ValueError("素材正在处理，请完成后再修改设置。")
+                material_settings.save(update)
         except MaterialSettingsConflict:
             raise Conflict("素材设置已在其他页面更新，请刷新后再保存。") from None
         return jsonify(material_settings_snapshot())
@@ -584,8 +590,8 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
         revision = payload.get("expected_revision")
         if type(revision) is not int or revision < 0:
             raise ValueError("设置版本无效，请重新读取后再保存。")
-        with manager.lock:
-            if manager.has_active_operations():
+        with manager.lock, material_manager.lock:
+            if manager.has_active_operations() or material_manager.has_active_operations():
                 raise ValueError("当前任务正在处理，请完成后再修改AI设置。")
             if revision != manager.ai_settings.snapshot()["key_revision"]:
                 raise Conflict("AI设置已在其他页面更新，请重新读取后再保存。")
@@ -621,8 +627,8 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
 
     @app.post("/api/admin/keys")
     def admin_keys():
-        with manager.lock:
-            if manager.has_active_operations():
+        with manager.lock, material_manager.lock:
+            if manager.has_active_operations() or material_manager.has_active_operations():
                 raise ValueError("当前任务正在处理，请完成后再修改 Key。")
             payload = request.get_json()
             if type(payload.get("expected_revision")) is not int:
@@ -701,8 +707,8 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
 
     @app.post("/api/ai/settings")
     def save_ai_settings():
-        with manager.lock:
-            if manager.has_active_operations():
+        with manager.lock, material_manager.lock:
+            if manager.has_active_operations() or material_manager.has_active_operations():
                 raise ValueError("当前任务正在处理，请完成后再修改AI设置。")
             manager.ai_settings.save(request.get_json())
         return jsonify(manager.ai_config())
@@ -807,6 +813,57 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
     def material_read_job(material_id):
         return jsonify(material_manager.snapshot(material_id, employee_id()))
 
+    @app.get("/api/material/jobs/<material_id>/events")
+    def material_events(material_id):
+        # Reserve two of the four HTTP threads for ordinary operations. A
+        # bounded connection renews authentication, and polling is a fallback.
+        if not material_streams.acquire(blocking=False):
+            return jsonify(error="实时通道繁忙，已切换普通进度刷新。"), 429
+        owner = employee_id()
+        try:
+            initial = material_manager.snapshot(material_id, owner)
+        except BaseException:
+            material_streams.release()
+            raise
+        released = False
+        def release_slot():
+            nonlocal released
+            if not released:
+                released = True
+                material_streams.release()
+        def events():
+            deadline, last_sequence, last_heartbeat = time.monotonic() + 12, None, 0
+            state = initial
+            try:
+                yield "retry: 1500\n\n"
+                while True:
+                    sequence = state.get("update_seq", state["revision"])
+                    if sequence != last_sequence:
+                        yield "event: snapshot\ndata: " + json.dumps(state, ensure_ascii=False, allow_nan=False) + "\n\n"
+                        last_sequence = sequence
+                    if state["status"] not in {"queued", "processing", "cancelling"}:
+                        yield "event: end\ndata: {}\n\n"
+                        return
+                    now = time.monotonic()
+                    if app.config["HSD_STOPPING"]:
+                        return
+                    if now >= deadline:
+                        yield "event: renew\ndata: {}\n\n"
+                        return
+                    if now - last_heartbeat >= 3:
+                        yield ": waiting\n\n"
+                        last_heartbeat = now
+                    time.sleep(.5)
+                    state = material_manager.snapshot(material_id, owner)
+            except (KeyError, ValueError, Conflict):
+                yield 'event: unavailable\ndata: {"error":"本批状态已变化，请刷新页面。"}\n\n'
+            finally:
+                release_slot()
+        response = Response(events(), mimetype="text/event-stream", headers={
+            "Cache-Control": "private, no-store", "X-Accel-Buffering": "no"})
+        response.call_on_close(release_slot)
+        return response
+
     @app.post("/api/material/jobs/<material_id>/cancel")
     def material_cancel_job(material_id):
         payload = request.get_json()
@@ -817,6 +874,14 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
     @app.post("/api/material/jobs/<material_id>/resolve")
     def material_resolve_job(material_id):
         return jsonify(material_manager.resolve(material_id, employee_id(), request.get_json()))
+
+    @app.post("/api/material/jobs/<material_id>/resolve-batch")
+    def material_resolve_batch(material_id):
+        return jsonify(material_manager.resolve_batch(material_id, employee_id(), request.get_json()))
+
+    @app.post("/api/material/jobs/<material_id>/undo-batch")
+    def material_undo_batch(material_id):
+        return jsonify(material_manager.undo_batch(material_id, employee_id(), request.get_json()))
 
     @app.post("/api/material/jobs/<material_id>/redo")
     def material_redo_job(material_id):
@@ -926,6 +991,18 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
             manager.resolve(identifier, payload.get("row_id"), payload.get("file_id"), revert=revert)
             return jsonify(public_job(identifier))
 
+    @app.post("/api/jobs/<identifier>/resolve-batch")
+    def resolve_batch(identifier):
+        payload = request.get_json()
+        if set(payload) != {"expected_revision", "items"}:
+            raise ValueError("批量确认参数无效。")
+        if type(payload["expected_revision"]) is not int or payload["expected_revision"] < 0:
+            raise Conflict("请刷新当前结果后再批量确认。")
+        with manager.job_operation(identifier):
+            check_revision(identifier, payload)
+            manager.resolve_batch(identifier, payload["items"])
+            return jsonify(public_job(identifier))
+
     @app.post("/api/jobs/<identifier>/export")
     def export(identifier):
         with manager.job_operation(identifier):
@@ -942,6 +1019,7 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
             public = public_job(identifier)
             if result.get("last_undone_row_id"):
                 public["last_undone_row_id"] = result["last_undone_row_id"]
+                public["last_undone_count"] = result.get("last_undone_count", 1)
             return jsonify(public)
 
     @app.post("/api/jobs/<identifier>/cancel")

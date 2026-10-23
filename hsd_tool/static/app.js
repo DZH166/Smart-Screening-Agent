@@ -13,7 +13,7 @@
     showDone: true, stopped: false, lastJobError: null,
     forceReview: false, showSummary: false, candidatesOpen: false, history: [],
     uploadRequest: null, uploadXhr: null, uploadUncertain: false, uploadChecking: false, uploadRetryAllowed: false,
-    uploadRecoveryTimer: null, cancelling: false, authExpired: false, downloading: false, configUnavailable: false,
+    uploadRecoveryTimer: null, cancelling: false, authExpired: false, downloading: false, configUnavailable: false, bulk: null,
   };
   const uiMetrics={table_renders:0,detail_renders:0,row_selections:0};
   function uiMeasure(name,start){uiMetrics[name]=(uiMetrics[name]||0)+1;uiMetrics[name+'_ms']=Math.round((performance.now()-start)*100)/100;document.documentElement.dataset.hsdUiMetrics=JSON.stringify(uiMetrics);}
@@ -461,6 +461,7 @@
     $('new-task-button').disabled=state.authExpired||state.resolving;
     $('undo-button').classList.toggle('hidden',!(state.job.can_undo ?? state.history.length)||done);
     $('undo-button').disabled=state.authExpired||state.resolving;
+    $('batch-review-button').classList.toggle('hidden',done);$('batch-review-button').disabled=state.authExpired||state.resolving||job.status!=='ready';
     renderStats();
     const warnings=job.warnings||[];
     $('warnings').classList.toggle('hidden',!warnings.length);
@@ -639,6 +640,8 @@
     $('review-panel').querySelectorAll('[data-candidate-id],#candidate-toggle,#file-search').forEach((item)=>item.disabled=state.resolving);
     ['new-task-button','shutdown-button'].forEach((id)=>{if($(id))$(id).disabled=state.resolving||isBusy();});
     $('export-button').disabled=state.authExpired||state.resolving||isBusy()||(state.job?.status!=='done'&&counts().matched===0);
+    if($('batch-review-button'))$('batch-review-button').disabled=state.authExpired||state.resolving||state.job?.status!=='ready';
+    updateBulkControls();
     ['undo-button','summary-undo-button'].forEach((id)=>$(id).disabled=state.authExpired||state.resolving||isBusy()||!(state.job?.can_undo??state.history.length));
   }
   let manualSearchTimer=null,rowSearchTimer=null;
@@ -698,6 +701,46 @@
       toast(fileId?'已确认对应文件，可随时撤销':'已跳过，该行保持原状');
       preloadNeighbours(rowById(state.selectedRowId));
     } catch(error){updated=await refreshConflict(error);notice(error.message);} finally {state.resolving=false;if(updated){renderJob();if(!$('review-view').classList.contains('hidden'))$('confirm-row-button')?.focus({preventScroll:true});}else setReviewBusy();}
+  }
+  function bulkCandidates() {
+    const proposed=filteredRows().filter(row=>row.status==='review'&&row.bulk_confirm_eligible===true).map(row=>{
+      const selected=row.id===state.selectedRowId?state.selectedFileId:rowViewState.get(row.id)?.selectedFileId;
+      const file=fileById(selected||row.file_id||row.candidates?.[0]?.file_id);
+      return {row,file};
+    }).filter(({row,file})=>file&&!file.issue&&!ownerOf(file.id,row.id));
+    const counts=new Map();for(const {file}of proposed)counts.set(file.id,(counts.get(file.id)||0)+1);
+    return proposed.filter(({file})=>counts.get(file.id)===1);
+  }
+  function updateBulkControls() {
+    const batch=state.bulk;if(!batch)return;const locked=state.resolving||state.authExpired||state.job?.id!==batch.jobId||state.job?.revision!==batch.revision;
+    $('batch-review-count').textContent=`已选 ${batch.selected.size} / ${batch.items.length} 项`;
+    $('batch-review-submit').disabled=locked||!batch.selected.size;$('batch-review-submit').textContent=state.resolving?'正在保存…':`确认所选对应关系（${batch.selected.size}）`;
+    $('batch-review-all').checked=!!batch.items.length&&batch.selected.size===batch.items.length;$('batch-review-all').indeterminate=!!batch.selected.size&&!$('batch-review-all').checked;$('batch-review-all').disabled=locked||!batch.items.length;
+    $('batch-review-close').disabled=state.resolving;
+    $('batch-review-grid').querySelectorAll('[data-bulk-row]').forEach(input=>{input.checked=batch.selected.has(input.dataset.bulkRow);input.disabled=locked;});
+  }
+  function openBulkReview() {
+    if(state.resolving||state.authExpired||state.job?.status!=='ready')return;
+    rememberPanel();const items=bulkCandidates();state.bulk={jobId:state.job.id,revision:state.job.revision,items,selected:new Set()};
+    $('batch-review-error').classList.add('hidden');
+    $('batch-review-note').textContent=`当前筛选有 ${items.length} 项可批量确认。对照下方图片后选择；提交后计为人工确认，可撤销。`;
+    $('batch-review-grid').innerHTML=items.length?items.map(({row,file})=>`<article class="batch-pair"><label><input type="checkbox" data-bulk-row="${escapeHtml(row.id)}">第 ${row.row_number} 行 · ${escapeHtml(numberFor(row)||'暂未编号')}</label><div class="batch-pair-images"><figure>${imageTag('row',row.id,'','表格图片')}<figcaption>表格图片</figcaption></figure><figure>${imageTag('file',file.id,'',file.name)}<figcaption>${escapeHtml(file.name)}</figcaption></figure></div><p>${escapeHtml(row.reason||'请核对对应关系')}</p></article>`).join(''):'<p class="empty-state">当前没有可批量确认的项目，请在审核页面单独处理提示的异常。</p>';
+    updateBulkControls();$('batch-review-dialog').showModal();
+  }
+  function selectBulkAll(checked) {if(!state.bulk||state.resolving)return;state.bulk.selected.clear();if(checked)state.bulk.items.forEach(({row})=>state.bulk.selected.add(row.id));updateBulkControls();}
+  async function confirmBulkRows() {
+    const batch=state.bulk;if(!batch||state.resolving||state.authExpired||state.job?.status!=='ready'||!batch.selected.size)return;
+    if(state.job.id!==batch.jobId||state.job.revision!==batch.revision){$('batch-review-error').textContent='本批已经更新，请关闭后重新打开批量确认。';$('batch-review-error').classList.remove('hidden');updateBulkControls();return;}
+    const items=batch.items.filter(({row})=>batch.selected.has(row.id)).map(({row,file})=>({row_id:row.id,file_id:file.id}));
+    state.resolving=true;setReviewBusy();let updated=false;
+    try{
+      const job=await api(`/api/jobs/${encodeURIComponent(batch.jobId)}/resolve-batch`,{method:'POST',body:{expected_revision:batch.revision,items}});
+      if(state.job?.id!==batch.jobId)return;
+      acceptJob(job);updated=true;state.history.push(items[0].row_id);state.bulk=null;$('batch-review-dialog').close();
+      selectRow(job.rows.find(awaiting)?.id||items[0].row_id,null,false);state.forceReview=false;state.showSummary=counts().review===0;
+      toast(`已人工确认 ${items.length} 项，可撤销本次批量操作`);
+    }catch(error){updated=await refreshConflict(error);$('batch-review-error').textContent=error.status===409?'本批已被其他页面修改，已刷新。请关闭后重新选择。':error.message;$('batch-review-error').classList.remove('hidden');}
+    finally{state.resolving=false;if(updated)renderJob();else setReviewBusy();updateBulkControls();}
   }
   async function undoLast() {
     const canUndo=state.job?.can_undo??!!state.history.length;
@@ -826,6 +869,7 @@
     $('rows-body').addEventListener('keydown',(event)=>{if(['Enter',' '].includes(event.key)){const row=event.target.closest('[data-row-id]');if(row&&!state.resolving){event.preventDefault();selectRow(row.dataset.rowId);}}});
     $('review-panel').addEventListener('click',(event)=>{const candidate=event.target.closest('[data-candidate-id]');if(candidate&&!state.resolving)selectCandidate(candidate.dataset.candidateId);});
     $('export-button').addEventListener('click',()=>{if(state.job?.status==='done'){state.showDone=true;renderDone();}else{state.showSummary=true;renderSummary();}});$('open-output-button').addEventListener('click',openOutput);
+    $('batch-review-button').addEventListener('click',openBulkReview);$('batch-review-close').addEventListener('click',()=>{if(!state.resolving)$('batch-review-dialog').close();});$('batch-review-dialog').addEventListener('cancel',event=>{if(state.resolving)event.preventDefault();});$('batch-review-dialog').addEventListener('close',()=>{state.bulk=null;});$('batch-review-all').addEventListener('change',event=>selectBulkAll(event.target.checked));$('batch-review-submit').addEventListener('click',confirmBulkRows);$('batch-review-grid').addEventListener('change',event=>{const input=event.target.closest('[data-bulk-row]');if(!input||!state.bulk||state.resolving)return;if(input.checked)state.bulk.selected.add(input.dataset.bulkRow);else state.bulk.selected.delete(input.dataset.bulkRow);updateBulkControls();});
     $('undo-button').addEventListener('click',undoLast);$('summary-undo-button').addEventListener('click',undoLast);
     $('summary-export-button').addEventListener('click',exportJob);
     $('summary-browse-button').addEventListener('click',()=>{state.forceReview=true;state.showSummary=false;state.filter='all';renderReview();});

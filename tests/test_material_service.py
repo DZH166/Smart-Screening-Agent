@@ -323,3 +323,231 @@ def test_redo_edits_verified_transparent_result_and_preserves_source_bounds(serv
     with Image.open(BytesIO(provider.edit_raw)) as image:
         assert max(image.size) == 4096
         assert image.getchannel("A").getextrema()[0] < 255
+
+
+def upload_two(manager):
+    files = MultiDict([("files", FileStorage(BytesIO(png()), filename=f"{i}.png")) for i in range(2)])
+    return complete(manager, manager.receive(files, MultiDict(), owner="employee-a"))
+
+
+def test_batch_confirm_is_explicit_employee_decision_and_undo_is_atomic(service):
+    manager, _ = service
+    result = upload_two(manager)
+    identifiers = [row["id"] for row in result["items"]]
+    updated = manager.resolve_batch(result["id"], "employee-a", {
+        "expected_revision": result["revision"], "item_ids": identifiers})
+    assert updated["revision"] == result["revision"] + 1
+    assert updated["stats"]["ready"] == 2 and updated["stats"]["needs_review"] == 0
+    assert updated["can_undo_batch"] is True
+    assert all(row["status"] == "confirmed" and row["review"]["method"] == "employee_batch" for row in updated["items"])
+    assert [row["warnings"] for row in updated["items"]] == [row["warnings"] for row in result["items"]]
+    restored = manager.undo_batch(result["id"], "employee-a", {"expected_revision": updated["revision"]})
+    assert restored["stats"]["ready"] == 0 and restored["stats"]["needs_review"] == 2
+    assert restored["can_undo_batch"] is False
+    assert all("review" not in row for row in restored["items"])
+    with pytest.raises(Conflict):
+        manager.undo_batch(result["id"], "employee-a", {"expected_revision": restored["revision"]})
+
+
+@pytest.mark.parametrize("problem", ["source", "output", "already_confirmed", "duplicate", "other_owner", "old_revision", "missing"])
+def test_batch_failure_never_confirms_other_selected_rows(service, problem):
+    manager, _ = service
+    result = upload_two(manager)
+    identifiers = [row["id"] for row in result["items"]]
+    owner, revision = "employee-a", result["revision"]
+    if problem == "source":
+        (manager._directory(result["id"]) / (result["items"][1]["source_id"] + ".png")).write_bytes(b"changed")
+    elif problem == "output":
+        (manager._directory(result["id"]) / (identifiers[1] + ".png")).write_bytes(b"changed")
+    elif problem == "already_confirmed":
+        modified = manager.resolve(result["id"], owner, {"expected_revision": revision, "item_id": identifiers[1], "action": "confirm"})
+        revision = modified["revision"]
+    elif problem == "duplicate":
+        identifiers = [identifiers[0], identifiers[0]]
+    elif problem == "other_owner":
+        owner = "employee-b"
+    elif problem == "old_revision":
+        revision -= 1
+    elif problem == "missing":
+        identifiers[1] = "f" * 32
+    before = (manager._directory(result["id"]) / "manifest.json").read_bytes()
+    with pytest.raises((KeyError, ValueError, Conflict)):
+        manager.resolve_batch(result["id"], owner, {"expected_revision": revision, "item_ids": identifiers})
+    assert manager.snapshot(result["id"], "employee-a")["items"][0]["status"] == "needs_review"
+    assert (manager._directory(result["id"]) / "manifest.json").read_bytes() == before
+
+
+def test_batch_save_failure_does_not_publish_success_and_retry_still_works(service, monkeypatch):
+    manager, _ = service
+    result = upload_two(manager)
+    payload = {"expected_revision": result["revision"], "item_ids": [row["id"] for row in result["items"]]}
+    original = manager._write
+    def fail_manifest(path, raw):
+        if path.name == "manifest.json":
+            raise OSError("synthetic disk full")
+        return original(path, raw)
+    monkeypatch.setattr(manager, "_write", fail_manifest)
+    with pytest.raises(OSError):
+        manager.resolve_batch(result["id"], "employee-a", payload)
+    assert manager.snapshot(result["id"], "employee-a")["stats"]["needs_review"] == 2
+    assert manager.snapshot(result["id"], "employee-a")["revision"] == result["revision"]
+    monkeypatch.setattr(manager, "_write", original)
+    assert manager.resolve_batch(result["id"], "employee-a", payload)["stats"]["ready"] == 2
+
+
+def test_single_correction_invalidates_batch_undo(service):
+    manager, _ = service
+    result = upload_two(manager)
+    updated = manager.resolve_batch(result["id"], "employee-a", {
+        "expected_revision": result["revision"], "item_ids": [row["id"] for row in result["items"]]})
+    changed = manager.resolve(result["id"], "employee-a", {
+        "expected_revision": updated["revision"], "item_id": result["items"][0]["id"], "action": "skip"})
+    assert changed["can_undo_batch"] is False
+    with pytest.raises(Conflict):
+        manager.undo_batch(result["id"], "employee-a", {"expected_revision": changed["revision"]})
+    assert manager.snapshot(result["id"], "employee-a")["stats"]["skipped"] == 1
+
+
+def test_stage_stream_tracks_real_work_and_completed_sources_arrive_incrementally(service):
+    manager, provider = service
+    provider.supports_progress = True
+    cleanup, locate = threading.Event(), threading.Event()
+    release_cleanup, release_locate = threading.Event(), threading.Event()
+    old_extract = provider.extract
+    counter = 0
+    def staged(raw, **kwargs):
+        nonlocal counter
+        counter += 1
+        kwargs["on_progress"]("cleanup", "not forwarded: raw provider text")
+        kwargs["on_attempt"]({"id": f"attempt-{counter}", "provider": "seedream", "operation": "cleanup", "state": "submitted", "usage": {}})
+        if counter == 1:
+            cleanup.set(); assert release_cleanup.wait(10)
+        kwargs["on_progress"]("locating", "not forwarded")
+        if counter == 2:
+            locate.set(); assert release_locate.wait(10)
+        result = old_extract(raw, **kwargs)
+        kwargs["on_attempt"]({"id": f"attempt-{counter}", "provider": "seedream", "state": "returned", "usage": {"images": 1}, "settled": True})
+        return result
+    provider.extract = staged
+    files = MultiDict([("files", FileStorage(BytesIO(png()), filename=f"{i}.png")) for i in range(2)])
+    identifier = manager.receive(files, MultiDict(), owner="employee-a")
+    try:
+        assert cleanup.wait(10)
+        snapshot = manager.snapshot(identifier, "employee-a")
+        assert snapshot["progress"]["stage_code"] == "cleanup"
+        assert snapshot["progress"]["indeterminate"] is True
+        assert "not forwarded" not in json.dumps(snapshot)
+        assert snapshot["progress"]["current"] == 0
+        assert snapshot["progress"]["total"] == 2
+        # Merely waiting does not claim model progress or create new events.
+        assert manager.snapshot(identifier, "employee-a")["update_seq"] == snapshot["update_seq"]
+        release_cleanup.set(); assert locate.wait(10)
+        during = manager.snapshot(identifier, "employee-a")
+        assert during["status"] == "processing" and len(during["items"]) == 1
+        assert during["progress"]["current"] == 1
+        assert during["update_seq"] > snapshot["update_seq"]
+        with pytest.raises(Conflict):
+            manager.resolve_batch(identifier, "employee-a", {"expected_revision": during["revision"], "item_ids": [during["items"][0]["id"]]})
+    finally:
+        release_cleanup.set(); release_locate.set()
+    final = complete(manager, identifier)
+    assert final["progress"]["stage_code"] == "done" and len(final["items"]) == 2
+    attempts = manager.jobs[identifier]["attempts"]
+    assert len(attempts[0]["pipeline_attempts"]) == 1
+    assert attempts[0]["pipeline_attempts"][0]["state"] == "returned"
+
+
+def test_production_requires_enabled_deepseek_and_does_not_expose_credentials(tmp_path):
+    class AiSettings:
+        enabled = False
+        def runtime(self):
+            return {"enabled": self.enabled, "api_key": "never-public"}
+    ai = AiSettings()
+    manager = MaterialManager(tmp_path, Settings(), ai_settings=ai, provider_factory=lambda config: Provider())
+    try:
+        assert manager.config("employee-a")["available"] is False
+        with pytest.raises(ValueError, match="DeepSeek"):
+            upload(manager)
+        ai.enabled = True
+        assert manager.config("employee-a")["available"] is True
+        assert "never-public" not in json.dumps(manager.config("employee-a"))
+    finally:
+        manager.close()
+
+
+def test_new_pipeline_opaque_crops_are_not_mislabeled_transparent_or_auto_ready(service):
+    manager, provider = service
+    old = provider.extract
+    def opaque(raw, **kwargs):
+        result = old(raw, **kwargs)
+        image = Image.new("RGBA", (40, 30), (255, 255, 255, 255))
+        output = BytesIO(); image.save(output, "PNG")
+        result.layers[0].png = output.getvalue()
+        result.layers[0].warnings = ("此结果保留矩形范围内的背景，未做透明抠图。",)
+        result.rectangular_crops = True
+        return result
+    provider.extract = opaque
+    manager.quality_hook = lambda *args, **kwargs: {"auto_ready": True, "warnings": [], "evidence": {}}
+    result = complete(manager, upload(manager))
+    assert result["status"] == "ready" and result["stats"]["needs_review"] == 1
+    item = result["items"][0]
+    assert item["rectangular_crop"] is True and "未做透明抠图" in " ".join(item["warnings"])
+
+
+def test_unexpected_sent_call_error_stays_unknown_for_manual_redo(service):
+    manager, provider = service
+    provider.failures = [RuntimeError("unknown after sending")]
+    result = complete(manager, upload(manager))
+    assert result["sources"][0]["submission_unknown"] is True
+    assert "是否扣费尚未确定" in result["sources"][0]["error"]
+    with pytest.raises(Conflict, match="可能重复计费"):
+        manager.redo(result["id"], "employee-a", {"expected_revision": result["revision"],
+                                                "source_id": result["sources"][0]["id"]})
+    assert provider.calls == 1
+
+
+def test_stop_during_local_output_save_does_not_publish_ready(service, monkeypatch):
+    manager, _ = service
+    entered, release = threading.Event(), threading.Event()
+    original = manager._outputs
+    def wait_to_publish(*args, **kwargs):
+        results = original(*args, **kwargs)
+        entered.set(); assert release.wait(10)
+        return results
+    monkeypatch.setattr(manager, "_outputs", wait_to_publish)
+    identifier = upload(manager)
+    try:
+        assert entered.wait(10)
+        snapshot = manager.snapshot(identifier, "employee-a")
+        manager.cancel(identifier, "employee-a", snapshot["revision"])
+    finally:
+        release.set()
+    final = complete(manager, identifier)
+    assert final["status"] == "cancelled" and final["items"] == []
+    assert final["sources"][0].get("submission_unknown") is not True
+
+
+def test_material_availability_honors_shared_key_pool_pause_and_rejects_legacy_gateway(tmp_path):
+    class AiSettings:
+        gateway = False
+        def runtime(self):
+            return {"enabled": True, "api_key": "never-public", "via_gateway": self.gateway}
+    class Pool:
+        status = "paused_authentication"
+        def snapshot(self):
+            return {"keys": [{"status": self.status}]}
+    ai, pool = AiSettings(), Pool()
+    manager = MaterialManager(tmp_path, Settings(), ai_settings=ai, ai_key_pool=pool,
+                              provider_factory=lambda config: Provider())
+    try:
+        assert not manager.config("employee-a")["available"]
+        with pytest.raises(ValueError, match="DeepSeek"):
+            upload(manager)
+        pool.status = "available"
+        assert manager.config("employee-a")["available"]
+        ai.gateway = True
+        assert not manager.config("employee-a")["available"]
+        with pytest.raises(ValueError, match="DeepSeek"):
+            upload(manager)
+    finally:
+        manager.close()

@@ -11,7 +11,7 @@
 <body>
   <div class="admin-shell">
     <header class="admin-header">
-      <div><a class="back-link" href="/admin">← 返回管理员页面</a><h1>素材提取设置</h1></div>
+      <div><a class="back-link" href="/admin#keys">← 返回 Key 账本</a><h1>素材清理 · 火山方舟配置</h1></div>
       <button id="material-refresh" class="button secondary" type="button">刷新设置</button>
     </header>
     <div id="material-message" class="notice hidden" role="status" aria-live="polite"></div>
@@ -19,7 +19,7 @@
     <main>
       <section class="panel">
         <div class="section-heading"><h2>火山引擎 · 火山方舟</h2></div>
-        <p>员工共用此配置，不需要各自填写。</p>
+        <p>用于素材提取的整图清理。设计识别使用 <a href="/admin#keys">DeepSeek 配置</a>，员工无需各自填写。</p>
         <p id="material-ark" class="state-line">正在读取设置…</p>
         <form id="material-form" autocomplete="off">
           <label for="material-key">API Key</label>
