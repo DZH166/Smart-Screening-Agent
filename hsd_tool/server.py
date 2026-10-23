@@ -21,6 +21,8 @@ from . import admin_auth
 from .cloud_tasks import CloudTaskStore, UploadClaims, upload_id
 from . import material_demo
 from .material_settings import MaterialSettings, MaterialSettingsConflict
+from .material_service import MaterialManager
+from .material_quality import quality_hook
 from .access_codes import AccessCodeStore, AccessCodesConflict
 
 
@@ -40,12 +42,13 @@ class EmployeeUploadRequest(Request):
     def _get_file_stream(self, total_content_length, content_type, filename=None, content_length=None):
         if not getattr(self, "_hsd_upload_unlimited", False):
             return super()._get_file_stream(total_content_length, content_type, filename, content_length)
-        uploads = current_app.config["HSD_UPLOADS"]
+        uploads = current_app.config[getattr(self, "_hsd_upload_manager_key", "HSD_UPLOADS")]
         if not getattr(self, "_hsd_upload_directory", None):
-            self._hsd_upload_directory = uploads.begin()
+            self._hsd_upload_directory = (uploads.begin(owner=getattr(g, "hsd_upload_claim", (None, None))[1])
+                if getattr(self, "_hsd_upload_manager_key", "") == "HSD_MATERIAL_MANAGER" else uploads.begin())
             claim = getattr(g, "hsd_upload_claim", None)
             if claim is not None:
-                current_app.config["HSD_UPLOAD_CLAIMS"].bind_directory(*claim, self._hsd_upload_directory)
+                current_app.config[getattr(self, "_hsd_upload_claims_key", "HSD_UPLOAD_CLAIMS")].bind_directory(*claim, self._hsd_upload_directory)
             self._hsd_upload_budget = DiskBudget(self._hsd_upload_directory)
             self._hsd_upload_streams = []
         stream = uploads.open_stream(self._hsd_upload_directory, self._hsd_upload_budget)
@@ -54,7 +57,7 @@ class EmployeeUploadRequest(Request):
             original_write = stream.write
             def checked_write(data):
                 try:
-                    current_app.config["HSD_UPLOAD_CLAIMS"].ensure_active(*claim)
+                    current_app.config[getattr(self, "_hsd_upload_claims_key", "HSD_UPLOAD_CLAIMS")].ensure_active(*claim)
                 except ValueError as exc:
                     raise UploadWriteError(str(exc)) from None
                 return original_write(data)
@@ -74,7 +77,7 @@ class EmployeeUploadRequest(Request):
         directory = getattr(self, "_hsd_upload_directory", None)
         if directory is not None and not getattr(self, "_hsd_upload_committed", False):
             try:
-                current_app.config["HSD_UPLOADS"].discard(directory)
+                current_app.config[getattr(self, "_hsd_upload_manager_key", "HSD_UPLOADS")].discard(directory)
             except (OSError, ValueError) as exc:
                 failure = failure or exc
         if failure is not None:
@@ -115,6 +118,12 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
     app.config["HSD_MANAGER"] = manager
     material_settings = MaterialSettings(manager.ai_settings.path.parent)
     app.config["HSD_MATERIAL_SETTINGS"] = material_settings
+    material_manager = MaterialManager(data_dir, material_settings, cloud=bool(cloud),
+                                       quality_hook=quality_hook)
+    app.config["HSD_MATERIAL_MANAGER"] = material_manager
+    material_claims = UploadClaims()
+    material_manager.restore_upload_claims(material_claims)
+    app.config["HSD_MATERIAL_UPLOAD_CLAIMS"] = material_claims
     access_codes = None
     if lan:
         try:
@@ -122,11 +131,17 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
                                           min_length=lan.min_code_length,
                                           bootstrap_code=lan.code)
         except BaseException:
+            material_manager.close()
             manager.close()
             raise
         lan.access_codes = access_codes
     app.config["HSD_ACCESS_CODES"] = access_codes
-    claims = CloudTaskStore(manager, cloud.origin) if cloud else UploadClaims()
+    try:
+        claims = CloudTaskStore(manager, cloud.origin) if cloud else UploadClaims()
+    except BaseException:
+        material_manager.close()
+        manager.close()
+        raise
     app.config["HSD_UPLOAD_CLAIMS"] = claims
     if cloud:
         manager.task_persistence = claims
@@ -190,7 +205,7 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
             if lan and port and request.host not in {f"{host}:{port}" for host in hosts}:
                 return jsonify(error="不支持此访问地址。"), 403
         remote = bool(lan and not lan.is_host(request.remote_addr))
-        is_upload = request.endpoint == "upload_job"
+        is_upload = request.endpoint in {"upload_job", "material_upload_job"}
         if request.method == "POST":
             origin = request.headers.get("Origin")
             if (origin and origin != request.host_url.rstrip("/")) or (remote and not origin):
@@ -272,17 +287,21 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
                 if app.config["HSD_STOPPING"] and request.endpoint != "shutdown":
                     raise Conflict("主机正在退出，请稍后重新打开员工入口。")
         if is_upload:
+            active_claims = material_claims if request.endpoint == "material_upload_job" else claims
             identifier = upload_id(request.headers.get("X-HSD-Upload-ID") or secrets.token_hex(16))
-            state = claims.reserve(identifier, employee_id())
+            state = active_claims.reserve(identifier, employee_id())
             if state["state"] == "completed":
                 return jsonify(id=state["job_id"], reused=True)
             if state["state"] != "reserved":
                 raise Conflict("本次上传仍在处理或已停止，请查询上传状态。")
             g.hsd_upload_claim = (identifier, employee_id())
+            if request.endpoint == "material_upload_job":
+                request._hsd_upload_manager_key = "HSD_MATERIAL_MANAGER"
+                request._hsd_upload_claims_key = "HSD_MATERIAL_UPLOAD_CLAIMS"
             request._hsd_upload_unlimited = True
             request.max_content_length = None
             request.max_form_memory_size = 512 * 1024
-            request.max_form_parts = 8
+            request.max_form_parts = 100 if request.endpoint == "material_upload_job" else 8
 
     @app.teardown_request
     def release_upload_streams(exc):
@@ -297,7 +316,7 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
             app.logger.warning("上传临时文件未能清理，请管理员检查磁盘空间与权限。")
         claim = getattr(g, "hsd_upload_claim", None)
         if claim is not None:
-            claims.finish(*claim)
+            (material_claims if request.endpoint == "material_upload_job" else claims).finish(*claim)
 
     def release_job_lease(identifier, state):
         with manager.lock:
@@ -324,14 +343,19 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
             response.direct_passthrough = False
             response.call_on_close(lambda: release_job_lease(identifier, state))
             state["bound"] = True
-        if request.endpoint != "image" or response.status_code not in {200, 304}:
+        if request.endpoint not in {"image", "material_image"} or response.status_code not in {200, 304}:
             response.headers["Cache-Control"] = "no-store"
         response.headers["X-Content-Type-Options"] = "nosniff"
-        download_frame = request.endpoint == "download" and request.args.get("frame") == "1"
+        download_frame = request.endpoint in {"download", "material_download"} and request.args.get("frame") == "1"
         response.headers["X-Frame-Options"] = "SAMEORIGIN" if download_frame else "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
         # The inline token/bootstrap is the only inline script; UI does not load external resources.
         response.headers["Content-Security-Policy"] = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'"
+        if request.endpoint == "index":
+            # Local selected-file thumbnails need object URLs. Scope this to
+            # the employee document; admin pages and API frames stay closed.
+            response.headers["Content-Security-Policy"] = response.headers["Content-Security-Policy"].replace(
+                "img-src 'self' data:;", "img-src 'self' data: blob:;")
         if getattr(g, "hsd_material_demo", False):
             # The prototype operates entirely in this browser. Its local file
             # preview needs blob images, but it has no reason to call any API.
@@ -339,6 +363,29 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
         if download_frame:
             response.headers["Content-Security-Policy"] = response.headers["Content-Security-Policy"].replace("frame-ancestors 'none'", "frame-ancestors 'self'")
         return response
+
+    @app.before_request
+    def material_task_lease():
+        identifier = (request.view_args or {}).get("material_id")
+        if identifier:
+            release = material_manager.acquire(identifier, employee_id())
+            g.hsd_material_release = release
+            g.hsd_material_bound = False
+
+    @app.after_request
+    def bind_material_task_lease(response):
+        release = getattr(g, "hsd_material_release", None)
+        if release is not None:
+            response.direct_passthrough = False
+            response.call_on_close(release)
+            g.hsd_material_bound = True
+        return response
+
+    @app.teardown_request
+    def release_material_task_lease(exc):
+        release = getattr(g, "hsd_material_release", None)
+        if release is not None and not getattr(g, "hsd_material_bound", False):
+            release()
 
     @app.errorhandler(ValueError)
     def invalid(exc):
@@ -354,7 +401,10 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
 
     @app.errorhandler(RequestEntityTooLarge)
     def too_large(exc):
-        message = "上传表单字段过多或过长，请只选择表格、ZIP和本批起始号。" if request.endpoint == "upload_job" else "请求内容过大，请缩短输入后重试。"
+        if request.endpoint == "material_upload_job":
+            message = "上传表单字段过多或过长，请一次只选择 1 到 100 张图片。"
+        else:
+            message = "上传表单字段过多或过长，请只选择表格、ZIP和本批起始号。" if request.endpoint == "upload_job" else "请求内容过大，请缩短输入后重试。"
         return jsonify(error=message), 413
 
     @app.errorhandler(BadRequest)
@@ -406,7 +456,8 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
         existing = manager.ai_config()
         return {"settings": material_settings.snapshot(),
                 "deepseek": {"enabled": existing["enabled"], "configured": existing["configured"]},
-                "validation_ready": False}
+                "validation_ready": False,
+                "processing_available": material_manager.config(employee_id())["available"]}
 
     @app.get("/api/admin/material-settings")
     def material_settings_get():
@@ -705,6 +756,94 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
             return jsonify(id=manager.create(payload, owner_id=employee_id()))
         return jsonify(id=manager.create(payload))
 
+    @app.get("/api/material/config")
+    def material_config():
+        return jsonify(material_manager.config(employee_id()))
+
+    @app.post("/api/material/jobs")
+    def material_upload_job():
+        if request.mimetype != "multipart/form-data":
+            raise ValueError("请使用图片上传表单。")
+        committed = False
+        with manager.lock:
+            if app.config["HSD_STOPPING"]:
+                raise Conflict("服务正在退出，请稍后重新打开员工入口。")
+            app.config["HSD_ACTIVE_UPLOADS"] += 1
+        try:
+            def commit(job):
+                material_claims.ensure_active(*g.hsd_upload_claim)
+                material_claims.commit(*g.hsd_upload_claim, job["id"])
+            identifier = material_manager.receive(
+                request.files, request.form, owner=employee_id(),
+                directory=getattr(request, "_hsd_upload_directory", None), before_submit=commit,
+                upload_request_id=g.hsd_upload_claim[0],
+                ensure_active=lambda: material_claims.ensure_active(*g.hsd_upload_claim))
+            committed = True
+            request._hsd_upload_committed = True
+            return jsonify(id=identifier)
+        finally:
+            with manager.lock:
+                app.config["HSD_ACTIVE_UPLOADS"] -= 1
+            # receive owns cleanup after parsing; malformed multipart is cleaned
+            # by the request teardown using this endpoint's private namespace.
+            if committed:
+                request.release_upload()
+
+    @app.get("/api/material/upload-status/<request_id>")
+    def material_upload_status(request_id):
+        return jsonify(material_claims.lookup(request_id, employee_id()))
+
+    @app.post("/api/material/upload-status/<request_id>/cancel")
+    def material_cancel_upload(request_id):
+        state = material_claims.cancel(request_id, employee_id())
+        if state["state"] == "completed":
+            identifier = state["job_id"]
+            with material_manager.lock:
+                result = material_manager.snapshot(identifier, employee_id())
+                material_manager.cancel(identifier, employee_id(), result["revision"])
+        return jsonify(state)
+
+    @app.get("/api/material/jobs/<material_id>")
+    def material_read_job(material_id):
+        return jsonify(material_manager.snapshot(material_id, employee_id()))
+
+    @app.post("/api/material/jobs/<material_id>/cancel")
+    def material_cancel_job(material_id):
+        payload = request.get_json()
+        if set(payload) != {"expected_revision"}:
+            raise ValueError("停止处理参数无效。")
+        return jsonify(material_manager.cancel(material_id, employee_id(), payload.get("expected_revision")))
+
+    @app.post("/api/material/jobs/<material_id>/resolve")
+    def material_resolve_job(material_id):
+        return jsonify(material_manager.resolve(material_id, employee_id(), request.get_json()))
+
+    @app.post("/api/material/jobs/<material_id>/redo")
+    def material_redo_job(material_id):
+        return jsonify(material_manager.redo(material_id, employee_id(), request.get_json()))
+
+    @app.get("/api/material/jobs/<material_id>/source/<item_id>")
+    @app.get("/api/material/jobs/<material_id>/item/<item_id>")
+    def material_image(material_id, item_id):
+        kind = "source" if "/source/" in request.path else "item"
+        path, digest = material_manager.asset(material_id, employee_id(), kind, item_id)
+        response = send_file(path, etag=digest, conditional=True, max_age=0)
+        response.headers["Cache-Control"] = "private, no-cache, must-revalidate"
+        return response
+
+    @app.get("/api/material/jobs/<material_id>/download")
+    @app.get("/api/material/jobs/<material_id>/download/<item_id>")
+    def material_download(material_id, item_id=None):
+        if item_id is None:
+            path, digest = material_manager.download(material_id, employee_id())
+            filename = "素材提取结果.zip"
+        else:
+            path, digest = material_manager.asset(material_id, employee_id(), "item", item_id, download=True)
+            filename = "素材.png"
+        response = send_file(path, as_attachment=True, download_name=filename, etag=digest, conditional=True)
+        response.headers["Cache-Control"] = "private, no-store"
+        return response
+
     @app.post("/api/jobs/upload")
     def upload_job():
         if not lan:
@@ -882,7 +1021,7 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
         with manager.lock:
             if app.config["HSD_ACTIVE_UPLOADS"] or app.config["HSD_ACTIVE_DOWNLOADS"]:
                 raise ValueError("员工正在上传或下载文件，请传输完成后再退出。")
-            if manager.has_active_operations():
+            if manager.has_active_operations() or material_manager.has_active_operations():
                 raise ValueError("任务正在处理，请完成后再退出工具。")
             app.config["HSD_STOPPING"] = True
         callback = app.config.get("HSD_SHUTDOWN")

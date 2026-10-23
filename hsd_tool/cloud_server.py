@@ -174,9 +174,13 @@ def create_cloud_app(environ=None):
     try:
         if app.config["HSD_MANAGER"].ai_settings.snapshot().get("key_persistence") != "linux_aesgcm":
             raise ValueError("云服务必须启用Linux加密密钥存储，不能降级为会话内保存。")
-        retention = CloudRetention(app.config["HSD_MANAGER"], app.config["HSD_JOB_LEASES"]).start()
+        retention = CloudRetention(app.config["HSD_MANAGER"], app.config["HSD_JOB_LEASES"],
+                                   companion=app.config.get("HSD_MATERIAL_MANAGER")).start()
         app.config["HSD_RETENTION"] = retention
     except BaseException:
+        materials = app.config.get("HSD_MATERIAL_MANAGER")
+        if materials is not None:
+            materials.close()
         app.config["HSD_MANAGER"].close()
         raise
     return app

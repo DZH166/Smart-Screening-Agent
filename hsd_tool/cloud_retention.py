@@ -58,13 +58,14 @@ class CloudRetention:
     """
 
     def __init__(self, manager, job_leases: dict, retention_seconds=259200,
-                 interval_seconds=60):
+                 interval_seconds=60, *, companion=None):
         if (isinstance(retention_seconds, bool) or not isinstance(retention_seconds, (int, float))
                 or not math.isfinite(retention_seconds) or retention_seconds <= 0
                 or isinstance(interval_seconds, bool) or not isinstance(interval_seconds, (int, float))
                 or not math.isfinite(interval_seconds) or interval_seconds <= 0):
             raise ValueError("Invalid cloud retention interval")
         self.manager, self.job_leases = manager, job_leases
+        self.companion = companion
         self.retention_seconds = float(retention_seconds)
         self.interval_seconds = float(interval_seconds)
         self.data = manager.data_dir.absolute()
@@ -371,14 +372,24 @@ class CloudRetention:
     def start(self):
         if self._thread is not None:
             return self
-        self.sweep()
+        self._cycle()
         self._event.clear()
         def run():
             while not self._event.wait(self.interval_seconds):
-                self.sweep()
+                self._cycle()
         self._thread = threading.Thread(target=run, name="hsd-cloud-retention", daemon=True)
         self._thread.start()
         return self
+
+    def _cycle(self):
+        self.sweep()
+        if self.companion is not None:
+            try:
+                self.companion.retention_sweep()
+            except Exception:
+                # A separate task namespace must not disable numbering expiry
+                # or leak filenames/provider details through the service log.
+                _LOG.warning("Material expiry was deferred; task files were preserved")
 
     def stop(self):
         self._event.set()

@@ -7,9 +7,11 @@
   <meta name="theme-color" content="#f5f7fa">
   <title>HSD 图号助手</title>
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/material.css">
   <script>window.HSD_TOKEN = __HSD_TOKEN__; window.HSD_ACCESS = __HSD_ACCESS__;</script>
   <script src="/static/ai-settings.js" defer></script>
   <script src="/static/app.js" defer></script>
+  <script src="/static/material.js" defer></script>
 </head>
 <body>
   <div class="app-shell">
@@ -33,10 +35,11 @@
     <div class="app-body">
       <aside class="app-nav" aria-label="功能选择">
         <p class="app-nav-title">功能</p>
-        <a class="app-nav-item active" href="/" aria-current="page"><span class="app-nav-name">图号助手</span><span class="app-nav-hint">图片编号</span></a>
-        <a class="app-nav-item" href="/material-demo/"><span class="app-nav-name">素材提取</span><span class="app-nav-hint">内测演示</span></a>
+        <a class="app-nav-item active" href="#numbering" data-workspace="numbering" aria-current="page"><span class="app-nav-name">图号助手</span><span class="app-nav-hint">图片编号</span></a>
+        <a class="app-nav-item" href="#material" data-workspace="material"><span class="app-nav-name">素材提取</span><span class="app-nav-hint">拆图 · 透明 PNG</span></a>
       </aside>
     <main id="main-content">
+      <div id="numbering-workspace">
       <div id="notice" class="notice hidden" role="alert"><span id="notice-text"></span><button id="notice-action" class="text-button hidden" type="button"></button><button id="notice-close" class="icon-button" type="button" aria-label="关闭提示">×</button></div>
       <section id="import-view" class="view">
         <div class="import-layout">
@@ -88,6 +91,27 @@
       <section id="done-view" class="view hidden"><div class="done-card card"><div class="success-symbol" aria-hidden="true">✓</div><h1>本批处理完成</h1><div id="done-summary" class="done-summary"></div><div class="done-actions"><button id="open-output-button" type="button" class="button button-primary">打开结果文件夹</button><button id="next-task-button" type="button" class="button button-secondary">处理下一批</button></div><div class="secondary-actions"><button id="back-results-button" type="button" class="text-button">查看本批匹配记录</button></div><details id="done-details" class="section-details"><summary>本批记录与处理详情</summary><div id="done-stats" class="detail-breakdown"></div><div class="output-location"><span>结果文件夹</span><p id="output-directory"></p></div><div id="done-ai-overview" class="ai-job-overview hidden"></div></details></div></section>
       <section id="error-view" class="view hidden"><div class="done-card card"><div class="error-symbol" aria-hidden="true">!</div><h1>本批处理未完成</h1><p id="job-error" class="subtitle"></p><button id="retry-task-button" type="button" class="button button-primary">返回导入并调整</button></div></section>
       <section id="cancelled-view" class="view hidden"><div class="done-card card"><h1>本批已停止</h1><p id="cancelled-message" class="subtitle">服务器已结束本批处理，原文件保持不变。</p><button id="cancelled-next-button" type="button" class="button button-primary">处理下一批</button></div></section>
+      </div>
+      <section id="material-workspace" class="hidden" aria-labelledby="material-title">
+        <div class="material-heading"><div><h1 id="material-title">素材提取</h1><p>拆出完整设计，尽量保留文字与配色，下载透明 PNG。</p></div><button id="material-new" class="button button-secondary hidden" type="button">处理下一批</button></div>
+        <div id="material-notice" class="notice hidden" role="status" aria-live="polite"></div>
+        <a id="material-sign-in" class="text-button hidden" href="/">重新登录</a>
+        <form id="material-upload-form" class="card material-import" novalidate>
+          <label id="material-dropzone" class="material-dropzone" for="material-files" tabindex="0"><span class="material-upload-symbol" aria-hidden="true">＋</span><strong>选择或拖入图片</strong><span>支持 PNG、JPG、WebP，可一次选择多张</span><input id="material-files" type="file" multiple accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp" aria-describedby="material-file-error"></label>
+          <p id="material-file-error" class="field-error hidden" role="alert"></p>
+          <ul id="material-selected-files" class="material-selected-files" aria-label="本批图片"></ul>
+          <div class="material-import-footer"><details class="inline-details"><summary>处理说明</summary><div class="help-content"><p>完整设计中的人物、文字、装饰与内部底板一起保留，只去除外部背景和水印。修补或文字拿不准时会标出，请员工确认。</p><p>图片将发送给管理员配置的火山方舟处理。目标为长边 4096 像素透明 PNG；放大尺寸不代表恢复了原图细节。</p><p>只下载已完成的素材；跳过及失败项不会混入结果。云端副本保留三天，请及时下载到自己电脑。</p></div></details><button id="material-start" class="button button-primary" type="submit" disabled>开始提取</button></div>
+        </form>
+        <section id="material-progress" class="card material-progress hidden" aria-live="polite"><div class="material-progress-heading"><div><h2 id="material-progress-title">正在准备</h2><p id="material-progress-message">请保持页面打开。</p></div><div><button id="material-upload-check" class="button button-quiet hidden" type="button">查询上传结果</button><button id="material-stop" class="button button-quiet" type="button">停止本批</button></div></div><div class="progress-track"><div id="material-progress-fill"></div></div><p id="material-progress-detail" class="material-muted"></p></section>
+        <section id="material-results" class="hidden" aria-label="本批素材">
+          <div class="material-result-toolbar"><div><h2 id="material-result-title">本批素材</h2><p id="material-summary" class="material-muted"></p></div><div class="material-toolbar-actions"><button id="material-recheck" class="button button-quiet" type="button">刷新结果</button><button id="material-download-all" class="button button-primary" type="button" disabled>下载已完成素材</button></div></div>
+          <div id="material-filter" class="filter-tabs" role="group" aria-label="素材筛选"><button type="button" class="active" data-material-filter="needs_review" aria-pressed="true">待确认 <span id="material-review-count">0</span></button><button type="button" data-material-filter="all" aria-pressed="false">全部</button><button type="button" data-material-filter="completed" aria-pressed="false">可下载</button><button type="button" data-material-filter="skipped" aria-pressed="false">已跳过</button></div>
+          <p id="material-empty" class="material-empty hidden"></p>
+          <div id="material-grid" class="material-grid"></div>
+          <details id="material-source-details" class="card material-source-details"><summary>查看原图 · 漏提取时重新框选</summary><div id="material-source-grid" class="material-source-grid"></div></details>
+          <details id="material-batch-details" class="material-batch-details"><summary>本批记录与问题</summary><div id="material-batch-info"></div></details>
+        </section>
+      </section>
     </main>
     </div>
     <footer class="app-footer"><span>HSD 图号助手 <span id="app-version">1.8.0</span></span></footer>
@@ -96,5 +120,7 @@
   <div id="toast" class="toast hidden" role="status"></div>
   <iframe id="result-download-frame" class="hidden" title="结果下载" aria-hidden="true"></iframe>
   <dialog id="compare-dialog" class="compare-dialog"><div class="enlarged-header"><div><h2>放大比对</h2><p>对照两张图片，检查是否为同一张图片。</p></div><form method="dialog"><button class="button button-secondary">关闭</button></form></div><div id="enlarged-pair" class="enlarged-pair"></div></dialog>
+  <dialog id="material-detail-dialog" class="material-detail-dialog"><div class="material-dialog-heading"><div><h2 id="material-detail-title">素材对照</h2><p id="material-detail-note" class="material-muted"></p></div><button id="material-detail-close" class="button button-secondary" type="button">关闭</button></div><div class="material-comparison"><figure><figcaption>原图</figcaption><div id="material-selection-stage" class="material-selection-stage"><img id="material-detail-source" alt="原图" draggable="false"><div id="material-selection-box" class="material-selection-box hidden"></div></div></figure><figure id="material-detail-output-figure"><figcaption>提取结果 · 透明区域以方格显示</figcaption><div class="material-output-image"><img id="material-detail-output" alt="提取结果"></div></figure></div><p id="material-detail-warning" class="material-warning"></p><div id="material-redo-controls" class="material-redo-controls hidden"><p id="material-box-note">在原图拖动框选完整设计。</p><div class="material-correction-fields"><label>修改要求<select id="material-correction-kind"><option value="完整保留框选设计，去除外部背景，不改变文字和配色">提取完整设计</option><option value="只清理标记位置的外部背景或水印，保留设计文字与装饰">清理背景或水印</option><option value="修复标记位置的残缺边缘，不增加新的设计内容">修补边缘</option><option value="尽量还原标记位置的文字，无法看清时保留疑问提示">检查文字</option><option value="展平倾斜、弯曲或褶皱，保持原有图案和配色">展平图案</option></select></label><label>补充说明（可不填）<input id="material-correction-note" maxlength="500" placeholder="例如：这一整组文字和人物需要保留在一起"></label></div><label id="material-unknown-row" class="material-unknown-row hidden"><input id="material-unknown-ack" type="checkbox"><span>上次调用结果尚未确认。重新提交可能重复计费，我确认继续。</span></label><button id="material-redo-submit" class="button button-primary" type="button" disabled>只重做框选范围</button></div><div id="material-detail-actions" class="material-detail-actions"></div><p id="material-dialog-message" class="field-error hidden" role="status"></p></dialog>
+  <iframe id="material-download-frame" class="hidden" title="素材下载" aria-hidden="true"></iframe>
 </body>
 </html>

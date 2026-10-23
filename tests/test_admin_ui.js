@@ -218,7 +218,8 @@ async function main(){
   retry.resolve({status:200,body:{ok:true}});await retrying;fetchHandler=null;assert.equal(sandbox.window.location.replacements.at(-1),'/admin/login');
 
   const html=fs.readFileSync(path.join(__dirname,'../hsd_tool/static/admin.html'),'utf8'),css=fs.readFileSync(path.join(__dirname,'../hsd_tool/static/admin.css'),'utf8');
-  assert.ok(html.includes('window.HSD_TOKEN = __HSD_TOKEN__'));assert.ok(html.includes('href="/"'));assert.equal((html.match(/<section class="panel\b/g)||[]).length,4,'AI settings, Key management, Key ledger and on-demand help');
+  assert.ok(html.includes('window.HSD_TOKEN = __HSD_TOKEN__'));assert.ok(html.includes('href="/"'));assert.equal((html.match(/<section class="panel\b/g)||[]).length,5,'AI settings, Key management, Key ledger, separate functions and on-demand help');
+  assert.ok(html.includes('data-admin-section="keys"')&&html.includes('data-admin-section="functions"')&&html.includes('data-admin-section="help"'),'admin sections are navigated independently');
   assert.ok(source.includes('只有通过系统独立核对'));assert.ok(html.includes('AI 建议相同不等于已经确认'));assert.ok(html.includes('原始表格、压缩包、AI 文件和电脑路径不会发送'));
   assert.ok(html.includes('<details id="admin-help">')&&!html.includes('<details id="admin-help" open'),'help stays closed until requested');
   assert.ok(html.includes('<details id="ledger-details">')&&!html.includes('<details id="ledger-details" open'),'the key ledger is closed until requested');

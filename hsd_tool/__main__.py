@@ -155,6 +155,9 @@ def main():
             server.serve_forever()
         finally:
             server.server_close()
+            materials = app.config.get("HSD_MATERIAL_MANAGER")
+            if materials is not None:
+                materials.close()
             app.config["HSD_MANAGER"].close()
             instance_path.unlink(missing_ok=True)
     except Exception:

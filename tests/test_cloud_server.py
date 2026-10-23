@@ -370,7 +370,10 @@ def cloud_factory_stubs(tmp_path, monkeypatch):
     retention = SimpleNamespace(start=lambda: retention)
     monkeypatch.setattr(server, "create_app", create)
     monkeypatch.setattr(cloud_admin, "CloudAdminCredentials", lambda path: object())
-    monkeypatch.setattr(cloud_retention, "CloudRetention", lambda *args: retention)
+    def make_retention(*args, **kwargs):
+        assert kwargs == {"companion": app.config.get("HSD_MATERIAL_MANAGER")}
+        return retention
+    monkeypatch.setattr(cloud_retention, "CloudRetention", make_retention)
     environment = {"HSD_PUBLIC_ORIGIN": ORIGIN, "HSD_DATA_DIR": str(tmp_path / "data"),
                    "HSD_SETTINGS_DIR": str(tmp_path / "settings"),
                    "HSD_EMPLOYEE_CODE_FILE": str(tmp_path / "synthetic-employee-code"),

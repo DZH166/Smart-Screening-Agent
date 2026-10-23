@@ -18,6 +18,11 @@ from gunicorn.workers.gthread import ThreadWorker
 
 def shutdown_application(app):
     app.config["HSD_STOPPING"] = True
+    materials = app.config.get("HSD_MATERIAL_MANAGER")
+    if materials is not None:
+        # Accepted image calls settle before task expiry or process exit. A
+        # stopped UI must not abandon the upstream reply or erase its record.
+        materials.close()
     retention = app.config.get("HSD_RETENTION")
     if retention is not None:
         retention.stop()

@@ -1,4 +1,5 @@
-"""Read-only demo hosting must not create another public or privileged entry."""
+"""Legacy demo stays read-only; the employee shell hosts real material work."""
+from html.parser import HTMLParser
 from types import SimpleNamespace
 
 import pytest
@@ -110,8 +111,66 @@ def test_allowlisted_files_have_correct_types_and_separate_browser_policy(demo):
         head = demo.call("/material-demo/" + filename, method="HEAD")
         assert head.status_code == 200 and not head.data
     original = demo.call("/")
-    assert "blob:" not in original.headers["Content-Security-Policy"]
-    assert "connect-src 'self'" in original.headers["Content-Security-Policy"]
+    policy = original.headers["Content-Security-Policy"]
+    assert "img-src 'self' data: blob:;" in policy
+    assert "default-src 'self';" in policy
+    assert "connect-src 'self';" in policy
+    assert "frame-ancestors 'none';" in policy
+    assert "blob:" not in policy.split("script-src ", 1)[1].split(";", 1)[0]
+
+
+def test_employee_navigation_enters_real_material_workspace_on_the_same_page(demo):
+    demo.login()
+    response = demo.call("/")
+    assert response.status_code == 200
+
+    class EmployeeMarkup(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.links, self.ids, self.scripts = {}, set(), []
+
+        def handle_starttag(self, tag, attributes):
+            attributes = dict(attributes)
+            if attributes.get("id"):
+                self.ids.add(attributes["id"])
+            if tag == "a" and attributes.get("data-workspace"):
+                self.links[attributes["data-workspace"]] = attributes
+            if tag == "script" and attributes.get("src"):
+                self.scripts.append(attributes["src"])
+
+    markup = EmployeeMarkup()
+    markup.feed(response.get_data(as_text=True))
+    assert set(markup.links) == {"numbering", "material"}
+    assert markup.links["numbering"]["href"] == "#numbering"
+    assert markup.links["material"]["href"] == "#material"
+    assert all(link.get("target") != "_blank" for link in markup.links.values())
+    assert {"numbering-workspace", "material-workspace", "import-form",
+            "material-upload-form", "material-files", "material-stop",
+            "material-results"} <= markup.ids
+    assert markup.scripts.count("/static/app.js") == 1
+    assert markup.scripts.count("/static/material.js") == 1
+    # Keep the old synthetic demo available only through its separate,
+    # authenticated read-only route; it is no longer the normal feature link.
+    legacy = demo.call("/material-demo/")
+    assert legacy.status_code == 200
+    assert 'data-hosted="true"' in legacy.get_data(as_text=True)
+    assert legacy.headers["Content-Security-Policy"] == material_demo.CSP
+
+
+def test_selected_file_blob_policy_does_not_expand_admin_or_api_permissions(demo):
+    demo.login()
+    assert demo.call("/admin/login", method="POST",
+                     payload={"username": ADMIN, "password": PASSWORD}).status_code == 200
+    for path in ("/admin", "/admin/material", "/api/config", "/api/material/config",
+                 "/api/admin/material-settings"):
+        response = demo.call(path)
+        assert response.status_code == 200
+        policy = response.headers["Content-Security-Policy"]
+        assert "blob:" not in policy
+        assert "connect-src 'self';" in policy
+        assert "frame-ancestors 'none';" in policy
+        assert response.headers["X-Frame-Options"] == "DENY"
+        assert response.headers["Cache-Control"] == "no-store"
 
 
 @pytest.mark.parametrize("suffix", (

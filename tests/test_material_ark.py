@@ -1,0 +1,469 @@
+"""Protocol, resource, privacy and submission-uncertainty controls, no real API."""
+import base64
+import io
+import json
+import socket
+
+from PIL import Image, PngImagePlugin
+import pytest
+
+from hsd_tool import material_ark as ark
+from hsd_tool.cancellation import TaskCancelled
+
+
+KEY = "unit-only-ark-credential"
+MODEL = "doubao-seedream-5-0-flash-260915"
+
+
+def picture(size=(512, 512), *, alpha=False, empty=False, metadata=False, format="PNG"):
+    im = Image.new("RGBA" if alpha else "RGB", size, (110, 25, 190, 255) if alpha else (110, 25, 190))
+    if alpha:
+        im.putpixel((0, 0), (0, 0, 0, 0))
+    if empty:
+        im = Image.new("RGBA", size, (255, 0, 0, 0))
+    target = io.BytesIO()
+    extra = {}
+    if metadata:
+        text = PngImagePlugin.PngInfo()
+        text.add_text("Author", "private_original_filename.png")
+        extra["pnginfo"] = text
+    im.save(target, format, **extra)
+    return target.getvalue()
+
+
+def item(index, *, size=(512, 512), alpha=None, bounds=None):
+    result = {"z_index": index, "size": f"{size[0]}x{size[1]}", "output_format": "png",
+              "b64_json": base64.b64encode(picture(size, alpha=bool(index) if alpha is None else alpha)).decode()}
+    if index:
+        result.update(name="完整设计", description="保留人物、文字和内部底板", bounding_box=bounds or {
+            "absolute": [0, 0, 512, 512], "normalized": [0, 0, 1000, 1000]})
+    return result
+
+
+def result_data():
+    return {"data": [item(0), item(1)], "model": MODEL,
+            "usage": {"generated_images": 2, "input_images": 1, "output_tokens": 2048}}
+
+
+class Recorder:
+    def __init__(self, data=None, status=200, *, raw=None, headers=None, url=ark.ENDPOINT, callback=None):
+        self.data = result_data() if data is None else data
+        self.status = status
+        self.raw = raw
+        self.headers = headers or {"x-request-id": "test-request-01"}
+        self.url = url
+        self.calls = []
+        self.callback = callback
+
+    def __call__(self, request, **options):
+        self.calls.append((request, options))
+        if self.callback:
+            self.callback()
+        return ark.HttpReply(self.status, self.raw if self.raw is not None else json.dumps(self.data).encode(), self.headers, self.url)
+
+
+def provider(transport):
+    return ark.ArkMaterialProvider(KEY, MODEL, transport=transport)
+
+
+def test_extract_uses_fixed_authenticated_base64_protocol_and_removes_metadata():
+    transport = Recorder()
+    output = provider(transport).extract(picture(metadata=True), instructions="保留底板")
+    request, options = transport.calls[0]
+    body = json.loads(request.data)
+    assert request.full_url == ark.ENDPOINT
+    assert request.method == "POST"
+    assert request.get_header("Authorization") == "Bearer " + KEY
+    assert body["layer_decomposition"] is True
+    assert body["response_format"] == "b64_json"
+    assert body["size"] == "2K"
+    assert body["output_format"] == "png"
+    assert body["watermark"] is False
+    assert "背景" in body["prompt"] and "完整设计" in body["prompt"] and "保留底板" in body["prompt"]
+    assert "private_original_filename" not in base64.b64decode(body["image"].split(",", 1)[1]).decode("latin1")
+    assert "background" not in body and "sequential_image_generation" not in body
+    assert options == {"timeout": 240, "max_bytes": ark.MAX_RESPONSE_BYTES}
+    assert len(output.layers) == 1
+    assert output.layers[0].bounds == {"x": 0, "y": 0, "width": 512, "height": 512}
+    assert output.usage["generated_images"] == 2
+    assert output.request_id == "test-request-01"
+    assert output.base_png.startswith(b"\x89PNG")
+    assert KEY not in repr(output)
+    assert "b64_json" not in repr(output)
+
+
+def test_upscale_only_satisfies_upstream_minimum_and_keeps_source_box():
+    transport = Recorder()
+    output = provider(transport).extract(picture((256, 256)))
+    body = json.loads(transport.calls[0][0].data)
+    with Image.open(io.BytesIO(base64.b64decode(body["image"].split(",", 1)[1]))) as im:
+        assert im.size == (512, 512)
+    assert output.layers[0].bounds["width"] == 256
+    assert any("不代表恢复细节" in note for note in output.warnings)
+
+
+def test_embedded_icc_is_converted_before_private_metadata_is_stripped():
+    from PIL import ImageCms
+    source = Image.new("RGBA", (512, 512), (110, 25, 190, 255))
+    source.putpixel((0, 0), (0, 0, 0, 0))
+    source.info['icc_profile'] = ImageCms.ImageCmsProfile(ImageCms.createProfile('sRGB')).tobytes()
+    exif = source.getexif()
+    exif[315] = 'private metadata must not leave server'
+    source.info['exif'] = exif.tobytes()
+    normal = ark.normalise_rgba(source)
+    assert normal.getpixel((100, 100)) == (110, 25, 190, 255)
+    assert normal.getpixel((0, 0))[3] == 0
+    assert normal.info == {}
+    encoded = ark._encode(normal)
+    assert b'private metadata' not in encoded
+    with Image.open(io.BytesIO(encoded)) as actual:
+        assert 'icc_profile' not in actual.info and 'exif' not in actual.info
+
+
+def test_bad_icc_is_not_silently_dropped_while_claiming_colours_were_preserved():
+    source = Image.new("RGB", (512, 512), (20, 30, 40))
+    source.info['icc_profile'] = b'not a valid profile'
+    with pytest.raises(ValueError, match='sRGB'):
+        ark.normalise_rgba(source)
+
+
+def test_exif_orientation_is_applied_before_metadata_removal():
+    source = Image.new("RGB", (4, 6), (20, 30, 40))
+    exif = source.getexif()
+    exif[274] = 6
+    source.info['exif'] = exif.tobytes()
+    normal = ark.normalise_rgba(source)
+    assert normal.size == (6, 4)
+    assert normal.info == {}
+
+
+def test_bounds_map_output_canvas_to_source_not_output_layer_size():
+    data = result_data()
+    data["data"][1] = item(1, size=(256, 256), bounds={"absolute": [128, 128, 384, 384], "normalized": [250, 250, 750, 750]})
+    output = provider(Recorder(data)).extract(picture((1024, 1024)))
+    assert output.layers[0].bounds == {"x": 256, "y": 256, "width": 512, "height": 512}
+
+
+def test_layers_are_sorted_and_base_is_not_a_design():
+    data = result_data()
+    data["data"] = [item(2), item(0), item(1)]
+    output = provider(Recorder(data)).extract(picture())
+    assert [value.z_index for value in output.layers] == [1, 2]
+
+
+@pytest.mark.parametrize("change,code", [
+    (lambda d: d["data"].pop(), "no_designs"),
+    (lambda d: d["data"][1].update(z_index=0), "invalid_response"),
+    (lambda d: d["data"][1].update(z_index=True), "invalid_response"),
+    (lambda d: d["data"][1].update(z_index=3), "invalid_response"),
+    (lambda d: d["data"][1].update(error={"message": KEY}), "invalid_response"),
+    (lambda d: d["data"][1].update(size="4096x4096"), "invalid_response"),
+    (lambda d: d["data"][1].update(output_format="jpeg"), "invalid_response"),
+    (lambda d: d["data"][1].update(b64_json="not base64 *"), "invalid_response"),
+    (lambda d: d["data"][1].update(b64_json=base64.b64encode(b"not a png").decode()), "invalid_image"),
+    (lambda d: d["data"][1].update(bounding_box={"absolute": [-1, 0, 10, 10]}), "invalid_bounds"),
+    (lambda d: d["data"][1].update(bounding_box={"absolute": [0, 0, 513, 512]}), "invalid_bounds"),
+    (lambda d: d["data"][1].update(bounding_box={"absolute": [0, 0, 0, 512]}), "invalid_bounds"),
+    (lambda d: d["data"][1].update(bounding_box={"absolute": [False, 0, 512, 512]}), "invalid_bounds"),
+    (lambda d: d["data"][1].update(bounding_box={"normalized": [0, 0, 1000, 1000]}), "invalid_bounds"),
+    (lambda d: d["data"][1].update(bounding_box={"absolute": [0, 0, 512, 512], "normalized": [0, 0, 500, 500]}), "invalid_bounds"),
+])
+def test_invalid_layer_data_never_retried_and_keeps_real_known_usage(change, code):
+    data = result_data()
+    change(data)
+    transport = Recorder(data)
+    with pytest.raises(ark.ArkProviderError) as raised:
+        provider(transport).extract(picture())
+    assert raised.value.code == code
+    assert raised.value.settled is True
+    assert raised.value.safe_retry is False
+    assert raised.value.usage["generated_images"] == 2
+    assert len(transport.calls) == 1
+    assert KEY not in str(raised.value)
+
+
+def test_external_url_is_never_fetched_even_when_provider_returns_one():
+    data = result_data()
+    del data["data"][1]["b64_json"]
+    data["data"][1]["url"] = "http://127.0.0.1/private"
+    transport = Recorder(data)
+    with pytest.raises(ark.ArkProviderError, match="未按约定"):
+        provider(transport).extract(picture())
+    assert len(transport.calls) == 1
+
+
+@pytest.mark.parametrize("url", ["http://127.0.0.1/", "https://169.254.169.254/", "https://untrusted.example/", ark.ENDPOINT + "?key=bad"])
+def test_transport_redirect_contract_is_enforced(url):
+    transport = Recorder(url=url)
+    with pytest.raises(ark.ArkProviderError) as error:
+        provider(transport).extract(picture())
+    assert not error.value.settled
+    assert not error.value.safe_retry
+    assert len(transport.calls) == 1
+
+
+def test_non_alpha_png_is_not_misrepresented_as_transparent():
+    data = result_data()
+    data["data"][1] = item(1, alpha=False)
+    with pytest.raises(ark.ArkProviderError) as error:
+        provider(Recorder(data)).extract(picture())
+    assert error.value.code == "missing_alpha"
+
+
+def test_empty_transparent_layer_is_rejected():
+    data = result_data()
+    data["data"][1]["b64_json"] = base64.b64encode(picture(empty=True)).decode()
+    with pytest.raises(ark.ArkProviderError) as error:
+        provider(Recorder(data)).extract(picture())
+    assert error.value.code == "empty_layer"
+
+
+def test_full_opaque_alpha_layer_keeps_internal_design_board_but_warns():
+    data = result_data()
+    image = Image.new("RGBA", (512, 512), (255, 255, 255, 255))
+    target = io.BytesIO()
+    image.save(target, "PNG")
+    data["data"][1]["b64_json"] = base64.b64encode(target.getvalue()).decode()
+    output = provider(Recorder(data)).extract(picture())
+    assert any("内部底板" in note for note in output.layers[0].warnings)
+
+
+def test_model_label_is_untrusted_text_and_never_contains_key():
+    data = result_data()
+    data["data"][1].update(name="<script>" + KEY + "\x00", description=KEY)
+    output = provider(Recorder(data)).extract(picture())
+    assert KEY not in output.layers[0].label + output.layers[0].description
+    assert "\x00" not in output.layers[0].label
+    assert "<script>" in output.layers[0].label  # UI must use textContent, not HTML.
+
+
+def test_layer_limit_explicitly_warns_about_unverified_complete_coverage():
+    data = result_data()
+    data["data"] = [item(i) for i in range(17)]
+    output = provider(Recorder(data)).extract(picture())
+    assert len(output.layers) == 16
+    assert any("未提取设计" in note for note in output.warnings)
+    data["data"].append(item(17))
+    with pytest.raises(ark.ArkProviderError):
+        provider(Recorder(data)).extract(picture())
+
+
+def test_no_usage_does_not_become_zero_usage():
+    data = result_data()
+    del data["usage"]
+    assert provider(Recorder(data)).extract(picture()).usage == {}
+
+
+@pytest.mark.parametrize("raw", [b"not-json", b"[]", b'{"data":[],"data":[]}', b'{"usage":NaN}', b'\xff'])
+def test_invalid_json_is_unknown_and_never_retried(raw):
+    transport = Recorder(raw=raw)
+    with pytest.raises(ark.ArkProviderError) as error:
+        provider(transport).extract(picture())
+    assert not error.value.settled
+    assert not error.value.safe_retry
+    assert len(transport.calls) == 1
+
+
+@pytest.mark.parametrize("status", [500, 502, 503, 504])
+def test_gateway_or_server_failures_never_prove_no_paid_work(status):
+    data = {"error": {"code": "InternalError", "message": KEY}, "usage": {"generated_images": 0}}
+    transport = Recorder(data, status=status)
+    with pytest.raises(ark.ArkProviderError) as error:
+        provider(transport).extract(picture())
+    assert not error.value.safe_retry
+    assert not error.value.settled
+    assert KEY not in str(error.value)
+    assert len(transport.calls) == 1
+
+
+def test_explicit_rate_rejection_can_be_retried_by_task_service_once():
+    transport = Recorder({"error": {"code": "RateLimitExceeded", "message": KEY}}, status=429)
+    with pytest.raises(ark.ArkProviderError) as error:
+        provider(transport).extract(picture())
+    assert error.value.settled
+    assert error.value.safe_retry
+    assert error.value.usage == {}
+    assert len(transport.calls) == 1  # Provider never retries itself.
+    assert KEY not in str(error.value)
+
+
+@pytest.mark.parametrize("code", ["RateLimitExceeded.EndpointRPMExceeded", "ModelAccountIpmRateLimitExceeded", "ServerOverloaded", "RequestBurstTooFast"])
+def test_documented_pre_generation_throttle_has_one_retry_eligibility(code):
+    transport = Recorder({"error": {"code": code}}, status=429)
+    with pytest.raises(ark.ArkProviderError) as error:
+        provider(transport).extract(picture())
+    assert error.value.safe_retry and error.value.settled
+    assert len(transport.calls) == 1
+
+
+@pytest.mark.parametrize("code", ["QuotaExceeded", "SetLimitExceeded", "AccountQuotaExceeded", "UnknownError"])
+def test_non_transient_or_unrecognized_429_does_not_waste_another_paid_attempt(code):
+    transport = Recorder({"error": {"code": code}}, status=429)
+    with pytest.raises(ark.ArkProviderError) as error:
+        provider(transport).extract(picture())
+    assert not error.value.safe_retry
+
+
+@pytest.mark.parametrize("usage", [{"generated_images": 1}, {"generated_images": -1}, {"generated_images": "0"}, {"generated_images": False}])
+def test_inconsistent_rate_reply_cannot_trigger_duplicate_submission(usage):
+    transport = Recorder({"error": {"code": "RateLimitExceeded"}, "usage": usage}, status=429)
+    with pytest.raises(ark.ArkProviderError) as error:
+        provider(transport).extract(picture())
+    assert not error.value.safe_retry
+    assert not error.value.settled
+
+
+def test_timeout_after_submission_never_automatically_resends():
+    calls = []
+    def fail(request, **options):
+        calls.append(request)
+        raise socket.timeout(KEY)
+    with pytest.raises(ark.ArkProviderError) as error:
+        provider(fail).extract(picture())
+    assert error.value.code == "submission_unknown"
+    assert not error.value.settled and not error.value.safe_retry
+    assert len(calls) == 1
+    assert KEY not in str(error.value)
+
+
+def test_cancel_before_submission_makes_no_request():
+    transport = Recorder()
+    with pytest.raises(ark.ArkCancelled) as error:
+        provider(transport).extract(picture(), check_cancel=lambda: True)
+    assert error.value.settled
+    assert not transport.calls
+
+
+def test_cancel_callback_raising_existing_task_exception_is_supported():
+    def check():
+        raise TaskCancelled()
+    with pytest.raises(ark.ArkCancelled):
+        provider(Recorder()).extract(picture(), check_cancel=check)
+
+
+def test_cancel_during_request_receives_response_and_preserves_known_usage():
+    stopped = False
+    def request_finishes():
+        nonlocal stopped
+        stopped = True
+    transport = Recorder(callback=request_finishes)
+    with pytest.raises(ark.ArkCancelled) as error:
+        provider(transport).extract(picture(), check_cancel=lambda: stopped)
+    assert error.value.settled
+    assert error.value.usage["generated_images"] == 2
+    assert error.value.request_id == "test-request-01"
+    assert len(transport.calls) == 1
+
+
+def test_cancel_during_timeout_remains_unknown_instead_of_claiming_upstream_stopped():
+    stopped = False
+    def fail(request, **options):
+        nonlocal stopped
+        stopped = True
+        raise TimeoutError(KEY)
+    with pytest.raises(ark.ArkCancelled) as error:
+        provider(fail).extract(picture(), check_cancel=lambda: stopped)
+    assert not error.value.settled
+    assert error.value.code == "submission_unknown"
+
+
+@pytest.mark.parametrize("key,model", [("", MODEL), ("a\nb", MODEL), (KEY, "fal-ai/model"), (KEY, "doubao-seedream-4-5-251128"), (KEY, "doubao-seededit-3-0-i2i")])
+def test_unsupported_config_is_rejected_before_network(key, model):
+    with pytest.raises(ark.ArkProviderError):
+        ark.ArkMaterialProvider(key, model)
+
+
+def test_private_endpoint_id_is_supported_without_guessing_its_mapping():
+    assert ark.ArkMaterialProvider(KEY, "ep-20261022010101-abcdef").model_id.startswith("ep-")
+
+
+@pytest.mark.parametrize("source", [b"broken image", picture((1024, 16)), picture(format="GIF")])
+def test_invalid_source_never_leaves_server(source):
+    transport = Recorder()
+    with pytest.raises(ark.ArkProviderError):
+        provider(transport).extract(source)
+    assert not transport.calls
+
+
+def test_response_byte_resource_limit_is_enforced_for_injected_transport(monkeypatch):
+    monkeypatch.setattr(ark, "MAX_RESPONSE_BYTES", 10)
+    with pytest.raises(ark.ArkProviderError) as error:
+        provider(Recorder()).extract(picture())
+    assert not error.value.settled
+
+
+def test_aggregate_pixel_limit_stops_layer_decode_without_resubmitting(monkeypatch):
+    monkeypatch.setattr(ark, "MAX_TOTAL_OUTPUT_PIXELS", 512 * 512)
+    with pytest.raises(ark.ArkProviderError) as error:
+        provider(Recorder()).extract(picture())
+    assert error.value.code == "response_resource_limit"
+    assert error.value.settled
+    assert not error.value.safe_retry
+
+
+def test_edit_uses_transparent_image_protocol_and_marks_generated_changes():
+    data = {"data": [{key: value for key, value in item(1).items() if key in {"size", "b64_json", "output_format"}}], "usage": {"generated_images": 1}}
+    transport = Recorder(data)
+    output = provider(transport).edit(picture(alpha=True), instructions="清理边缘", bounds={"x": 10, "y": 20, "width": 100, "height": 80})
+    request = json.loads(transport.calls[0][0].data)
+    assert request["background"] == "transparent"
+    assert "layer_decomposition" not in request
+    assert "<bbox>10 20 110 100</bbox>" in request["prompt"]
+    assert len(output.layers) == 1
+    assert output.base_png == b""
+    assert any("其他区域" in note for note in output.warnings)
+    assert any("模型生成" in note for note in output.warnings)
+
+
+@pytest.mark.parametrize("bounds", [{"x": -1, "y": 0, "width": 1, "height": 1}, {"x": 0, "y": 0, "width": 513, "height": 1}, {"x": 0, "y": 0, "width": True, "height": 1}, {"x": 0}])
+def test_edit_bounds_are_validated_before_submission(bounds):
+    transport = Recorder()
+    with pytest.raises(ark.ArkProviderError):
+        provider(transport).edit(picture(alpha=True), instructions="修补", bounds=bounds)
+    assert not transport.calls
+
+
+def test_edit_requires_actual_alpha_input_instead_of_claiming_transparency():
+    transport = Recorder()
+    with pytest.raises(ark.ArkProviderError) as error:
+        provider(transport).edit(picture(), instructions="去背景")
+    assert error.value.code == "missing_alpha"
+    assert not transport.calls
+
+
+def test_edit_bad_result_preserves_usage_and_does_not_retry():
+    transport = Recorder({"data": [], "usage": {"generated_images": 1}})
+    with pytest.raises(ark.ArkProviderError) as error:
+        provider(transport).edit(picture(alpha=True), instructions="修补")
+    assert error.value.settled
+    assert not error.value.safe_retry
+    assert error.value.usage["generated_images"] == 1
+
+
+def test_default_transport_builds_no_redirect_opener_and_uses_fixed_destination(monkeypatch):
+    class Response:
+        status = 200
+        headers = {"Content-Length": "2"}
+        def geturl(self):
+            return ark.ENDPOINT
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+        def read(self, count):
+            if not hasattr(self, "read_once"):
+                self.read_once = True
+                return b"{}"
+            return b""
+    class Opener:
+        def open(self, request, timeout):
+            assert request.full_url == ark.ENDPOINT
+            assert timeout == 10
+            return Response()
+    def build(handler):
+        assert isinstance(handler, ark._NoRedirect)
+        assert handler.redirect_request(None, None, None, None, None, "http://127.0.0.1") is None
+        return Opener()
+    monkeypatch.setattr(ark.urllib.request, "build_opener", build)
+    response = ark._default_transport(ark.urllib.request.Request(ark.ENDPOINT), timeout=10, max_bytes=10)
+    assert response.body == b"{}"

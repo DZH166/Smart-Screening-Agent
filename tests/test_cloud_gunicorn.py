@@ -67,6 +67,17 @@ def test_master_waits_for_worker_exit_instead_of_default_grace_force_kill(monkey
     assert master.LISTENERS == []
 
 
+def test_shutdown_drains_material_requests_before_numbering_and_final_retention():
+    order = []
+    app = SimpleNamespace(config={
+        "HSD_MATERIAL_MANAGER": SimpleNamespace(close=lambda: order.append("materials_settled")),
+        "HSD_MANAGER": SimpleNamespace(close=lambda: order.append("numbering_settled")),
+    })
+    production.shutdown_application(app)
+    assert app.config["HSD_STOPPING"]
+    assert order == ["materials_settled", "numbering_settled"]
+
+
 def test_reload_and_worker_count_signals_cannot_create_parallel_owner_maps():
     master = object.__new__(production.CloudArbiter)
     warnings = []

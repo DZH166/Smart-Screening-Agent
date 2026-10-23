@@ -19,14 +19,14 @@
     <main>
       <section class="panel">
         <div class="section-heading"><h2>火山引擎 · 火山方舟</h2></div>
-        <p>填写图片处理服务配置，供后续素材效果验证使用。</p>
+        <p>员工共用此配置，不需要各自填写。</p>
         <p id="material-ark" class="state-line">正在读取设置…</p>
         <form id="material-form" autocomplete="off">
           <label for="material-key">API Key</label>
           <input id="material-key" type="password" autocomplete="new-password" spellcheck="false" aria-describedby="material-key-help" placeholder="粘贴火山方舟 API Key" disabled>
           <p id="material-key-help" class="muted">加密保存，输入框不会回填。已有配置时留空，可保留原 Key。</p>
           <label for="material-model">图片模型 ID</label>
-          <input id="material-model" type="text" autocomplete="off" spellcheck="false" maxlength="128" aria-describedby="material-model-help" placeholder="从火山方舟复制 Model ID 或 ep- 开头的接入点 ID" disabled>
+          <div class="model-input-row"><input id="material-model" type="password" autocomplete="new-password" spellcheck="false" maxlength="128" aria-describedby="material-model-help" placeholder="粘贴图片模型 ID 或接入点 ID" disabled><button id="material-model-reveal" class="button secondary" type="button" aria-pressed="false" disabled>显示</button><button id="material-model-copy" class="button secondary" type="button" disabled>复制</button></div>
           <p id="material-model-help" class="muted">先在火山方舟开通图片模型，再复制对应 ID。不要填写模型昵称。</p>
           <div class="material-actions"><button id="material-save" class="button primary" type="submit" disabled>保存配置</button><button id="material-remove" class="button quiet" type="button" disabled>删除配置</button></div>
         </form>
@@ -40,7 +40,7 @@
           <p class="muted">仅管理员可操作。收起、刷新或离开页面后重新隐藏，不会改动已保存的配置。</p>
         </details>
         <form id="material-enable-form">
-          <div class="section-heading"><label class="enable-control"><input id="material-enabled" type="checkbox" disabled><span>允许后续素材效果验证</span></label><button id="material-enable-save" class="button secondary" type="submit" disabled>保存开关</button></div>
+          <div class="section-heading"><label class="enable-control"><input id="material-enabled" type="checkbox" disabled><span>启用素材提取</span></label><button id="material-enable-save" class="button secondary" type="submit" disabled>保存开关</button></div>
         </form>
       </section>
       <section class="panel help-panel">
@@ -50,7 +50,7 @@
             <li>开通所需图片模型，复制 Model ID 或自己的推理接入点 ID，粘贴到上方。Key 需要有该模型的使用权限。</li>
             <li>保存后输入框会清空 Key，这是正常保护。想更换 Key，重新粘贴并保存；删除配置会同时关闭验证开关。</li>
             <li>提示“其他页面已更新”时，先刷新再修改；保存结果不明确时，也先刷新核对。</li>
-            <li>保存及开关操作只管理配置，不发送图片、不调用计费接口。真实接口和图片效果仍需另行验证，员工“demo内测”继续为示例演示。</li>
+            <li>保存设置不会调用图片服务。启用后，员工开始提取时才会把所选图片交给火山方舟处理；不确定的结果会提示员工确认。</li>
           </ol>
           <p id="material-deepseek" class="muted">正在读取 DeepSeek 状态…</p>
           <p class="muted">图片服务固定使用火山方舟北京接口；现有 DeepSeek 配置独立保留。本项目不接入 OSS，不设置调用费用上限。</p>

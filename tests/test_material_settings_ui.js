@@ -122,7 +122,7 @@ test("boot reads only safe settings and renders configuration after the response
   await h.reply(1, responseBody(8, true, true));
   assert.equal(h.node("material-enabled").checked, true);
   assert.equal(h.node("material-remove").disabled, false);
-  assert.match(h.node("material-ark").textContent, /尚待验证/);
+  assert.match(h.node("material-ark").textContent, /素材提取已启用/);
   assert.ok(!h.calls.some(({ url }) => /ledger|debug|usage/.test(url)));
 });
 
@@ -437,6 +437,40 @@ for (const bad of [{...keyBody(),provider:"fal"},{...keyBody(),revision:9},{...k
     assert.ok(!h.displayedText().includes(KEY)); assert.deepEqual(h.copied,[]);
   });
 }
+
+test("model ID starts masked and can be shown, hidden and copied without reading the Key",async()=>{
+  const h=await harness().ready(responseBody(4,true,false));
+  assert.equal(h.node("material-model").type,"password");
+  assert.equal(h.node("material-model").value,MODEL);
+  h.node("material-model-reveal").emit("click");
+  assert.equal(h.node("material-model").type,"text");
+  assert.equal(h.node("material-model-reveal").textContent,"隐藏");
+  h.node("material-model-copy").emit("click"); await flush();
+  assert.deepEqual(h.copied,[MODEL]);assert.equal(h.calls.length,1);
+  h.node("material-model-reveal").emit("click");assert.equal(h.node("material-model").type,"password");
+  h.node("material-model-reveal").emit("click");h.node("material-refresh").emit("click");
+  assert.equal(h.node("material-model").type,"password");
+  await h.reply(1,responseBody(4,true,false));
+  h.node("material-model-reveal").emit("click");h.emit("pagehide");
+  assert.equal(h.node("material-model").type,"password");
+});
+
+test("model copy acknowledgement waits and ignores a response after leaving",async()=>{
+  const h=await harness().ready(responseBody(4,true,false));
+  const copying=deferred();h.clipboard.writeText=()=>copying.promise;
+  h.node("material-model-copy").emit("click");
+  assert.ok(!/已复制/.test(h.node("material-message").textContent));
+  h.emit("pagehide");copying.resolve();await flush();
+  assert.ok(!/已复制/.test(h.node("material-message").textContent));
+});
+
+test("model copy failure gives a safe manual fallback",async()=>{
+  const h=await harness().ready(responseBody(4,true,false));
+  h.clipboard.writeText=async()=>{throw new Error(KEY);};
+  h.node("material-model-copy").emit("click");await flush();
+  assert.match(h.node("material-message").textContent,/手动复制/);
+  assert.ok(!h.displayedText().includes(KEY));
+});
 
 async function main() {
   let failures = 0;

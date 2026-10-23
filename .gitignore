@@ -39,3 +39,4 @@ material_volcengine_settings.json
 employee_access/
 access_codes.json
 .access-codes-*.tmp
+/material_tasks/

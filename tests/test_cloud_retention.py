@@ -24,6 +24,17 @@ def manager_at(path):
     return manager
 
 
+def test_cloud_timer_also_sweeps_isolated_material_namespace_and_survives_failure(tmp_path):
+    manager = manager_at(tmp_path / "service")
+    calls = []
+    companion = SimpleNamespace(retention_sweep=lambda: calls.append("materials"))
+    retention = CloudRetention(manager, {}, companion=companion)
+    retention._cycle()
+    assert calls == ["materials"]
+    companion.retention_sweep = lambda: (_ for _ in ()).throw(ValueError("synthetic failure"))
+    retention._cycle()  # A deferred material deletion cannot stop the timer.
+
+
 def add_upload(manager, status="ready", identifier=JOB, batch=BATCH):
     root = manager.data_dir
     for name, identity in (("uploads", batch), ("employee_outputs", batch),

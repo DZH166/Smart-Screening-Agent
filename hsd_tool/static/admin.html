@@ -4,15 +4,16 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="light">
-  <title>DeepSeek 管理 · HSD 图号助手</title>
+  <title>管理员设置 · HSD 图号助手</title>
   <link rel="stylesheet" href="/static/admin.css">
   <script>window.HSD_TOKEN = __HSD_TOKEN__;</script>
   <script src="/static/admin.js" defer></script>
+  <script src="/static/admin-workspace.js" defer></script>
 </head>
 <body>
   <div class="admin-shell">
     <header class="admin-header">
-      <div><a class="back-link" href="/">← 返回图片编号</a><h1>DeepSeek 管理</h1></div>
+      <div><a class="back-link" href="/">← 返回员工页面</a><h1>管理员设置</h1></div>
       <div class="header-actions">
         <button id="admin-refresh" class="button secondary" type="button">刷新设置</button>
         <button id="admin-logout" class="button secondary" type="button">退出登录</button>
@@ -27,6 +28,7 @@
         <a class="admin-nav-item" href="#help"><span class="admin-nav-name">帮助</span></a>
       </aside>
     <main>
+      <div class="admin-section" data-admin-section="keys">
       <section class="panel settings-panel" id="keys" aria-labelledby="settings-heading">
         <div class="section-heading">
           <h2 id="settings-heading">AI 处理</h2>
@@ -56,28 +58,28 @@
           </div>
         </details>
       </section>
-      <section class="admin-note" id="functions">
+      </div>
+      <section class="panel hidden" id="functions" data-admin-section="functions">
         <h2>功能区</h2>
-        <p>每个功能单独进入；DeepSeek 只有一份配置，图号助手与素材提取共用。</p>
         <div class="function-grid">
           <a class="function-card" href="/">
             <strong>图号助手</strong>
-            <span>图片编号：A 列编号、B 列图片，缺号按 HSD 加四位流水号</span>
+            <span>上传表格与 AI 文件，自动匹配并编号</span>
             <em>打开功能 →</em>
           </a>
           <a class="function-card" href="/admin/material">
             <strong>素材提取</strong>
-            <span>火山方舟图片处理配置与效果验证</span>
+            <span>配置火山方舟 Key、图片模型与开关</span>
             <em>打开设置 →</em>
           </a>
           <a class="function-card" href="/admin/access-codes">
             <strong>员工访问码</strong>
-            <span>增加、停用或删除访问码，员工使用任意一个有效码登录</span>
+            <span>增加、停用或删除员工登录码</span>
             <em>打开设置 →</em>
           </a>
         </div>
       </section>
-      <section class="panel help-panel" id="help" aria-labelledby="help-heading">
+      <section class="panel help-panel hidden" id="help" data-admin-section="help" aria-labelledby="help-heading">
         <details id="admin-help">
           <summary id="help-heading">使用说明与故障排查</summary>
           <div class="help-body">
@@ -89,6 +91,7 @@
                 <li><strong>只处理有疑问的图片。</strong>可靠匹配直接通过；剩余图片按提示确认、换候选或跳过。不需要逐张检查全部图片。</li>
                 <li><strong>确认摘要，再下载。</strong>核对数量后点击“确认并导出”。未处理或跳过的原始行保持原状，不会被当作完成项。请检查下载的 ZIP 能否打开。</li>
                 <li><strong>想中途停止。</strong>点击“停止上传”或“停止本批”，等页面显示已经停止，再处理下一批。已发出的 AI 请求需要等返回或超时，已产生的用量仍会记录。</li>
+                <li><strong>提取透明素材。</strong>在“功能区”配置火山方舟 Key 与图片模型，启用素材提取。员工在左侧切换到“素材提取”，选择图片后开始；核对标出的疑难项，再下载 PNG 或 ZIP。漏提取时从原图框选补提，局部不满意可标记修改。</li>
                 <li><strong>云端结果及时保存。</strong>结果下载到员工电脑，不存 OSS；服务器副本在本批结束或成功修改后保留三天。原浏览器重新登录可找回保留期内同版本任务；换浏览器、清除网站数据或版本升级后不能找回旧批次。</li>
               </ol>
             </section>
@@ -106,7 +109,7 @@
             </section>
           </div>
           <div class="help-notes">
-            <p><strong>图片会发到哪里？</strong>启用 AI 后，只发送用于查找和核对的图片预览给 DeepSeek；原始表格、压缩包、AI 文件和电脑路径不会发送。</p>
+            <p><strong>图片会发到哪里？</strong>图号助手发送用于查找和核对的图片预览给 DeepSeek，原始表格、压缩包、AI 文件和电脑路径不会发送。素材提取会把员工选择的图片及修改要求发送给火山方舟。两个服务的 Key 分开设置。</p>
             <p id="qualification-state"></p><p id="persistence-state"></p>
           </div>
         </details>
