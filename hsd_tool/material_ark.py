@@ -121,6 +121,7 @@ class ArkResult:
     attempts: tuple[dict, ...] = ()
     provider_usage: dict = field(default_factory=dict)
     rectangular_crops: bool = False
+    no_upscale: bool = False
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):

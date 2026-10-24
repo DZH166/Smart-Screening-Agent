@@ -44,6 +44,7 @@ _STAGES = {
     "preparing": ("准备图片", "正在检查图片"),
     "cleanup": ("清理整图", "正在清理水印和杂质，等待图片服务返回"),
     "locating": ("识别设计范围", "正在识别完整设计的位置，等待识别服务返回"),
+    "designs": ("生成素材", "正在逐个生成高清素材，等待图片服务返回"),
     "cropping": ("裁剪素材", "正在按设计范围裁剪素材"),
     "saving": ("保存素材", "正在保存本张图片的结果"),
     "source_done": ("本张已完成", "本张素材已生成，继续处理其余图片"),
@@ -199,9 +200,13 @@ class MaterialManager:
         self._write(self._directory(job["id"]) / "manifest.json",
                     _canonical({"payload": payload, "hmac_sha256": signature}))
 
-    def _progress(self, job, stage, *, current=None, total=None, source_id=None):
+    def _progress(self, job, stage, *, current=None, total=None, source_id=None, done=None, of=None):
         """Only real work boundaries advance the stream; waiting is not percent."""
         phase, message = _STAGES[stage]
+        # Provider text is never forwarded; a provider may only report a count
+        # of finished items and the server words it.
+        if stage == "designs" and type(done) is int and type(of) is int and 0 < of and 0 <= done <= of:
+            message = "已完成 %d / %d 个素材。" % (done, of)
         previous = job.get("progress", {})
         now = self.clock()
         job["progress"] = {"stage_code": stage, "phase": phase, "message": message,
@@ -209,7 +214,7 @@ class MaterialManager:
                            "total": previous.get("total", len(job["sources"])) if total is None else total,
                            "source_id": source_id if source_id is not None else previous.get("source_id"),
                            "started_at": now, "updated_at": now,
-                           "indeterminate": stage in {"cleanup", "locating", "cancelling"}}
+                           "indeterminate": stage in {"cleanup", "locating", "designs", "cancelling"}}
         # A short, private stage history survives reconnects and is never model
         # chain-of-thought. It contains no credentials or upstream response text.
         history = job.setdefault("stage_history", [])
@@ -413,8 +418,8 @@ class MaterialManager:
     def _provider(self, config):
         if self.provider_factory:
             return self.provider_factory(config)
-        from .material_pipeline import MaterialPipelineProvider
-        return MaterialPipelineProvider(config, self.ai_settings, key_pool=self.ai_key_pool)
+        from .material_design import MaterialDesignProvider
+        return MaterialDesignProvider(config, self.ai_settings, key_pool=self.ai_key_pool)
 
     def _check(self, job):
         if job.get("cancel_requested"):
@@ -440,14 +445,14 @@ class MaterialManager:
             try:
                 kwargs = {"instructions": instructions, "check_cancel": lambda: self._check(job)}
                 if getattr(provider, "supports_progress", False):
-                    def progress(stage_code, _message=""):
+                    def progress(stage_code, message="", *, current=None, total=None):
                         stage = {"prepare": "preparing", "locate": "locating", "crop": "cropping",
                                  "complete": "saving"}.get(stage_code, stage_code)
                         if stage not in _STAGES:
                             return
                         with self.lock:
                             if not job.get("cancel_requested"):
-                                self._progress(job, stage, source_id=source_id)
+                                self._progress(job, stage, source_id=source_id, done=current, of=total)
                                 self._save(job)
                     def record(update):
                         with self.lock:
@@ -652,8 +657,13 @@ class MaterialManager:
             notices = list(dict.fromkeys(warnings_common + list(getattr(layer, "warnings", ()) or ()) +
                                         list(quality.get("warnings", ()))))
             original_size = image.size
-            scale = 4096 / max(image.size)
-            size = tuple(max(1, round(value * scale)) for value in image.size)
+            if getattr(result, "no_upscale", False):
+                # One design already received the whole generation budget; a
+                # synthetic 4096 stretch would only inflate files and time.
+                size = image.size
+            else:
+                scale = 4096 / max(image.size)
+                size = tuple(max(1, round(value * scale)) for value in image.size)
             if size != image.size:
                 image = image.resize(size, Image.Resampling.LANCZOS)
                 notices.append("已按比例输出长边 4096 像素；放大不等于恢复原图细节。")
