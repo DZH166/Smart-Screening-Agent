@@ -64,6 +64,14 @@ _INVENTORY_PROMPT = (
     "尽量保持原始配色、文字、形状和细节，不主动增艳、换色、改字或增加图案、渐变、描边和阴影。"
     "实物上的设计尽量展平，遮挡和模糊处仅谨慎修补，不要凭空添加内容。"
 )
+_SINGLE_DESIGN_PROMPT = (
+    "只提取指定的一个完整设计，作为一个前景图层返回，不要拆成多个零件或图层。"
+    "同一设计的人物全身、头发、裙摆、鞋子、文字、装饰及内部底板必须整体保留；"
+    "去掉设计外的背景、邻近其他设计和覆盖在设计上的外加水印。"
+    "用真实PNG透明通道保留设计外的透明区域，不画白底或棋盘格。"
+    "输出高清、清楚的完整设计画布，四周自然留白，不裁切轮廓。"
+    "保持原有文字、配色、形状和平面印刷风格，不能编造缺失内容。"
+)
 _FIDELITY_WARNING = "模型拆分可能改变细节，需核对完整设计、文字和配色。"
 
 
@@ -478,13 +486,44 @@ class ArkMaterialProvider:
             raise ArkProviderError(error.code, error.message, usage=usage, request_id=request_id) from None
 
     def extract(self, image_bytes: bytes, *, instructions="", check_cancel: Callable | None = None) -> ArkResult:
+        return self._extract_layers(image_bytes, instructions=instructions, check_cancel=check_cancel,
+                                    single_design=False, bounds=None)
+
+    def extract_design(self, image_bytes: bytes, *, instructions="", bounds=None,
+                       check_cancel: Callable | None = None) -> ArkResult:
+        """One paid native-alpha extraction, accepting exactly one foreground.
+
+        Preserve the provider's complete layer canvas. Multiple layers are an
+        unresolved grouping decision, never a reason to choose the largest,
+        delete fragments locally or issue another paid generation automatically.
+        """
+        return self._extract_layers(image_bytes, instructions=instructions, check_cancel=check_cancel,
+                                    single_design=True, bounds=bounds)
+
+    def _extract_layers(self, image_bytes, *, instructions, check_cancel, single_design, bounds):
         if _cancelled(check_cancel):
             raise ArkCancelled()
         if not isinstance(instructions, str) or len(instructions) > 1000:
             raise ArkProviderError("invalid_instructions", "处理要求过长，请简要描述。")
         image, source_size, data_uri, notes = _input(image_bytes, decomposition=True)
+        target = ""
+        if bounds is not None:
+            width, height = source_size
+            if (not isinstance(bounds, dict) or set(bounds) != {"x", "y", "width", "height"}
+                    or not all(type(value) is int for value in bounds.values())
+                    or bounds["x"] < 0 or bounds["y"] < 0 or bounds["width"] <= 0 or bounds["height"] <= 0
+                    or bounds["x"] + bounds["width"] > width or bounds["y"] + bounds["height"] > height):
+                raise ArkProviderError("invalid_bounds", "目标设计位置超出参考图片，请重新框选后重试。")
+            left = math.floor(bounds["x"] * image.width / width)
+            top = math.floor(bounds["y"] * image.height / height)
+            right = math.ceil((bounds["x"] + bounds["width"]) * image.width / width)
+            bottom = math.ceil((bounds["y"] + bounds["height"]) * image.height / height)
+            target = (f"只提取像素范围<bbox>{left} {top} {right} {bottom}</bbox>附近的目标完整设计。"
+                      "位置框只用于辨认目标；身体、文字或饰物延伸到框外时仍整体保留，不按框切图，其他独立设计不要提取。")
         payload = {"model": self.model_id, "image": data_uri,
-                   "prompt": _INVENTORY_PROMPT + ("补充要求：" + instructions if instructions.strip() else ""),
+                   "prompt": (_SINGLE_DESIGN_PROMPT if single_design else _INVENTORY_PROMPT) +
+                             target +
+                             ("补充要求：" + instructions if instructions.strip() else ""),
                    "layer_decomposition": True, "size": "2K", "output_format": "png",
                    "response_format": "b64_json", "watermark": False}
         parsed, usage, request_id = self._submit(payload, check_cancel)
@@ -492,6 +531,8 @@ class ArkMaterialProvider:
             data = parsed.get("data")
             if not isinstance(data, list) or not 2 <= len(data) <= MAX_LAYERS + 1 or not all(isinstance(v, dict) for v in data):
                 raise ArkProviderError("no_designs", "图片服务未返回完整设计图层，请框选设计后重试。")
+            if single_design and len(data) != 2:
+                raise ArkProviderError("ambiguous_design", "图片服务把这个设计拆成了多个图层，请重新框选完整设计后重做。")
             indices = [item.get("z_index") for item in data]
             if (not all(type(v) is int for v in indices) or set(indices) != set(range(len(data)))
                     or any("error" in item for item in data)):

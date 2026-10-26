@@ -136,7 +136,7 @@ class MaterialManager:
         self._closed = False
         self._key = self._load_key()
         implementation = hashlib.sha256(__version__.encode())
-        for name in ("material_service.py", "material_ark.py", "material_quality.py", "material_pipeline.py", "material_locate.py"):
+        for name in ("material_service.py", "material_ark.py", "material_quality.py", "material_pipeline.py", "material_locate.py", "material_design.py"):
             if not Path(__file__).with_name(name).exists():
                 continue
             implementation.update(name.encode()); implementation.update(Path(__file__).with_name(name).read_bytes())
@@ -205,16 +205,28 @@ class MaterialManager:
         phase, message = _STAGES[stage]
         # Provider text is never forwarded; a provider may only report a count
         # of finished items and the server words it.
-        if stage == "designs" and type(done) is int and type(of) is int and 0 < of and 0 <= done <= of:
-            message = "已完成 %d / %d 个素材。" % (done, of)
         previous = job.get("progress", {})
         now = self.clock()
+        source = source_id if source_id is not None else previous.get("source_id")
+        same_stage = previous.get("stage_code") == stage and previous.get("source_id") == source
+        # Keep generation counts as data. They describe this source's completed
+        # attempts (including failed ones), never the provider's internal time.
+        counts = {}
+        if stage == "designs" and type(done) is int and type(of) is int and 0 < of and 0 <= done <= of:
+            if same_stage and previous.get("designs_total") == of:
+                done = max(done, previous.get("designs_completed", 0))
+            counts = {"designs_completed": done, "designs_total": of}
+            message = "已处理 %d / %d 个素材。" % (done, of)
+        elif same_stage or (stage in {"saving", "source_done", "source_error", "cancelling", "cancelled", "done", "error"}
+                            and source == previous.get("source_id")):
+            counts = {key: previous[key] for key in ("designs_completed", "designs_total") if key in previous}
         job["progress"] = {"stage_code": stage, "phase": phase, "message": message,
                            "current": previous.get("current", 0) if current is None else current,
                            "total": previous.get("total", len(job["sources"])) if total is None else total,
-                           "source_id": source_id if source_id is not None else previous.get("source_id"),
-                           "started_at": now, "updated_at": now,
-                           "indeterminate": stage in {"cleanup", "locating", "designs", "cancelling"}}
+                           "source_id": source,
+                           "started_at": previous.get("started_at", now) if same_stage else now, "updated_at": now,
+                           "indeterminate": stage in {"cleanup", "locating", "cancelling"}
+                           or (stage == "designs" and not counts), **counts}
         # A short, private stage history survives reconnects and is never model
         # chain-of-thought. It contains no credentials or upstream response text.
         history = job.setdefault("stage_history", [])
@@ -252,7 +264,7 @@ class MaterialManager:
                     continue
                 if job["status"] in _BUSY:
                     job.update(status="error", error="上次处理被中断，未自动重复调用。请检查已有结果后重新处理。",
-                               revision=job["revision"] + 1)
+                               revision=job["revision"] + 1, run_finished_at=self.clock())
                     self._progress(job, "error")
                     for source in job["sources"]:
                         if source["status"] == "processing":
@@ -369,6 +381,7 @@ class MaterialManager:
                            "progress": {"phase": "排队", "current": 0, "total": len(sources),
                                         "message": "等待素材处理"}, "created_at": now,
                            "settled_at": None, "expires_at": None, "sources": sources,
+                           "run_id": secrets.token_hex(16), "run_started_at": now, "run_finished_at": None,
                            "items": [], "warnings": [], "error": "", "cancel_requested": False,
                            "attempts": [], "upload_id": str(upload_request_id)}
                     self._progress(job, "queued")
@@ -506,13 +519,15 @@ class MaterialManager:
             if job["cancel_requested"]:
                 job["status"] = "cancelled"
                 job["revision"] += 1
+                job["run_finished_at"] = self.clock()
                 self._progress(job, "cancelled")
                 for source in job["sources"]:
                     if source["status"] == "queued":
                         source["status"] = "cancelled"
                 self._save(job, touch=True); return
             job["status"] = "processing"; job["revision"] += 1
-            job["run_started_at"] = self.clock()
+            # Accepted/queued time is part of this run. Do not restart its clock
+            # when execution begins, or when switching sources/stages/designs.
             self._progress(job, "preparing")
             self._save(job)
         try:
@@ -593,11 +608,13 @@ class MaterialManager:
                 self._check(job)
                 job["status"] = "ready" if any(s["status"] == "done" for s in job["sources"]) else "error"
                 job["error"] = "" if job["status"] == "ready" else "本批未能生成素材，请查看图片旁的原因后重试。"
+                job["run_finished_at"] = self.clock()
                 self._progress(job, "done" if job["status"] == "ready" else "error", current=len(sources), total=len(sources))
                 job["revision"] += 1; self._save(job, touch=True)
         except TaskCancelled:
             with self.lock:
                 job["status"] = "cancelled"
+                job["run_finished_at"] = self.clock()
                 self._progress(job, "cancelled")
                 for source in job["sources"]:
                     if source["status"] in {"queued", "processing"}:
@@ -609,6 +626,7 @@ class MaterialManager:
         except Exception as exc:
             with self.lock:
                 job["status"] = "error"; job["error"] = self._public_error(exc)
+                job["run_finished_at"] = self.clock()
                 self._progress(job, "error")
                 job["revision"] += 1; self._save(job, touch=True)
 
@@ -653,7 +671,9 @@ class MaterialManager:
             # the employee's explicit single/batch decision.
             if rectangular:
                 quality["auto_ready"] = False
-                quality["evidence"] = {"version": "material-rectangular-crop-1", "scope": "unverified_generated_content"}
+                quality["evidence"] = {"version": ("material-preserved-canvas-1" if getattr(result, "no_upscale", False)
+                                                   else "material-rectangular-crop-1"),
+                                       "scope": "unverified_generated_content"}
             notices = list(dict.fromkeys(warnings_common + list(getattr(layer, "warnings", ()) or ()) +
                                         list(quality.get("warnings", ()))))
             original_size = image.size
@@ -750,9 +770,12 @@ class MaterialManager:
             result["update_seq"] = job.get("update_seq", 0)
             result["can_undo_batch"] = bool(job.get("batch_undo") and
                                            job["batch_undo"]["revision"] == job["revision"] and job["status"] not in _BUSY)
-            end = self.clock() if job["status"] in _BUSY else job.get("settled_at") or self.clock()
+            end = (self.clock() if job["status"] in _BUSY else
+                   job.get("run_finished_at") or job.get("settled_at") or self.clock())
             result["progress"]["elapsed_seconds"] = max(0, int(end - job["progress"].get("started_at", job["created_at"])))
             result["progress"]["task_elapsed_seconds"] = max(0, int(end - job.get("run_started_at", job["created_at"])))
+            result["progress"].update(run_id=job.get("run_id", identifier),
+                                       run_started_at=job.get("run_started_at", job["created_at"]))
             result["sources"] = []
             for source in job["sources"]:
                 row = {key: deepcopy(value) for key, value in source.items() if key != "sha256"}
@@ -910,7 +933,8 @@ class MaterialManager:
                     raise ValueError("请先框出要补提取的范围。")
             self._runtime()
             job.pop("batch_undo", None)
-            job.update(status="queued", cancel_requested=False, error="", settled_at=None, expires_at=None)
+            job.update(status="queued", cancel_requested=False, error="", settled_at=None, expires_at=None,
+                       run_id=secrets.token_hex(16), run_started_at=self.clock(), run_finished_at=None)
             self._progress(job, "queued", current=0, total=1, source_id=source["id"])
             job["revision"] += 1; self._save(job)
             self.futures[identifier] = self.executor.submit(self._run, identifier, deepcopy(payload))

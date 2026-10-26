@@ -1,4 +1,4 @@
-﻿"""Per-design regeneration, local framing and bounded concurrency. No real API."""
+﻿"""Native design extraction, full canvas preservation and bounded concurrency. No real API."""
 from concurrent.futures import ThreadPoolExecutor
 import io
 import threading
@@ -9,8 +9,8 @@ import pytest
 
 from hsd_tool.material_ark import ArkCancelled, ArkLayer, ArkProviderError, ArkResult, _encode
 from hsd_tool.ai_usage import empty_usage
-from hsd_tool.material_design import (MaterialDesignProvider, pad_box, remove_plain_background,
-                                      trim_design)
+from hsd_tool.material_design import (MaterialDesignProvider, design_target_bounds,
+                                      pad_box, prepare_design_reference, preserve_design)
 from hsd_tool.material_locate import LocatedDesign
 
 KEY = "unit-only-material-key"
@@ -71,9 +71,9 @@ class FakeArk:
         self.calls = []
         self.lock = threading.Lock()
 
-    def clean(self, png, *, instructions="", bounds=None, check_cancel=None):
+    def clean(self, png, *, instructions="", bounds=None, check_cancel=None, _operation="clean"):
         with self.lock:
-            self.calls.append({"png": png, "instructions": instructions, "bounds": bounds})
+            self.calls.append({"png": png, "instructions": instructions, "bounds": bounds, "operation": _operation})
             index = len(self.calls)
         if self.barrier is not None and index >= self.barrier_from:
             self.barrier.wait(timeout=10)
@@ -87,6 +87,11 @@ class FakeArk:
         return ArkResult((ArkLayer(png, "设计 %d" % index, "", {"x": 0, "y": 0, "width": 10, "height": 10}, 1),),
                          {"input_images": 1, "generated_images": 1, "output_tokens": 10, "total_tokens": 10},
                          (), png, (400, 400), "req-%d" % index)
+
+    def extract_design(self, png, *, instructions="", bounds=None, check_cancel=None):
+        return self.clean(png, instructions=instructions, bounds=bounds,
+                          check_cancel=check_cancel, _operation="extract_design")
+
 
 
 def provider(ark, designs, *, workers=8):
@@ -108,66 +113,57 @@ def test_pad_box_rejects_impossible_ranges(box):
         pad_box(box, (400, 400))
 
 
-def test_white_card_becomes_real_transparency():
-    result, plain = remove_plain_background(Image.open(io.BytesIO(card())))
-    assert plain is True
-    assert result.getchannel("A").getextrema() == (0, 255)
-    assert result.getchannel("A").getpixel((2, 2)) == 0
-    assert result.getchannel("A").getpixel((200, 200)) == 255
+def assert_canvas_preserved(source, output):
+    with Image.open(io.BytesIO(output)) as actual:
+        assert actual.size == source.size
+        assert actual.convert("RGBA").tobytes() == source.convert("RGBA").tobytes()
 
 
-def test_white_area_inside_the_design_survives():
-    image = Image.new("RGB", (200, 200), (255, 255, 255))
+def test_preserve_keeps_soft_alpha_white_details_and_original_canvas():
+    image = Image.new("RGBA", (400, 400), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
-    draw.rectangle((20, 20, 180, 180), fill=(20, 20, 20))
-    draw.rectangle((80, 80, 120, 120), fill=(255, 255, 255))
-    framed, plain = remove_plain_background(image)
-    assert plain is True
-    assert framed.getchannel("A").getpixel((100, 100)) == 255
-    assert framed.getchannel("A").getpixel((5, 5)) == 0
+    draw.rectangle((100, 80, 300, 330), fill=(200, 40, 40, 255))
+    draw.rectangle((100, 120, 150, 170), fill=(255, 255, 255, 255))
+    image.putpixel((99, 120), (200, 40, 40, 37))
+    image.putpixel((301, 120), (200, 40, 40, 188))
+    png, notes = preserve_design(image)
+    assert_canvas_preserved(image, png)
+    assert any("完整画布" in note for note in notes)
+    assert not any("未返回透明区域" in note for note in notes)
 
 
-def test_trim_keeps_the_design_and_adds_one_uniform_margin():
-    png, notes = trim_design(Image.open(io.BytesIO(card())))
-    with Image.open(io.BytesIO(png)) as framed:
-        alpha = framed.getchannel("A")
-        assert framed.mode == "RGBA"
-        assert alpha.getextrema() == (0, 255)
-        left, top, right, bottom = alpha.getbbox()
-        assert (right - left, bottom - top) == (161, 221)
-        assert left == top and framed.width - right == left and framed.height - bottom == top
-    assert any("模型重新绘制了这张设计" in note for note in notes)
-    assert not any("可能被裁切" in note for note in notes)
-
-
-def test_trim_drops_neighbour_fragments_in_the_outer_band():
-    image = Image.new("RGB", (400, 400), (255, 255, 255))
+def test_preserve_does_not_delete_disconnected_edge_ornaments_letters_or_feet():
+    image = Image.new("RGBA", (400, 400), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
-    draw.rectangle((140, 120, 260, 280), fill=(30, 30, 30))
-    draw.rectangle((0, 0, 24, 24), fill=(10, 90, 220))          # leftover neighbour
-    png, notes = trim_design(image)
-    with Image.open(io.BytesIO(png)) as framed:
-        assert framed.width < 160 and framed.height < 200
-        pixels = np.asarray(framed.convert("RGB")).reshape(-1, 3)
-    assert not np.any((pixels[:, 2] > 200) & (pixels[:, 0] < 40))
-    assert any("边缘杂块" in note for note in notes)
+    draw.rectangle((140, 100, 260, 300), fill=(30, 30, 30, 255))
+    draw.ellipse((0, 0, 24, 24), fill=(10, 90, 220, 255))
+    draw.rectangle((130, 380, 145, 399), fill=(20, 100, 80, 255))
+    png, notes = preserve_design(image)
+    assert_canvas_preserved(image, png)
+    assert any("触及画布边缘" in note for note in notes)
+    assert not any("已去掉" in note for note in notes)
 
 
-def test_trim_warns_when_the_design_touches_the_frame():
-    image = Image.new("RGB", (400, 400), (255, 255, 255))
-    ImageDraw.Draw(image).rectangle((0, 0, 399, 200), fill=(30, 30, 30))
-    _, notes = trim_design(image)
-    assert any("可能被裁切" in note for note in notes)
+def test_preserve_opaque_background_is_warned_and_never_silently_removed():
+    image = Image.open(io.BytesIO(card()))
+    png, notes = preserve_design(image)
+    assert_canvas_preserved(image, png)
+    assert any("未返回透明区域" in note for note in notes)
+    with Image.open(io.BytesIO(png)) as actual:
+        assert actual.getchannel("A").getextrema() == (255, 255)
 
 
-def test_trim_warns_when_the_background_was_not_cleared():
-    _, notes = trim_design(Image.open(io.BytesIO(card(background=(238, 226, 214)))))
-    assert any("背景没有清理干净" in note for note in notes)
+def test_preserve_warns_on_small_content_without_cropping_or_scaling():
+    image = Image.new("RGBA", (400, 400), (0, 0, 0, 0))
+    ImageDraw.Draw(image).rectangle((150, 150, 180, 180), fill=(40, 60, 80, 255))
+    png, notes = preserve_design(image)
+    assert_canvas_preserved(image, png)
+    assert any("占比偏小" in note for note in notes)
 
 
-def test_trim_refuses_an_empty_result():
+def test_preserve_rejects_empty_transparent_output():
     with pytest.raises(ArkProviderError):
-        trim_design(Image.new("RGB", (200, 200), (255, 255, 255)))
+        preserve_design(Image.new("RGBA", (200, 200), (255, 0, 0, 0)))
 
 
 # -- provider --------------------------------------------------------------
@@ -195,14 +191,45 @@ def test_extract_regenerates_each_design_and_reports_progress():
     assert [row["provider"] for row in rows.values()].count("deepseek") == 1
     assert all(row["state"] == "returned" for row in rows.values())
     assert ("designs", "", {"current": 2, "total": 2}) in progress
-    assert any("模型重新绘制" in note for layer in result.layers for note in layer.warnings)
+    assert any("模型提取可能改变" in note for layer in result.layers for note in layer.warnings)
+    assert [c["operation"] for c in ark.calls] == ["clean", "extract_design", "extract_design"]
 
 
-def test_extract_uses_the_padded_range_not_the_bare_box():
+def test_extract_shares_whole_source_context_and_only_hints_the_padded_range():
     ark = FakeArk()
-    provider(ark, [design((40, 40, 180, 180))]).extract(source_image())
-    with Image.open(io.BytesIO(ark.calls[1]["png"])) as crop:
-        assert crop.size == (180 - 40 + 2 * 17, 180 - 40 + 2 * 17)
+    original = source_image()
+    provider(ark, [design((40, 40, 180, 180)), design((220, 220, 360, 360))]).extract(original)
+    assert ark.calls[1]["png"] is ark.calls[2]["png"], "encode the whole reference once per source"
+    with Image.open(io.BytesIO(ark.calls[1]["png"])) as reference:
+        assert reference.size == (400, 400)
+        assert_canvas_preserved(Image.open(io.BytesIO(original)), ark.calls[1]["png"])
+    assert ark.calls[1]["bounds"] == {"x": 23, "y": 23, "width": 174, "height": 174}
+
+
+def test_reference_limits_pixels_without_cutting_the_full_image_or_changing_ratio():
+    source = Image.new("RGBA", (4000, 2000), (80, 20, 10, 127))
+    source.putpixel((0, 0), (200, 0, 0, 255))
+    png, size = prepare_design_reference(source)
+    assert size[0] * size[1] <= 4_000_000
+    assert abs(size[0] / size[1] / 2 - 1) < .002
+    with Image.open(io.BytesIO(png)) as reference:
+        assert reference.size == size
+        assert reference.getpixel((size[0] - 1, size[1] - 1)) == (80, 20, 10, 127)
+    target = design_target_bounds((0, 0, 4000, 2000), source.size, size)
+    assert target == {"x": 0, "y": 0, "width": size[0], "height": size[1]}
+
+
+def test_provider_keeps_native_layer_pixels_and_canvas_including_separate_edge_details():
+    native = Image.new("RGBA", (320, 640), (0, 0, 0, 0))
+    drawing = ImageDraw.Draw(native)
+    drawing.rectangle((120, 180, 190, 430), fill=(255, 255, 255, 255))
+    drawing.ellipse((0, 0, 12, 12), fill=(10, 90, 220, 255))
+    drawing.rectangle((130, 615, 145, 639), fill=(20, 100, 80, 255))
+    native.putpixel((120, 179), (200, 40, 40, 37))
+    ark = FakeArk(payloads=[card(), _encode(native)])
+    result = provider(ark, [design((40, 40, 180, 180))]).extract(source_image())
+    assert_canvas_preserved(native, result.layers[0].png)
+    assert any("触及画布边缘" in note for note in result.layers[0].warnings)
 
 
 def test_extract_runs_designs_at_the_same_time():
@@ -241,7 +268,7 @@ def test_extract_refuses_an_empty_location():
     assert error.value.code == "invalid_decision"
 
 
-def test_edit_regenerates_and_frames_a_single_design():
+def test_edit_keeps_one_clean_request_and_preserves_full_returned_canvas():
     ark = FakeArk()
     result = provider(ark, []).edit(source_image(), instructions="把红色改成蓝色",
                                     bounds={"x": 10, "y": 10, "width": 50, "height": 50})
@@ -249,9 +276,53 @@ def test_edit_regenerates_and_frames_a_single_design():
     assert ark.calls[0]["bounds"] == {"x": 10, "y": 10, "width": 50, "height": 50}
     assert "把红色改成蓝色" in ark.calls[0]["instructions"]
     with Image.open(io.BytesIO(result.layers[0].png)) as framed:
-        assert framed.getchannel("A").getextrema() == (0, 255)
+        assert framed.getchannel("A").getextrema() == (255, 255)
+        assert framed.size == (400, 400)
+    assert any("未返回透明区域" in note for note in result.layers[0].warnings)
 
 
 def test_provider_caps_the_worker_pool():
     assert provider(FakeArk(), []).workers == 8
     assert MaterialDesignProvider(CONFIG, None, ark=FakeArk(), locator=FakeLocator([]), workers=64).workers == 8
+
+
+def eight_designs():
+    return [design((10 + 90 * (i % 4), 10 + 180 * (i // 4),
+                    80 + 90 * (i % 4), 150 + 180 * (i // 4))) for i in range(8)]
+
+
+def test_eight_concurrent_successes_and_failures_retain_exact_usage_without_retry():
+    ark = FakeArk(fail={4, 8}, barrier=threading.Barrier(8))
+    attempts = []
+    result = provider(ark, eight_designs()).extract(source_image(), on_attempt=attempts.append)
+    assert len(ark.calls) == 9 and len(result.layers) == 6
+    assert result.provider_usage["seedream"] == {
+        "input_images": 9, "generated_images": 7, "output_tokens": 70, "total_tokens": 70}
+    final = {row["id"]: row for row in attempts}
+    assert len(final) == 10  # Whole-sheet + locator + 8 native design requests.
+    assert sum(row["state"] == "failed" for row in final.values()) == 2
+    assert sum(row["usage"].get("input_images", 0) for row in final.values()) == 9
+
+
+def test_cancelled_parallel_request_drains_and_retains_all_paid_results():
+    cancelled = threading.Event()
+
+    class CancelOne(FakeArk):
+        def extract_design(self, png, **kwargs):
+            result = super().extract_design(png, **kwargs)
+            with self.lock:
+                first = not cancelled.is_set()
+                cancelled.set()
+            if first:
+                raise ArkCancelled(usage=result.usage, request_id=result.request_id)
+            return result
+
+    ark = CancelOne(barrier=threading.Barrier(8))
+    with pytest.raises(ArkCancelled) as error:
+        provider(ark, eight_designs()).extract(source_image(), check_cancel=cancelled.is_set)
+    assert len(ark.calls) == 9
+    assert error.value.provider_usage["seedream"] == {
+        "input_images": 9, "generated_images": 9, "output_tokens": 90, "total_tokens": 90}
+    final = {row["id"]: row for row in error.value.attempts}
+    assert sum(row["usage"].get("input_images", 0) for row in final.values()) == 9
+    assert sum(row["state"] == "cancelled" for row in final.values()) == 1

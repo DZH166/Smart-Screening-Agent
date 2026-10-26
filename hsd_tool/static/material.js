@@ -4,7 +4,7 @@
   const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const activeStatuses = new Set(["queued", "processing", "cancelling"]);
   const completed = item => ["ready", "confirmed"].includes(item.status);
-  const state = {workspace:"numbering",config:null,job:null,files:[],objectUrls:[],busy:false,uploading:false,uncertain:false,retryUpload:false,stopRequested:false,uploadId:null,xhr:null,timer:null,polling:false,authLost:false,filter:"needs_review",newBatch:false,dialog:null,box:null,startPoint:null,sourcesSignature:"",items:new Map(),scroll:{numbering:0,material:0},epoch:0,selected:new Set(),stream:null,streamJob:null,streamErrors:0,streamDisabled:false,clockTimer:null,clockAnchor:null,renewTimer:null};
+  const state = {workspace:"numbering",config:null,job:null,files:[],objectUrls:[],busy:false,uploading:false,uncertain:false,retryUpload:false,stopRequested:false,uploadId:null,xhr:null,timer:null,polling:false,authLost:false,filter:"needs_review",newBatch:false,dialog:null,box:null,startPoint:null,sourcesSignature:"",items:new Map(),scroll:{numbering:0,material:0},epoch:0,selected:new Set(),stream:null,streamJob:null,streamErrors:0,streamDisabled:false,clockTimer:null,clockAnchor:null,progressCounts:null,renewTimer:null};
   const metrics = {cards_created:0,cards_updated:0,polls:0};
   function count(name) {metrics[name]++;document.documentElement.dataset.materialUiMetrics=JSON.stringify(metrics);}
   function stored(key) {try{return sessionStorage.getItem(key);}catch(_){return null;}}
@@ -69,13 +69,13 @@
     releaseUrls();$("material-selected-files").innerHTML=state.files.map((file,index)=>{const url=URL.createObjectURL(file);state.objectUrls.push(url);return `<li class="material-selected-file"><img src="${esc(url)}" alt="" decoding="async"><span>${esc(file.name)}<small>${formatBytes(file.size)}</small></span><button type="button" data-remove-file="${index}" aria-label="移除 ${esc(file.name)}">×</button></li>`;}).join("");
   }
   function formatBytes(bytes) {if(bytes<1024)return `${bytes} B`;if(bytes<1024*1024)return `${(bytes/1024).toFixed(1)} KiB`;return `${(bytes/1024/1024).toFixed(1)} MiB`;}
-  function showUpload() {$("material-progress").classList.remove("hidden");$("material-upload-check").classList.toggle("hidden",!state.uncertain);$("material-stop").classList.remove("hidden");$("material-progress-title").textContent=state.uncertain?"正在核对上传结果":"正在上传图片";$("material-progress-message").textContent=state.uncertain?"连接中断，先确认服务器是否收到，避免重复处理。":"上传完成后自动开始提取。";$("material-progress-fill").classList.toggle("indeterminate",true);$("material-progress-detail").textContent="";}
+  function showUpload() {$("material-progress").classList.remove("hidden");$("material-upload-check").classList.toggle("hidden",!state.uncertain);$("material-stop").classList.remove("hidden");$("material-progress-title").textContent=state.uncertain?"正在核对上传结果":"正在上传图片";$("material-progress-message").textContent=state.uncertain?"连接中断，先确认服务器是否收到，避免重复处理。":"上传完成后自动开始提取。";$("material-progress-meter").classList.remove("hidden");$("material-progress-label").textContent="上传进度";$("material-progress-track").setAttribute("aria-label","上传进度");$("material-progress-percent").textContent="";$("material-progress-fill").classList.toggle("indeterminate",true);$("material-progress-track").removeAttribute("aria-valuenow");$("material-progress-detail").textContent="";}
   function clearUpload() {state.uploading=false;state.uncertain=false;state.retryUpload=false;state.stopRequested=false;state.uploadId=null;state.xhr=null;remember("hsd-material-upload",null);$("material-upload-check").classList.add("hidden");}
   function upload(files) {
     return new Promise((resolve,reject)=>{
       const form=new FormData();files.forEach(file=>form.append("files",file));
       const xhr=new XMLHttpRequest();state.xhr=xhr;xhr.open("POST","/api/material/jobs");xhr.timeout=0;xhr.setRequestHeader("X-HSD-Token",window.HSD_TOKEN||"");xhr.setRequestHeader("X-HSD-Upload-ID",state.uploadId);
-      xhr.upload.addEventListener("progress",event=>{if(!state.uploading)return;const known=event.lengthComputable&&event.total>0;$("material-progress-fill").classList.toggle("indeterminate",!known);if(known){const percent=Math.min(100,Math.round(event.loaded/event.total*100));$("material-progress-fill").style.width=`${percent}%`;$("material-progress-detail").textContent=`上传 ${percent}% · ${formatBytes(event.loaded)} / ${formatBytes(event.total)}`;if(percent===100)$("material-progress-message").textContent="上传完成，正在检查图片，请稍候。";}});
+      xhr.upload.addEventListener("progress",event=>{if(!state.uploading)return;const known=event.lengthComputable&&event.total>0;$("material-progress-fill").classList.toggle("indeterminate",!known);if(known){const percent=Math.min(100,Math.round(event.loaded/event.total*100));$("material-progress-fill").style.width=`${percent}%`;$("material-progress-percent").textContent=`${percent}%`;$("material-progress-track").setAttribute("aria-valuenow",String(percent));$("material-progress-detail").textContent=`上传 ${formatBytes(event.loaded)} / ${formatBytes(event.total)}`;if(percent===100)$("material-progress-message").textContent="上传完成，正在检查图片，请稍候。";}});
       xhr.addEventListener("load",()=>{let data;try{data=JSON.parse(xhr.responseText);}catch(_){reject(new Error("上传结果未确认。"));return;}if(xhr.status<200||xhr.status>=300){const error=new Error(data.error||"上传未完成。");error.status=xhr.status;reject(error);return;}if(!data.id){reject(new Error("上传结果未确认。"));return;}resolve(data);});
       ["error","abort","timeout"].forEach(name=>xhr.addEventListener(name,()=>reject(new Error("上传连接中断，正在核对结果。"))));xhr.send(form);
     });
@@ -104,10 +104,17 @@
     if(typeof window.EventSource==="function"&&!state.streamDisabled){openStream();return;}
     state.timer=setTimeout(poll,1500);
   }
+  function duration(seconds) {const value=Math.max(0,Math.floor(Number(seconds)||0)),s=value%60,m=Math.floor(value/60)%60,h=Math.floor(value/3600);return h?`${h} 小时 ${m} 分 ${s} 秒`:m?`${m} 分 ${s} 秒`:`${s} 秒`;}
+  function elapsedSeconds() {if(!activeStatuses.has(state.job?.status))return Math.max(0,Number(state.job?.progress?.task_elapsed_seconds)||0);return Math.max(0,(state.clockAnchor?.elapsed||0)+((window.performance?.now()||0)-(state.clockAnchor?.received||0))/1000);}
+  function progressDetail() {
+    const p=state.job?.progress||{},total=Number(p.total)||0,current=Number(p.current)||0;
+    const context=state.job?.status==="queued"&&p.queue_position?`排队第 ${p.queue_position} 位`:total>1?`已处理 ${Math.min(current,total)} / ${total} 张原图`:"";
+    return `${context?context+" · ":""}本批累计用时 ${duration(elapsedSeconds())}`;
+  }
   function updateClock() {
-    clearTimeout(state.clockTimer);const p=state.job?.progress||{};
+    clearTimeout(state.clockTimer);
     if(!activeStatuses.has(state.job?.status)||document.hidden||state.workspace!=="material")return;
-    if(Number(p.started_at)>0){const elapsed=Math.max(0,Math.floor((state.clockAnchor?.elapsed||0)+((window.performance?.now()||0)-(state.clockAnchor?.received||0))/1000));$("material-progress-detail").textContent=(state.job.status==="queued"&&p.queue_position?`当前排在第 ${p.queue_position} 位`:`已完成 ${Number(p.current)||0} / ${Number(p.total)||0} 张原图`)+` · 本阶段已用 ${elapsed} 秒`;state.clockTimer=setTimeout(updateClock,1000);}
+    $("material-progress-detail").textContent=progressDetail();state.clockTimer=setTimeout(updateClock,1000);
   }
   function openStream() {
     const id=state.job.id,epoch=state.epoch;if(state.stream&&state.streamJob===id)return;closeStream();
@@ -119,6 +126,7 @@
     const fallback=()=>{if(!current())return;closeStream();state.streamDisabled=true;$("material-stream-state").textContent="实时连接暂不可用，正在自动刷新进度";clearTimeout(state.timer);state.timer=setTimeout(poll,0);};
     stream.addEventListener("unavailable",fallback);
     stream.onerror=()=>{if(!current())return;state.streamErrors++;$("material-stream-state").textContent="正在重新连接进度…";if(stream.readyState===2||state.streamErrors>=2)fallback();};
+    updateClock();
   }
   async function poll() {if(state.polling||state.authLost||!state.job)return;const epoch=state.epoch;state.polling=true;count("polls");try{await loadJob();}catch(error){if(epoch===state.epoch&&!state.authLost)notify("暂时无法获取进度，请检查网络；系统不会重复提交图片。",true);}finally{if(epoch===state.epoch){state.polling=false;controls();schedule();}}}
   function setJob(job) {
@@ -126,8 +134,12 @@
     if(state.job?.id===job.id&&(Number(job.revision)<Number(state.job.revision)||(job.revision===state.job.revision&&Number(job.update_seq)<Number(state.job.update_seq))))return;
     const changed=state.job?.id!==job.id,finished=activeStatuses.has(state.job?.status)&&!activeStatuses.has(job.status);state.job=job;remember("hsd-material-job",job.id);
     if(changed){closeStream();state.streamDisabled=false;state.streamErrors=0;state.selected.clear();state.items.clear();$("material-grid").replaceChildren();state.sourcesSignature="";state.filterTouched=false;}
-    const clockKey=JSON.stringify([job.id,job.progress?.stage_code,job.progress?.started_at,job.progress?.source_id]);
-    if(state.clockAnchor?.key!==clockKey)state.clockAnchor={key:clockKey,elapsed:Math.max(0,Number(job.progress?.elapsed_seconds)||0),received:window.performance?.now()||0};
+    const clockKey=JSON.stringify([job.id,job.progress?.run_id||job.progress?.run_started_at||job.id]),now=window.performance?.now()||0,elapsed=Math.max(0,Number(job.progress?.task_elapsed_seconds)||0);
+    if(state.clockAnchor?.key!==clockKey)state.clockAnchor={key:clockKey,elapsed,received:now};
+    else if(elapsed>state.clockAnchor.elapsed+(now-state.clockAnchor.received)/1000){state.clockAnchor.elapsed=elapsed;state.clockAnchor.received=now;}
+    const progressKey=JSON.stringify([clockKey,job.progress?.source_id]),done=job.progress?.designs_completed,total=job.progress?.designs_total;
+    if(state.progressCounts?.key!==progressKey)state.progressCounts={key:progressKey,done:0,total:0};
+    if(Number.isInteger(done)&&Number.isInteger(total)&&total>0&&done>=0&&done<=total){if(state.progressCounts.total!==total)state.progressCounts={key:progressKey,done,total};else state.progressCounts.done=Math.max(state.progressCounts.done,done);}
     if(changed||(finished&&!state.filterTouched))state.filter=job.items.some(item=>item.status==="needs_review")||activeStatuses.has(job.status)?"needs_review":"all";
     render();schedule();
   }
@@ -135,26 +147,31 @@
     const job=state.job;if(!job)return;const running=activeStatuses.has(job.status);
     $("material-upload-form").classList.add("hidden");$("material-results").classList.remove("hidden");$("material-new").classList.remove("hidden");$("material-progress").classList.toggle("hidden",!running);$("material-upload-check").classList.add("hidden");
     if(running){
-      const progress=job.progress||{},total=Number(progress.total)||0,current=Number(progress.current)||0,queued=job.status==="queued";
+      const progress=job.progress||{},total=Number(progress.total)||0,current=Number(progress.current)||0,queued=job.status==="queued",phase=String(progress.stage_code||progress.phase||""),counts=state.progressCounts||{};
       $("material-progress-title").textContent=job.status==="cancelling"?"正在停止本批":queued?"排队等待":progress.phase||"正在处理素材";
       $("material-progress-message").textContent=progress.message||"图片处理中，完成的结果会陆续显示。";
-      // Count represents completed source images, never the upstream model's percentage.
-      $("material-progress-fill").classList.toggle("indeterminate",!total||queued||current===0||progress.indeterminate===true);
-      if(total&&!queued&&current>0)$("material-progress-fill").style.width=`${Math.min(100,current/total*100)}%`;
-      const elapsed=Number(progress.elapsed_seconds)||0;
-      $("material-progress-detail").textContent=(queued&&progress.queue_position?`当前排在第 ${progress.queue_position} 位`:total?`已完成 ${current} / ${total} 张原图`:"正在等待处理")+(elapsed?` · 本阶段已用 ${Math.floor(elapsed)} 秒`:"");
-      const phase=String(progress.stage_code||progress.phase||"");const step=/clean|清理/.test(phase)?0:/locat|detect|识别/.test(phase)?1:/crop|sav|裁剪|保存/.test(phase)?2:-1;
-      $("material-stage-list").innerHTML=["清理整图","识别设计","裁剪保存"].map((name,index)=>`<li${step===index?' class="current" aria-current="step"':""}>${index+1}. ${name}</li>`).join("");
+      // Only settled generation tasks have a known denominator. This is the
+      // current source's generation count, never a model-internal or batch ETA.
+      const known=counts.total>0&&!queued&&/designs|saving|source_done|cancelling/.test(phase),percent=known?Math.floor(counts.done/counts.total*100):0;
+      $("material-progress-meter").classList.toggle("hidden",!known);$("material-progress-fill").classList.remove("indeterminate");
+      const sourceIndex=job.sources.findIndex(source=>source.id===progress.source_id);
+      $("material-progress-label").textContent=(total>1?`第 ${Math.min(sourceIndex>=0?sourceIndex+1:current+1,total)} / ${total} 张原图 · `:"")+"本张素材生成进度";
+      $("material-progress-percent").textContent=known?`${percent}%`:"";$("material-progress-fill").style.width=known?`${percent}%`:"0%";
+      $("material-progress-track").setAttribute("aria-label",$("material-progress-label").textContent);
+      if(known){$("material-progress-track").setAttribute("aria-valuenow",String(percent));$("material-progress-message").textContent=`已处理 ${counts.done} / ${counts.total} 个素材${phase==="saving"?"，正在保存结果。":"。"}`;}else $("material-progress-track").removeAttribute("aria-valuenow");
+      $("material-progress-detail").textContent=progressDetail();
+      const step=/clean|清理/.test(phase)?0:/locat|detect|识别/.test(phase)?1:/design|crop|sav|生成|保存/.test(phase)?2:-1;
+      const steps=["清理整图","识别设计","生成并保存"].map((name,index)=>`<li${step===index?' class="current" aria-current="step"':""}>${index+1}. ${name}</li>`).join("");if($("material-stage-list").innerHTML!==steps)$("material-stage-list").innerHTML=steps;
     }
     if(job.status==="error")notify(job.error||"本批未能处理，请查看原图下的问题提示。",true);else if(job.status==="cancelled")notify("本批已停止。已经完成的素材仍可查看和下载。");
     const stats=job.stats||{},pending=job.items.filter(item=>item.status==="needs_review").length,ready=job.items.filter(completed).length,skipped=job.items.filter(item=>item.status==="skipped").length;
-    $("material-summary").textContent=`${job.sources.length} 张原图 · ${job.items.length} 个素材 · ${pending} 个待确认 · ${ready} 个可下载${skipped?` · ${skipped} 个已跳过`:""}${stats.failed?` · ${stats.failed} 张处理失败`:""}`;
+    $("material-summary").textContent=`${job.sources.length} 张原图 · ${job.items.length} 个素材 · ${pending} 个待确认 · ${ready} 个可下载${skipped?` · ${skipped} 个已跳过`:""}${stats.failed?` · ${stats.failed} 张处理失败`:""}${!running?` · 本批累计用时 ${duration(elapsedSeconds())}`:""}`;
     $("material-result-title").textContent=running?"正在生成本批素材":pending?`还有 ${pending} 个素材需要确认`:"本批提取结果";$("material-review-count").textContent=String(pending);
     document.querySelectorAll("[data-material-filter]").forEach(button=>{const active=button.dataset.materialFilter===state.filter;button.classList.toggle("active",active);button.setAttribute("aria-pressed",String(active));});
     const shared=sharedWarnings();$("material-shared-warning").textContent=shared.join("；");$("material-shared-warning").classList.toggle("hidden",!shared.length);
     renderCards();renderSources();
     const warnings=[...(job.warnings||[]),...(job.sources||[]).filter(source=>source.error).map(source=>`${source.name}：${source.error}`)];
-    $("material-batch-info").innerHTML=`<p>可下载 ${ready} 个；待确认 ${pending} 个；已跳过 ${skipped} 个。只导出已完成项。</p><p>长边目标 4096 像素，不代表恢复了原本看不清的细节。人工确认后的问题提示仍保留。</p>${warnings.map(warning=>`<p>${esc(warning)}</p>`).join("")}<p>云端副本保留三天，请将结果下载到自己的电脑。</p>`;
+    $("material-batch-info").innerHTML=`<p>可下载 ${ready} 个；待确认 ${pending} 个；已跳过 ${skipped} 个。只导出已完成项。</p><p>按生成图片的完整画布保存；尺寸不代表恢复了原本看不清的细节。人工确认后的问题提示仍保留。</p>${warnings.map(warning=>`<p>${esc(warning)}</p>`).join("")}<p>云端副本保留三天，请将结果下载到自己的电脑。</p>`;
     controls();
   }
   function visibleItem(item) {return state.filter==="all"||(state.filter==="completed"&&completed(item))||state.filter===item.status;}
@@ -222,7 +239,7 @@
     const dialog={...state.dialog};const source=state.job.sources.find(value=>value.id===dialog.sourceId);const unknown=source?.submission_unknown===true;if(unknown&&!$("material-unknown-ack").checked){$("material-dialog-message").textContent="请先确认重新提交可能重复计费，再继续。";$("material-dialog-message").classList.remove("hidden");return;}
     const box={...state.box};const instruction=[$("material-correction-kind").value,$("material-correction-note").value.trim()].filter(Boolean).join("；");const success=await mutate("redo",{source_id:dialog.sourceId,...(dialog.itemId?{item_id:dialog.itemId}:{}),box,instruction,...(unknown?{acknowledge_unknown:true}:{})});if(success)$("material-detail-dialog").close();else{$("material-dialog-message").textContent=$("material-notice").textContent;$("material-dialog-message").classList.remove("hidden");}
   }
-  function reset() {if(busy()||state.authLost)return;state.epoch++;closeStream();clearTimeout(state.timer);state.selected.clear();state.polling=false;state.job=null;state.items.clear();state.sourcesSignature="";state.newBatch=true;state.files=[];releaseUrls();remember("hsd-material-job",null);remember("hsd-material-new","1");$("material-files").value="";$("material-selected-files").replaceChildren();$("material-grid").replaceChildren();$("material-upload-form").classList.remove("hidden");$("material-results").classList.add("hidden");$("material-progress").classList.add("hidden");$("material-new").classList.add("hidden");notify("");controls();$("material-files").focus();}
+  function reset() {if(busy()||state.authLost)return;state.epoch++;closeStream();clearTimeout(state.timer);state.selected.clear();state.polling=false;state.job=null;state.clockAnchor=null;state.progressCounts=null;state.items.clear();state.sourcesSignature="";state.newBatch=true;state.files=[];releaseUrls();remember("hsd-material-job",null);remember("hsd-material-new","1");$("material-files").value="";$("material-selected-files").replaceChildren();$("material-grid").replaceChildren();$("material-upload-form").classList.remove("hidden");$("material-results").classList.add("hidden");$("material-progress").classList.add("hidden");$("material-new").classList.add("hidden");notify("");controls();$("material-files").focus();}
   function boot() {
     document.querySelectorAll("[data-workspace]").forEach(link=>link.addEventListener("click",event=>{event.preventDefault();workspace(link.dataset.workspace,true);}));window.addEventListener("hashchange",()=>workspace(location.hash.slice(1)));
     $("material-files").addEventListener("change",event=>selectFiles(event.target.files));$("material-upload-form").addEventListener("submit",start);$("material-selected-files").addEventListener("click",event=>{const button=event.target.closest("[data-remove-file]");if(!button||busy())return;state.files.splice(Number(button.dataset.removeFile),1);renderSelected();controls();});

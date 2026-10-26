@@ -151,6 +151,88 @@ def test_layers_are_sorted_and_base_is_not_a_design():
     assert [value.z_index for value in output.layers] == [1, 2]
 
 
+def test_native_design_is_one_submission_and_keeps_complete_layer_canvas_and_soft_alpha():
+    image = Image.new("RGBA", (320, 640), (0, 0, 0, 0))
+    image.putpixel((0, 0), (255, 255, 255, 255))  # Legitimate isolated ornament.
+    image.putpixel((319, 639), (30, 40, 50, 255))  # Detached foot/letter at edge.
+    image.putpixel((160, 300), (200, 100, 50, 37))
+    png = ark._encode(image)
+    data = result_data()
+    data["data"][1] = item(1, size=image.size)
+    data["data"][1]["b64_json"] = base64.b64encode(png).decode()
+    transport = Recorder(data)
+    result = provider(transport).extract_design(picture(), instructions="保留完整裙摆和鞋子")
+    assert len(transport.calls) == 1 and len(result.layers) == 1
+    payload = json.loads(transport.calls[0][0].data)
+    assert payload["layer_decomposition"] is True and payload["size"] == "2K"
+    assert "一个前景图层" in payload["prompt"] and "不画白底或棋盘格" in payload["prompt"]
+    assert "保留完整裙摆和鞋子" in payload["prompt"]
+    with Image.open(io.BytesIO(result.layers[0].png)) as actual:
+        assert actual.size == image.size and actual.tobytes() == image.tobytes()
+    assert result.usage == data["usage"]
+
+
+def test_native_design_rejects_multiple_layers_without_selecting_or_resubmitting():
+    data = result_data()
+    data["data"].append(item(2))
+    data["usage"]["generated_images"] = 3
+    transport = Recorder(data)
+    with pytest.raises(ark.ArkProviderError) as error:
+        provider(transport).extract_design(picture())
+    assert error.value.code == "ambiguous_design"
+    assert error.value.settled and not error.value.safe_retry and len(transport.calls) == 1
+    assert error.value.usage["generated_images"] == 3
+
+
+@pytest.mark.parametrize("png,code", [(picture(alpha=True, empty=True), "empty_layer"),
+                                     (picture(alpha=False), "missing_alpha")])
+def test_native_design_rejects_invalid_alpha_without_paid_fallback(png, code):
+    data = result_data();data["data"][1]["b64_json"] = base64.b64encode(png).decode()
+    transport = Recorder(data)
+    with pytest.raises(ark.ArkProviderError) as error:
+        provider(transport).extract_design(picture())
+    assert error.value.code == code and len(transport.calls) == 1
+    assert error.value.usage == data["usage"] and not error.value.safe_retry
+
+
+def test_native_design_warns_on_fully_opaque_alpha_instead_of_deleting_pixels():
+    data = result_data()
+    rgba = Image.new("RGBA", (512, 512), (250, 250, 250, 255))
+    data["data"][1]["b64_json"] = base64.b64encode(ark._encode(rgba)).decode()
+    result = provider(Recorder(data)).extract_design(picture())
+    with Image.open(io.BytesIO(result.layers[0].png)) as actual:
+        assert actual.tobytes() == rgba.tobytes()
+    assert any("没有透明区域" in warning for warning in result.layers[0].warnings)
+
+
+def test_native_target_is_a_prompt_hint_and_maps_the_whole_image_upscale():
+    transport = Recorder()
+    result = provider(transport).extract_design(
+        picture((256, 256)), bounds={"x": 10, "y": 20, "width": 100, "height": 150})
+    payload = json.loads(transport.calls[0][0].data)
+    assert "<bbox>20 40 220 340</bbox>" in payload["prompt"]
+    assert "延伸到框外时仍整体保留" in payload["prompt"]
+    with Image.open(io.BytesIO(base64.b64decode(payload["image"].split(",", 1)[1]))) as reference:
+        assert reference.size == (512, 512), "the hint must not crop the reference"
+    with Image.open(io.BytesIO(result.layers[0].png)) as actual:
+        assert actual.size == (512, 512), "the hint must not crop the returned layer"
+
+
+@pytest.mark.parametrize("bounds", [
+    {}, {"x": 0}, {"x": -1, "y": 0, "width": 10, "height": 10},
+    {"x": 0, "y": True, "width": 10, "height": 10},
+    {"x": 0, "y": 0, "width": 0, "height": 10},
+    {"x": 500, "y": 0, "width": 20, "height": 10},
+    {"x": 0, "y": 0, "width": 20.0, "height": 10},
+    {"x": 0, "y": 0, "width": 20, "height": 10, "extra": 1},
+])
+def test_native_target_rejects_invalid_pixels_before_any_paid_submission(bounds):
+    transport = Recorder()
+    with pytest.raises(ark.ArkProviderError) as error:
+        provider(transport).extract_design(picture(), bounds=bounds)
+    assert error.value.code == "invalid_bounds" and not transport.calls
+
+
 @pytest.mark.parametrize("change,code", [
     (lambda d: d["data"].pop(), "no_designs"),
     (lambda d: d["data"][1].update(z_index=0), "invalid_response"),
