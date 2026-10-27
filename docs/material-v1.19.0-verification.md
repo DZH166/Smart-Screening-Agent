@@ -23,4 +23,12 @@
 
 本轮未调用付费模型，未使用真实业务图或10.12批次。提示词、单次调用和流程正确不证明真实画质提高、文字不变或生产合格；实际素材效果仍由员工自测。对照截图是合成测试，不代表真实Seedream精修效果。
 
-Linux实际归档验证和生产切换尚待完成；获得回执后补记，不提前宣称已上线。上线继续按当前实际实现签名保护新任务及下载，只操作本项目服务，保留原站和凭据。
+### Linux 归档验证与生产切换（2026-10-27 20:34 +0800，已上线）
+
+- 归档提交 `429cc20`（`e69f3e2` v1.19.0 + 一条过期断言修正），已推送到 `origin/main`。发布物由 `git archive` 生成，先上传后解包，未在生产目录构建。
+- 服务器 `/opt/hsd-agent/releases/429cc20172fe5f8ea58046a2ef33276da5c7c4ee`，`/opt/hsd-agent/current` 已指向该版本；`hsd-agent.service` 重启后 `ActiveState=active`、`NRestarts=0`，Gunicorn 26.2.0 单 worker 正常监听 `127.0.0.1:8830`。
+- 公开入口 `https://39.106.45.116:8443/` 返回 200；`/api/health` 仍要求员工访问码，本次没有新增临时生产访问码，也没有改动现有口令或凭据。
+- 线上文件核对：`__version__ = "1.19.0"`，`material_service.py` 含精修入口与 `"status": "generated"`，`static/material.js` 含直接下载逻辑。
+- 部署前检查：8 份 Node 前端脚本全部通过（素材员工 UI 69 项 0 失败）；Python 全量 **2076 passed、76 skipped**，另有 1 项 `test_batch_progress_api` 的过期断言（批量撤销后期望 `needs_review`，v1.19.0 起应为可下载未验证的 `generated`）已修正为断言 `downloadable == 2` 且状态为 `generated`，随本版一起上线。
+- 版本与实现签名变化，v1.18.5 及之前的任务不会恢复（既有规则）；升级前若有员工在处理，需要提醒其重做。数据卷使用 6.0G、剩余 5.6G，本次未清理任何任务目录。
+
