@@ -210,7 +210,8 @@ class MaterialManager:
         self._write(self._directory(job["id"]) / "manifest.json",
                     _canonical({"payload": payload, "hmac_sha256": signature}))
 
-    def _progress(self, job, stage, *, current=None, total=None, source_id=None, done=None, of=None):
+    def _progress(self, job, stage, *, current=None, total=None, source_id=None, done=None, of=None,
+                  item_id=None):
         """Only real work boundaries advance the stream; waiting is not percent."""
         phase, message = _STAGES[stage]
         # Provider text is never forwarded; a provider may only report a count
@@ -218,6 +219,9 @@ class MaterialManager:
         previous = job.get("progress", {})
         now = self.clock()
         source = source_id if source_id is not None else previous.get("source_id")
+        # A refinement is one item's work, so the page can keep the batch usable
+        # and show progress on that card instead of freezing the whole view.
+        item = item_id if item_id is not None else previous.get("item_id", "")
         same_stage = previous.get("stage_code") == stage and previous.get("source_id") == source
         # Keep generation counts as data. They describe this source's completed
         # attempts (including failed ones), never the provider's internal time.
@@ -233,7 +237,7 @@ class MaterialManager:
         job["progress"] = {"stage_code": stage, "phase": phase, "message": message,
                            "current": previous.get("current", 0) if current is None else current,
                            "total": previous.get("total", len(job["sources"])) if total is None else total,
-                           "source_id": source,
+                           "source_id": source, "item_id": item,
                            "started_at": previous.get("started_at", now) if same_stage else now, "updated_at": now,
                            "indeterminate": stage in {"cleanup", "locating", "cancelling"}
                            or (stage == "designs" and not counts), **counts}
@@ -401,7 +405,7 @@ class MaterialManager:
                            "run_id": secrets.token_hex(16), "run_started_at": now, "run_finished_at": None,
                            "items": [], "warnings": [], "error": "", "cancel_requested": False,
                            "attempts": [], "upload_id": str(upload_request_id)}
-                    self._progress(job, "queued")
+                    self._progress(job, "queued", item_id="")
                     self.jobs[identifier] = job
                     self._save(job)
                     if before_submit:
@@ -576,7 +580,7 @@ class MaterialManager:
             job["status"] = "processing"; job["revision"] += 1
             # Accepted/queued time is part of this run. Do not restart its clock
             # when execution begins, or when switching sources/stages/designs.
-            self._progress(job, "preparing")
+            self._progress(job, "preparing", item_id=redo["item_id"] if refining and redo else "")
             try:
                 self._save(job)
             except Exception as exc:
@@ -634,7 +638,8 @@ class MaterialManager:
                         offset = (box["x"], box["y"])
                     if refining:
                         with self.lock:
-                            self._progress(job, "refining", current=0, total=1, source_id=source["id"])
+                            self._progress(job, "refining", current=0, total=1, source_id=source["id"],
+                                           item_id=old_item["id"] if old_item else "")
                             self._save(job)
                     result = self._invoke(job, provider, raw, (redo or {}).get("instruction", ""),
                                           edit=bool(old_item), bounds=edit_bounds, source_id=source["id"], refine=refining,
@@ -1050,7 +1055,7 @@ class MaterialManager:
             candidate.pop("batch_undo", None)
             candidate.update(status="queued", cancel_requested=False, error="", settled_at=None, expires_at=None,
                        run_id=secrets.token_hex(16), run_started_at=self.clock(), run_finished_at=None)
-            self._progress(candidate, "queued", current=0, total=1, source_id=source["id"])
+            self._progress(candidate, "queued", current=0, total=1, source_id=source["id"], item_id=item["id"])
             candidate["revision"] += 1; self._save(candidate)
             job.clear(); job.update(candidate)
             operation = {"source_id": source["id"], "item_id": item["id"], "_refine": True}
@@ -1116,7 +1121,7 @@ class MaterialManager:
             job.pop("batch_undo", None)
             job.update(status="queued", cancel_requested=False, error="", settled_at=None, expires_at=None,
                        run_id=secrets.token_hex(16), run_started_at=self.clock(), run_finished_at=None)
-            self._progress(job, "queued", current=0, total=1, source_id=source["id"])
+            self._progress(job, "queued", current=0, total=1, source_id=source["id"], item_id="")
             job["revision"] += 1; self._save(job)
             self.futures[identifier] = self.executor.submit(self._run, identifier, deepcopy(payload))
             return self.snapshot(identifier, owner)

@@ -180,7 +180,18 @@ def test_detail_view_shows_the_cached_thumbnail_before_the_full_file():
     body = script.split("function swapImage(el,value)", 1)[1][:1200]
     assert "thumbnail_url" in body and "image_url" in body
     assert "new Image()" in body
-    assert "preload.onload=settle" in body and "image-loading" in body
+    assert "preload.onload=settle" in body and "setLoading(el,true)" in body
     assert 'swapImage($("material-detail-source"),before||source)' in script
     assert 'swapImage($("material-detail-output"),item)' in script
     assert 'getAttribute("src")!==sourceUrl' not in script
+
+
+def test_the_compare_dialog_never_dims_the_picture_while_loading():
+    """A translucent overlay made the original and the result look grey."""
+    root = Path(__file__).resolve().parents[1] / "hsd_tool" / "static"
+    css = (root / "material.css").read_text("utf-8")
+    assert "opacity:.68" not in css and "img.image-loading" not in css
+    assert ".material-selection-stage.image-loading::after" in css
+    script = (root / "material.js").read_text("utf-8")
+    assert 'frame.classList.toggle("image-loading",loading)' in script
+    assert "正在加载原图" in css

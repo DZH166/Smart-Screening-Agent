@@ -392,7 +392,7 @@ class NativeArk(FakeArk):
     [(10, 10, 110, 110)],
     [(10, 10, 60, 60), (200, 200, 250, 250)],
     [(10, 10, 110, 110), (160, 20, 390, 390)],
-    [(0, 0, 240, 100), (240, 0, 400, 200)],
+    [(10, 10, 250, 110), (250, 10, 390, 210)],
 ])
 def test_every_design_is_extracted_once_regardless_of_size_count_or_transparency(transparent, boxes):
     ark = NativeArk(transparent=transparent)
@@ -575,7 +575,7 @@ def test_dense_sheet_draws_each_design_from_its_own_enlarged_view():
 
 
 def test_sparse_sheet_still_shares_one_whole_sheet_reference():
-    boxes = [(0, 0, 180, 180), (200, 200, 380, 380)]
+    boxes = [(10, 10, 190, 190), (200, 200, 380, 380)]
     ark = FakeArk()
     result = provider(ark, [design(box) for box in boxes], workers=1).extract(busy_sheet())
     views = [row["png"] for row in ark.calls[1:]]
@@ -599,7 +599,7 @@ def test_magnified_reference_keeps_the_box_inside_its_own_view():
 
 
 @pytest.mark.parametrize("limits", ["upscale", "downscale", "byte_shrink"])
-@pytest.mark.parametrize("box", [(400, 400, 500, 500), (0, 50, 100, 150)])
+@pytest.mark.parametrize("box", [(400, 400, 500, 500), (20, 50, 120, 150)])
 def test_dense_request_hint_points_at_the_design_in_the_final_encoded_image(monkeypatch, limits, box):
     # Pixel projection, not just containment: the hint must still surround the
     # visible subject after up/down-scaling and PNG byte-budget resizing.
@@ -628,8 +628,7 @@ def test_dense_request_hint_points_at_the_design_in_the_final_encoded_image(monk
         assert len(request["png"]) <= 20_000
 
 
-@pytest.mark.parametrize("box", [(40, 160, 360, 168), (160, 40, 168, 360),
-                                  (0, 0, 1, 380), (0, 0, 380, 1)])
+@pytest.mark.parametrize("box", [(100, 400, 900, 425), (400, 100, 425, 900)])
 def test_thin_design_uses_accepted_whole_reference_without_an_extra_call(box):
     from hsd_tool.material_ark import _input, _prompt_bounds
 
@@ -639,7 +638,10 @@ def test_thin_design_uses_accepted_whole_reference_without_an_extra_call(box):
             _prompt_bounds(kwargs["bounds"], size)
             return super().extract_design(png, **kwargs)
 
-    ark = ValidatingArk()
+    # The cleaned sheet matches the source so locator boxes map 1:1 to it; a
+    # 25px-thick design is still a complete design, only its local view would
+    # exceed the accepted aspect range and must fall back to the whole sheet.
+    ark = ValidatingArk([card((1000, 1000))])
     result = provider(ark, [design(box)], workers=1).extract(source_image((1000, 1000)))
     assert len(result.layers) == 1 and len(ark.calls) == 2
     with Image.open(io.BytesIO(ark.calls[1]["png"])) as reference:
@@ -701,7 +703,7 @@ def test_mixed_references_bound_parallelism_by_largest_planned_view(monkeypatch)
 
     monkeypatch.setattr(design_module, "ThreadPoolExecutor", ObservedPool)
     ark = FakeArk()
-    result = provider(ark, [design((0, 0, 200, 200)), design((250, 250, 280, 280))]).extract(
+    result = provider(ark, [design((10, 10, 210, 210)), design((250, 250, 280, 280))]).extract(
         source_image((6000, 6000)))
     assert len(result.layers) == 2 and len(ark.calls) == 3
     assert limits == [2]
@@ -841,3 +843,46 @@ def test_manual_refine_unexpected_transport_failure_is_unknown_without_retry_or_
     assert not raised.value.safe_retry and ark.refine_calls == 1
     assert raised.value.attempts[-1]["state"] == "unknown"
     assert "upstream/internal" not in str(raised.value)
+
+
+# -- designs cut by the sheet border ---------------------------------------
+
+def test_border_cut_fragments_are_reported_instead_of_generated():
+    """A sliver at the sheet edge cannot be redrawn: the model invents it."""
+    ark = FakeArk([card((400, 400))])
+    designs = [design((0, 10, 120, 90), label="左侧碎片"),
+               design((5, 5, 28, 28), label="小块"),
+               design((150, 150, 250, 250), label="完整设计")]
+    result = provider(ark, designs, workers=1).extract(source_image((400, 400)))
+    assert [layer.label for layer in result.layers] == ["完整设计"]
+    # One whole-sheet pass plus exactly one paid extraction.
+    assert len(ark.calls) == 2
+    note = next(text for text in result.warnings if "2 个设计" in text)
+    assert "左侧碎片" in note and "没有生成" in note
+    assert "框选" in note
+
+
+def test_all_fragments_fail_with_a_reason_instead_of_inventing_designs():
+    ark = FakeArk([card((400, 400))])
+    with pytest.raises(ArkProviderError) as raised:
+        provider(ark, [design((0, 0, 200, 120))], workers=1).extract(source_image((400, 400)))
+    assert raised.value.code == "invalid_decision" and len(ark.calls) == 1
+    assert "框选" in str(raised.value)
+
+
+def test_a_design_inside_the_sheet_but_too_thin_to_redraw_is_skipped():
+    ark = FakeArk([card((400, 400))])
+    result = provider(ark, [design((100, 200, 300, 210)), design((100, 300, 200, 390), label="完整设计")],
+                      workers=1).extract(source_image((400, 400)))
+    assert [layer.label for layer in result.layers] == ["完整设计"]
+    assert len(ark.calls) == 2 and result.warnings
+
+
+def test_a_single_design_filling_the_sheet_is_not_treated_as_a_cut_fragment():
+    """One tight-cropped upload touches every border but was not cut by us."""
+    ark = FakeArk([card((400, 400))])
+    result = provider(ark, [design((0, 0, 400, 400), label="整张设计")],
+                      workers=1).extract(source_image((400, 400)))
+    assert [layer.label for layer in result.layers] == ["整张设计"]
+    assert len(ark.calls) == 2
+    assert not any("没有生成" in note for note in result.warnings)

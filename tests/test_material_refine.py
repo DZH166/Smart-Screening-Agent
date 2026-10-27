@@ -285,3 +285,28 @@ def test_refinement_needs_only_image_service_not_deepseek(refinement):
     refine(manager, state)
     assert complete(manager, state["id"])["items"][0]["refined"]
     assert provider.calls == 2
+
+
+def test_a_refinement_publishes_the_item_it_is_working_on(refinement):
+    """The page needs to know which card is being redrawn to stay usable."""
+    manager, provider, state = refinement
+    item_id = state["items"][0]["id"]
+    refine(manager, state)
+    saved = manager.jobs[state["id"]]
+    assert saved["status"] in {"queued", "processing"}
+    assert saved["progress"]["item_id"] == item_id
+    current = complete(manager, state["id"])
+    assert current["status"] == "ready"
+    # The marker only means "working on this card": the page ignores it once the
+    # batch is no longer running, and a new upload clears it on the server.
+    assert current["progress"]["stage_code"] != "refining"
+    assert current["items"][0]["refined"] is True
+
+
+def test_a_rectangle_redo_never_claims_to_be_a_refinement(refinement):
+    manager, provider, state = refinement
+    source = state["sources"][0]
+    manager.redo(state["id"], "employee-a", {"expected_revision": state["revision"],
+        "source_id": source["id"], "box": {"x": 0, "y": 0, "width": 12, "height": 12}})
+    assert manager.jobs[state["id"]]["progress"]["item_id"] == ""
+    complete(manager, state["id"])

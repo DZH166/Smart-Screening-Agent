@@ -38,16 +38,26 @@
     if(name==="material"&&!state.config)loadConfig();else schedule();
   }
   function busy() {return state.busy||state.uploading||state.uncertain||activeStatuses.has(state.job?.status);}
+  // Reading a finished result never has to wait for a model call: only writes
+  // and the whole-page transitions are blocked while one item is refined.
+  function softLocked() {return state.busy||state.uploading||state.uncertain||state.authLost;}
+  function refiningId() {
+    const job=state.job,progress=job?.progress||{};
+    if(!job||!["queued","processing"].includes(job.status))return "";
+    return typeof progress.item_id==="string"?progress.item_id:"";
+  }
+  function refineElapsed() {const started=Number(state.job?.progress?.started_at)||0;if(!started)return 0;return Math.min(3600,Math.max(0,Math.round(Date.now()/1000-started)));}
   function controls() {
-    const locked=busy()||state.authLost;
+    const locked=busy()||state.authLost,reading=softLocked();
     $("material-files").disabled=locked;$("material-start").disabled=(locked&&!(state.uncertain&&state.retryUpload&&!state.busy&&!state.authLost))||!state.files.length||!state.config?.available;
     $("material-start").textContent=state.uploading?"正在上传…":state.busy?"正在提交…":state.uncertain&&state.retryUpload?"重试本次上传":"开始提取";
     $("material-new").disabled=locked;$("material-stop").disabled=state.busy||state.authLost||state.job?.status==="cancelling";
     $("material-stop").textContent=state.job?.status==="cancelling"?"正在停止…":state.uploading||state.uncertain?"停止上传":"停止本批";
-    $("material-download-all").disabled=locked||!safeUrl(state.job?.download_url);
-    $("material-recheck").disabled=state.busy||state.polling||state.authLost;
+    $("material-download-all").disabled=reading||!safeUrl(state.job?.download_url);
+    $("material-recheck").disabled=reading||state.polling;
     $("material-upload-check").disabled=state.busy||state.authLost;
-    const itemControl=button=>{const item=state.job?.items.find(value=>value.id===button.dataset.itemId);button.disabled=locked||(button.dataset.materialAction==="download"&&!downloadable(item))||(button.dataset.materialAction==="refine"&&(!item||item.status==="skipped"||!safeUrl(item.image_url)||(item.refine_submission_unknown&&!state.refineAcks.has(item.id))));};
+    const itemControl=button=>{const item=state.job?.items.find(value=>value.id===button.dataset.itemId),action=button.dataset.materialAction,viewing=action==="download"||action==="compare";
+      button.disabled=(viewing?reading:locked)||(action==="download"&&!downloadable(item))||(action==="refine"&&(!item||item.status==="skipped"||!safeUrl(item.image_url)||(item.refine_submission_unknown&&!state.refineAcks.has(item.id))));};
     $("material-grid").querySelectorAll("button").forEach(itemControl);
     const inputControl=input=>{input.disabled=locked;if(input.dataset.refineAck)input.checked=state.refineAcks.has(input.dataset.refineAck);};
     $("material-grid").querySelectorAll("input").forEach(inputControl);
@@ -126,6 +136,9 @@
   function updateClock() {
     clearTimeout(state.clockTimer);
     if(!activeStatuses.has(state.job?.status)||document.hidden||state.workspace!=="material")return;
+    // The refined card keeps its own elapsed counter, so the batch view stays
+    // usable while one picture is being redrawn.
+    if(refiningId()){const timer=$("material-grid").querySelector?.("[data-refine-timer]");if(timer)timer.textContent=`精修中 ${refineElapsed()} 秒`;}
     $("material-progress-detail").textContent=progressDetail();state.clockTimer=setTimeout(updateClock,1000);
   }
   function openStream() {
@@ -156,9 +169,11 @@
     render();schedule();
   }
   function render() {
-    const job=state.job;if(!job)return;const running=activeStatuses.has(job.status);
-    $("material-upload-form").classList.add("hidden");$("material-results").classList.remove("hidden");$("material-new").classList.remove("hidden");$("material-progress").classList.toggle("hidden",!running);$("material-upload-check").classList.add("hidden");
-    if(running){
+    const job=state.job;if(!job)return;const running=activeStatuses.has(job.status),refining=!!refiningId();
+    // A refinement is one card's work: keep the batch on screen instead of
+    // replacing it with a full-page progress panel.
+    $("material-upload-form").classList.add("hidden");$("material-results").classList.remove("hidden");$("material-new").classList.remove("hidden");$("material-progress").classList.toggle("hidden",!running||refining);$("material-upload-check").classList.add("hidden");
+    if(running&&!refining){
       const progress=job.progress||{},total=Number(progress.total)||0,current=Number(progress.current)||0,queued=job.status==="queued",phase=String(progress.stage_code||progress.phase||""),counts=state.progressCounts||{};
       $("material-progress-title").textContent=job.status==="cancelling"?"正在停止本批":queued?"排队等待":progress.phase||"正在处理素材";
       $("material-progress-message").textContent=progress.message||"图片处理中，完成的结果会陆续显示。";
@@ -177,8 +192,8 @@
     }
     if(job.status==="error")notify(job.error||"本批未能处理，请查看原图下的问题提示。",true);else if(job.status==="cancelled")notify("本批已停止。已经完成的素材仍可查看和下载。");
     const stats=job.stats||{},ready=job.items.filter(downloadable).length,skipped=job.items.filter(item=>item.status==="skipped").length;
-    $("material-summary").textContent=`${job.sources.length} 张原图 · ${job.items.length} 个素材${!running?` · ${ready} 个可下载`:""}${skipped?` · ${skipped} 个已舍弃`:""}${stats.failed?` · ${stats.failed} 张处理失败`:""}${!running?` · 本批累计用时 ${duration(elapsedSeconds())}`:""}`;
-    $("material-result-title").textContent=running?(job.progress?.stage_code==="refining"?"正在精修素材":"正在生成本批素材"):"本批提取结果";$("material-available-count").textContent=String(job.items.length-skipped);
+    $("material-summary").textContent=`${job.sources.length} 张原图 · ${job.items.length} 个素材${!running||refining?` · ${ready} 个可下载`:""}${skipped?` · ${skipped} 个已舍弃`:""}${stats.failed?` · ${stats.failed} 张处理失败`:""}${!running||refining?` · 本批累计用时 ${duration(elapsedSeconds())}`:""}`;
+    $("material-result-title").textContent=running&&!refining?(job.progress?.stage_code==="refining"?"正在精修素材":"正在生成本批素材"):"本批提取结果";$("material-available-count").textContent=String(job.items.length-skipped);
     document.querySelectorAll("[data-material-filter]").forEach(button=>{const active=button.dataset.materialFilter===state.filter;button.classList.toggle("active",active);button.setAttribute("aria-pressed",String(active));});
     const shared=sharedWarnings();$("material-shared-warning").textContent=shared.join("；");$("material-shared-warning").classList.toggle("hidden",!shared.length);
     $("material-generation-warning").classList.toggle("hidden",job.has_generation_failures!==true);
@@ -195,13 +210,13 @@
   let warningItems=null,warningCache=[];
   function sharedWarnings() {if(warningItems===state.job?.items)return warningCache;warningItems=state.job?.items;const counts=new Map();for(const item of state.job?.items||[])for(const warning of specificWarnings(item))counts.set(warning,(counts.get(warning)||0)+1);warningCache=[...counts].filter(([,count])=>count>1&&count===state.job.items.length).map(([warning])=>warning);return warningCache;}
   function itemActions(item) {
-    const skipped=item.status==="skipped",unknown=item.refine_submission_unknown===true;
+    const skipped=item.status==="skipped",unknown=item.refine_submission_unknown===true,busyRefine=refiningId()===item.id;
     if(skipped)return `<button class="button button-secondary" type="button" data-material-action="restore" data-item-id="${esc(item.id)}">恢复素材</button>`;
-    return `${unknown?`<label class="material-refine-ack"><input type="checkbox" data-refine-ack="${esc(item.id)}"${state.refineAcks.has(item.id)?" checked":""}>上次精修结果尚未确定。重新提交可能重复计费，我确认继续。</label>`:""}<button class="button button-primary" type="button" data-material-action="download" data-item-id="${esc(item.id)}"${downloadable(item)?"":" disabled"}>下载</button><button class="button button-secondary" type="button" data-material-action="refine" data-item-id="${esc(item.id)}"${unknown&&!state.refineAcks.has(item.id)?" disabled":""}>精修</button><button class="button button-quiet" type="button" data-material-action="skip" data-item-id="${esc(item.id)}">舍弃</button>`;
+    return `${unknown?`<label class="material-refine-ack"><input type="checkbox" data-refine-ack="${esc(item.id)}"${state.refineAcks.has(item.id)?" checked":""}>上次精修结果尚未确定。重新提交可能重复计费，我确认继续。</label>`:""}<button class="button button-primary" type="button" data-material-action="download" data-item-id="${esc(item.id)}"${downloadable(item)?"":" disabled"}>下载</button><button class="button button-secondary" type="button" data-material-action="refine" data-item-id="${esc(item.id)}"${busyRefine?" disabled":""}>${busyRefine?"精修中…":"精修"}</button><button class="button button-quiet" type="button" data-material-action="skip" data-item-id="${esc(item.id)}">舍弃</button>`;
   }
   function itemContent(item) {
-    const skipped=item.status==="skipped",shared=new Set(sharedWarnings()),specific=specificWarnings(item).filter(w=>!shared.has(w)),inline=specific[0],remaining=[...specific.slice(1),...processingNotes(item)];
-    return `<div class="material-item-info"><div class="material-item-heading"><strong class="material-item-name">${esc(item.name)}</strong>${skipped||item.refined?`<span class="material-item-badge ${skipped?"skipped":"completed"}">${skipped?"已舍弃":"已精修"}</span>`:""}</div>${inline?`<p class="material-item-warning">${esc(inline)}</p>`:""}<div class="material-item-actions">${itemActions(item)}</div><details><summary>详情</summary>${remaining.length?`<ul>${remaining.map(w=>`<li>${esc(w)}</li>`).join("")}</ul>`:""}<p>${Number(item.width)||0} × ${Number(item.height)||0} 像素 · PNG</p><p>${guidance}</p></details></div>`;
+    const skipped=item.status==="skipped",shared=new Set(sharedWarnings()),specific=specificWarnings(item).filter(w=>!shared.has(w)),inline=specific[0],remaining=[...specific.slice(1),...processingNotes(item)],busyRefine=refiningId()===item.id;
+    return `<div class="material-item-info"><div class="material-item-heading"><strong class="material-item-name">${esc(item.name)}</strong>${busyRefine?`<span class="material-item-badge refining" data-refine-timer>精修中 ${refineElapsed()} 秒</span>`:skipped||item.refined?`<span class="material-item-badge ${skipped?"skipped":"completed"}">${skipped?"已舍弃":"已精修"}</span>`:""}</div>${busyRefine?`<p class="material-item-warning">只精修这一张，其他素材和下载仍可操作；完成后这张图会自动替换。</p>`:""}${inline?`<p class="material-item-warning">${esc(inline)}</p>`:""}<div class="material-item-actions">${itemActions(item)}</div><details><summary>详情</summary>${remaining.length?`<ul>${remaining.map(w=>`<li>${esc(w)}</li>`).join("")}</ul>`:""}<p>${Number(item.width)||0} × ${Number(item.height)||0} 像素 · PNG</p><p>${guidance}</p></details></div>`;
   }
   function previewUrl(value) {return safeUrl(value.thumbnail_url)||safeUrl(value.image_url);}
   function previewHtml(item) {return `<button class="material-item-preview" data-material-action="compare" data-item-id="${esc(item.id)}" type="button" aria-label="放大对照 ${esc(item.name)}"><img src="${esc(previewUrl(item))}" alt="${esc(item.name)}" width="640" height="640" loading="lazy" decoding="async" fetchpriority="low"></button>`;}
@@ -210,7 +225,7 @@
     const nextExisting=new Map();let anchor=null;
     for(let index=state.job.items.length-1;index>=0;index--){const item=state.job.items[index];nextExisting.set(item.id,anchor);if(state.items.has(item.id))anchor=state.items.get(item.id).node;}
     for(const item of state.job.items){
-      const key=JSON.stringify([item.name,item.status,item.warnings,item.width,item.height,item.downloadable,item.refined,item.refine_error,item.refine_submission_unknown,sharedWarnings()]),preview=previewHtml(item);let record=state.items.get(item.id);
+      const key=JSON.stringify([item.name,item.status,item.warnings,item.width,item.height,item.downloadable,item.refined,item.refine_error,item.refine_submission_unknown,sharedWarnings(),refiningId()===item.id]),preview=previewHtml(item);let record=state.items.get(item.id);
       const content=!record||record.key!==key?itemContent(item):record.content;
       if(!record){
         const node=document.createElement("article");node.className="material-item";node.dataset.itemId=item.id;
@@ -249,22 +264,35 @@
     catch(error){if(epoch!==state.epoch)return false;state.lastConflict=error.status===409;notify(error.status===409?"本批状态已更新，正在重新读取；请核对后再操作。":error.message,true);if(error.status===409)try{await loadJob();}catch(_){}return false;}
     finally{if(epoch===state.epoch){state.busy=false;controls();}}
   }
+  async function refineItem(itemId,acknowledge) {
+    // One paid call for one card. It must not take the page hostage: the batch
+    // stays readable and this card reports its own progress until it lands.
+    if(state.busy||state.authLost||!state.job)return false;
+    const epoch=state.epoch;state.busy=true;state.lastConflict=false;notify("");
+    try{const result=await api(jobPath("/refine"),{expected_revision:state.job.revision,item_id:itemId,...(acknowledge?{acknowledge_unknown:true}:{})});if(epoch!==state.epoch)return false;if(result?.items)setJob(result);else await loadJob();return true;}
+    catch(error){if(epoch!==state.epoch)return false;state.lastConflict=error.status===409;notify(error.status===409?"本批状态已更新，正在重新读取；请核对后再操作。":error.message,true);if(error.status===409)try{await loadJob();}catch(_){}return false;}
+    finally{if(epoch===state.epoch){state.busy=false;render();controls();}}
+  }
   async function stop() {
     if(state.busy||state.authLost)return;
     if(state.uploading||state.uncertain){const epoch=state.epoch;state.busy=true;state.stopRequested=true;state.retryUpload=false;controls();try{await api(`/api/material/upload-status/${encodeURIComponent(state.uploadId)}/cancel`,{});if(epoch!==state.epoch)return;state.xhr?.abort();state.uploading=false;state.uncertain=true;}catch(error){if(epoch===state.epoch)notify(error.message,true);}finally{if(epoch===state.epoch){state.busy=false;await recoverUpload();controls();}}return;}
     const stopped=await mutate("cancel",{});if(!stopped&&state.lastConflict&&activeStatuses.has(state.job?.status))await mutate("cancel",{});
   }
-  function download(url) {const safe=safeUrl(url);if(!safe||busy()||state.authLost)return;const id=state.job.id,frame=$("material-download-frame");frame.onload=()=>{if(state.job?.id!==id)return;let text="";try{text=(frame.contentDocument?.body?.textContent||"").trim();}catch(_){text="无法读取下载结果。";}if(!text)return;let error;try{error=JSON.parse(text).error;}catch(_){}notify(error||"下载未能开始，请检查网络后重试。",true);if(/访问码|会话|登录/.test(error||""))lockAuth();};frame.onerror=()=>{if(state.job?.id===id)notify("下载连接中断，请检查网络后重试。",true);};frame.src=`${safe}${safe.includes("?")?"&":"?"}frame=1`;notify("已请求下载，请查看浏览器下载列表；未开始时可重试。");}
+  function download(url) {const safe=safeUrl(url);if(!safe||softLocked())return;const id=state.job.id,frame=$("material-download-frame");frame.onload=()=>{if(state.job?.id!==id)return;let text="";try{text=(frame.contentDocument?.body?.textContent||"").trim();}catch(_){text="无法读取下载结果。";}if(!text)return;let error;try{error=JSON.parse(text).error;}catch(_){}notify(error||"下载未能开始，请检查网络后重试。",true);if(/访问码|会话|登录/.test(error||""))lockAuth();};frame.onerror=()=>{if(state.job?.id===id)notify("下载连接中断，请检查网络后重试。",true);};frame.src=`${safe}${safe.includes("?")?"&":"?"}frame=1`;notify("已请求下载，请查看浏览器下载列表；未开始时可重试。");}
   async function itemAction(event) {
-    const button=event.target.closest("[data-material-action]");if(!button||busy()||state.authLost)return;const item=state.job.items.find(item=>item.id===button.dataset.itemId);if(!item)return;
+    const button=event.target.closest("[data-material-action]");if(!button||state.authLost)return;const item=state.job.items.find(item=>item.id===button.dataset.itemId);if(!item)return;
     const action=button.dataset.materialAction;
+    // Viewing and downloading a finished item stays available during a run.
+    if(["compare","download","refine"].includes(action)?softLocked():busy())return;
     if(action==="compare"){openDetail(item.source_id,item,false);return;}
     if(action==="download"){if(downloadable(item))download(item.download_url);return;}
     if(action==="refine"){
+      // The server refines one card at a time; do not stack a second paid call.
+      if(refiningId()&&refiningId()!==item.id)return;
       if(item.status==="skipped"||!safeUrl(item.image_url))return;
       const unknown=item.refine_submission_unknown===true;if(unknown&&!state.refineAcks.has(item.id)){notify("上次精修结果尚未确定，请先确认重新提交可能重复计费。",true);return;}
       state.refineAcks.delete(item.id);
-      if(await mutate("refine",{item_id:item.id,...(unknown?{acknowledge_unknown:true}:{})})){if(state.dialog?.itemId===item.id)$("material-detail-dialog").close();}
+      if(await refineItem(item.id,unknown)){if(state.dialog?.itemId===item.id)$("material-detail-dialog").close();}
       return;
     }
     if(!["skip","restore"].includes(action))return;
@@ -272,6 +300,12 @@
   }
   function acknowledgeRefine(event) {const input=event.target.closest("[data-refine-ack]");if(!input||busy()||state.authLost)return;const item=state.job?.items.find(value=>value.id===input.dataset.refineAck);if(!item?.refine_submission_unknown)return;if(input.checked)state.refineAcks.add(item.id);else state.refineAcks.delete(item.id);controls();}
   function showBatchRecords() {const details=$("material-batch-details");details.open=true;details.querySelector("summary")?.focus({preventScroll:true});details.scrollIntoView({block:"nearest",behavior:"smooth"});}
+  function setLoading(el,loading) {
+    // Mark the picture as still loading without dimming it: a translucent
+    // overlay made the source and the result look grey and washed out.
+    el.classList.toggle("image-loading",loading);
+    const frame=el.parentElement;if(frame)frame.classList.toggle("image-loading",loading);
+  }
   function swapImage(el,value) {
     // Show the already-cached thumbnail first, then swap in the full file once it
     // decodes. Without this the previous item's picture stays on screen while the
@@ -279,13 +313,13 @@
     const full=safeUrl(value&&value.image_url),thumb=safeUrl(value&&value.thumbnail_url)||full;
     el.dataset.imageToken=String((Number(el.dataset.imageToken||0)+1));
     const token=el.dataset.imageToken;
-    if(!thumb){el.removeAttribute("src");el.classList.remove("image-loading");return;}
+    if(!thumb){el.removeAttribute("src");setLoading(el,false);return;}
     if(el.getAttribute("src")!==thumb)el.src=thumb;
-    if(!full||full===thumb){el.classList.remove("image-loading");return;}
-    el.classList.add("image-loading");
+    if(!full||full===thumb){setLoading(el,false);return;}
+    setLoading(el,true);
     const preload=new Image();
     preload.decoding="async";
-    const settle=()=>{if(el.dataset.imageToken===token){if(preload.naturalWidth)el.src=full;el.classList.remove("image-loading");}};
+    const settle=()=>{if(el.dataset.imageToken===token){if(preload.naturalWidth)el.src=full;setLoading(el,false);}};
     preload.onload=settle;preload.onerror=settle;preload.src=full;
   }
   function openDetail(sourceId,item=null,redo=false) {

@@ -31,6 +31,13 @@ MAX_WORKERS = 8
 PAD_RATIO = .12
 MIN_PAD = 6
 EDGE_PIXELS = 2
+# A design that touches the sheet border lost pixels to the crop, and a design
+# smaller than this cannot be redrawn without the model inventing content.
+EDGE_TOLERANCE_PIXELS = 3
+MIN_DESIGN_SIDE = 24
+# A design covering nearly the whole sheet is the uploaded artwork itself, not a
+# piece cut out of a larger collage.
+WHOLE_SHEET_SHARE = .85
 REFERENCE_MAX_PIXELS = 16_000_000
 CONCURRENT_REFERENCE_PIXELS = 32_000_000
 
@@ -99,6 +106,25 @@ def design_target_bounds(box, source_size, reference_size):
     return {"x": x, "y": y,
             "width": min(ref_width, math.ceil(right * ref_width / width)) - x,
             "height": min(ref_height, math.ceil(bottom * ref_height / height)) - y}
+
+
+def design_is_complete(box, size):
+    """Only a design fully inside the sheet can be redrawn without invention.
+
+    Slivers touching the border were being sent to the image model, which then
+    invented a whole design from a few pixels. A single design that fills the
+    sheet is not a cropped sliver: that is the artwork the employee uploaded.
+    """
+    left, top, right, bottom = box
+    width, height = size
+    box_width, box_height = right - left, bottom - top
+    if box_width < MIN_DESIGN_SIDE or box_height < MIN_DESIGN_SIDE:
+        return False
+    if box_width * box_height >= WHOLE_SHEET_SHARE * width * height:
+        return True
+    return not (left <= EDGE_TOLERANCE_PIXELS or top <= EDGE_TOLERANCE_PIXELS
+                or right >= width - EDGE_TOLERANCE_PIXELS
+                or bottom >= height - EDGE_TOLERANCE_PIXELS)
 
 
 def design_share(box, size):
@@ -313,12 +339,29 @@ class MaterialDesignProvider:
             designs = list(located.designs)
             if not designs:
                 raise ArkProviderError("invalid_decision", "未能可靠确定设计范围，请在原图框选后重试。")
-            progress("designs", "", current=0, total=len(designs))
-            layers, failures = self._generate(source, base, designs, instructions, check_cancel, progress, call)
+            # Designs cut by the sheet border (or reduced to a sliver) cannot be
+            # redrawn faithfully: the image model invents the missing parts. Keep
+            # them out of the paid calls and tell the employee what was skipped.
+            usable, skipped = [], []
+            for design in designs:
+                native = self._native_box(design, source, base)
+                (usable if design_is_complete(native, source.size) else skipped).append((design, native))
+            if not usable:
+                raise ArkProviderError(
+                    "invalid_decision",
+                    "原图里没有找到完整的设计：%d 个都贴着画面边缘或被裁切。请上传未裁剪的原图，或在原图上框选完整个体。" % len(skipped))
+            progress("designs", "", current=0, total=len(usable))
+            layers, failures = self._generate(source, base, usable, instructions, check_cancel, progress, call)
             cancel()
             if not layers:
                 raise ArkProviderError("provider_failed", "本张图片的所有设计都未能生成，请重试或联系管理员。")
             notes = list(cleaned.warnings) + list(located.warnings)
+            if skipped:
+                labels = "、".join(design.label for design, _ in skipped[:3])
+                if len(skipped) > 3:
+                    labels += " 等"
+                notes.append("有 %d 个设计贴着原图边缘、被裁切或过小，没有生成：%s。"
+                             "需要时可上传未裁剪的原图，或在原图上框选完整个体补提。" % (len(skipped), labels))
             notes.extend("第 %d 个设计（%s）未能生成：%s" % (index, _label(label), _reason(error))
                          for index, label, error in failures)
             progress("saving")
@@ -355,8 +398,7 @@ class MaterialDesignProvider:
         note = self._note(instructions)
         layers, failures = [], []
         finished = 0
-        targets = [(index, design, self._native_box(design, source, base))
-                   for index, design in enumerate(designs, 1)]
+        targets = [(index, design, native) for index, (design, native) in enumerate(designs, 1)]
         shares = {index: design_share(native, source.size) for index, _, native in targets}
         magnified = {index: (shares[index] < DENSE_TARGET_SHARE
                             and supports_magnified_reference(native, source.size))

@@ -142,11 +142,40 @@ test("refine submits the current item once without a confirmation or custom inst
   assert.equal(h.requests.length,1);assert.ok(h.requests[0].url.endsWith("/refine"));
   assert.deepEqual(JSON.parse(h.requests[0].options.body),{expected_revision:3,item_id:"i1"});
   assert.equal(h.ui.state.job.items[0].image_url,old.image_url);assert.equal(h.ui.state.job.items[0].refined,false);
-  await h.reply(0,job({status:"queued",revision:4,items:[{...old,downloadable:false,download_url:null}],progress:{stage_code:"refining",phase:"精修素材",current:0,total:1}}));await pending;
+  await h.reply(0,job({status:"queued",revision:4,items:[{...old,downloadable:false,download_url:null}],progress:{stage_code:"refining",phase:"精修素材",current:0,total:1,item_id:"i1"}}));await pending;
   assert.equal(h.ui.state.job.items.length,1);assert.equal(h.ui.state.job.items[0].refined,false);
-  assert.equal(h.node("material-progress-meter").classList.contains("hidden"),true);
-  assert.match(h.node("material-stage-list").innerHTML,/精修当前素材/);
+  assert.equal(h.node("material-progress").classList.contains("hidden"),true);
   assert.ok(!h.ui.state.items.get("i1").node.innerHTML.includes("已精修"));
+});
+test("a running refinement leaves the rest of the batch usable instead of freezing the page",async()=>{
+  const h=harness(),base=job(),old=base.items[0],second={...old,id:"i2",name:"第二个素材",image_url:old.image_url.replace(/i1$/,"i2"),download_url:old.download_url.replace(/i1$/,"i2")};
+  h.ui.state.config={available:false};h.ui.setJob({...base,items:[old,second]});
+  const pending=h.ui.itemAction(actionEvent("refine","i1"));
+  await flush();assert.equal(h.requests.length,1);
+  await h.reply(0,{...base,status:"processing",revision:4,items:[old,second],progress:{stage_code:"refining",phase:"精修素材",current:0,total:1,item_id:"i1",started_at:Math.round(Date.now()/1000)-4}});
+  await pending;
+  // The batch view stays; only the refined card reports its own progress.
+  assert.equal(h.node("material-progress").classList.contains("hidden"),true);
+  assert.equal(h.node("material-results").classList.contains("hidden"),false);
+  assert.equal(h.node("material-result-title").textContent,"本批提取结果");
+  assert.match(h.ui.state.items.get("i1").node.innerHTML,/精修中/);
+  // Reading another finished card is not blocked by the running refinement.
+  assert.equal(h.ui.state.busy,false);
+  await h.ui.itemAction(actionEvent("download","i2"));
+  assert.match(String(h.node("material-download-frame").src),/\/download\/i2\?frame=1$/);
+  // A second paid refinement is refused while one is running.
+  await h.ui.itemAction(actionEvent("refine","i2"));
+  assert.equal(h.requests.length,1);
+});
+test("the compare dialog marks loading on the picture pane without dimming the image",()=>{
+  const h=harness(),batch=thumbnailJob();h.ui.setJob(batch);
+  const output=h.node("material-detail-output"),pane=h.node("material-output-image");output.parentElement=pane;
+  h.ui.openDetail("s1",batch.items[0]);
+  assert.equal(output.classList.contains("image-loading"),true);
+  assert.equal(pane.classList.contains("image-loading"),true);
+  h.images[0].succeed();h.images[1].succeed();
+  assert.equal(output.classList.contains("image-loading"),false);
+  assert.equal(pane.classList.contains("image-loading"),false);
 });
 test("successful refinement replaces the current preview and opens a before-and-after comparison",()=>{
   const h=harness(),base=thumbnailJob(),old=base.items[0];h.ui.setJob(base);

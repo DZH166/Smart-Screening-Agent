@@ -8,7 +8,10 @@
 .material-stage-list{display:flex;list-style:none;padding:0;margin:14px 0 0;gap:12px;flex-wrap:wrap;font-size:13px;color:var(--muted)}.material-stage-list li{padding:5px 9px;border-radius:5px;background:#f3f5f8}.material-stage-list li.current{color:var(--blue);background:var(--blue-light);font-weight:600}#material-stream-state:empty{display:none}#material-shared-warning{padding:10px 14px;background:var(--amber-light);border-radius:7px}.material-item-info details{font-size:12px}.material-item-preview{height:240px}.material-item-info{padding:11px 12px}.material-item-actions{margin-top:8px}.material-item-name{font-weight:500}
 
 .material-progress-scale{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:8px;font-size:13px;color:var(--muted)}.material-progress-scale strong{color:var(--blue);font-size:17px;font-variant-numeric:tabular-nums}#material-progress-detail{font-variant-numeric:tabular-nums}#material-progress-meter.hidden{display:none}
-.material-selection-stage img.image-loading,.material-output-image img.image-loading{opacity:.68;transition:opacity .12s ease-out}
+/* Loading is shown with a corner badge. Dimming the picture made the original
+   and the generated result look grey, so the image itself is never faded. */
+.material-selection-stage.image-loading::after,.material-output-image.image-loading::after{content:"正在加载原图…";position:absolute;right:10px;bottom:10px;z-index:2;padding:4px 10px;border-radius:999px;background:rgba(17,24,39,.72);color:#fff;font-size:12px;line-height:1.4;pointer-events:none}
+.material-item-badge.refining{background:#eef2ff;color:#2d4bd0}
 
 .material-refine-ack{display:flex;align-items:flex-start;gap:8px;flex-basis:100%;font-size:13px;line-height:1.55;color:#795b19}.material-refine-ack input{width:18px;height:18px;flex:none;margin:2px 0 0;accent-color:var(--blue)}.material-item details p{margin:7px 0;line-height:1.55}.material-detail-actions .material-refine-ack{margin-bottom:6px}#material-detail-warning:empty,#material-detail-guidance:empty{display:none}
 .material-generation-warning{display:block;margin:0 0 14px;color:#795b19;text-align:left}
