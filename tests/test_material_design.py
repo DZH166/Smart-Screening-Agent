@@ -626,3 +626,22 @@ def test_dense_request_hint_points_at_the_design_in_the_final_encoded_image(monk
         assert 0 <= actual[1] < actual[3] <= reference.height
     if limits == "byte_shrink":
         assert len(request["png"]) <= 20_000
+
+
+@pytest.mark.parametrize("box", [(40, 160, 360, 168), (160, 40, 168, 360),
+                                  (0, 0, 1, 380), (0, 0, 380, 1)])
+def test_thin_design_uses_accepted_whole_reference_without_an_extra_call(box):
+    from hsd_tool.material_ark import _input, _prompt_bounds
+
+    class ValidatingArk(FakeArk):
+        def extract_design(self, png, **kwargs):
+            _, size, _, _ = _input(png, decomposition=False)
+            _prompt_bounds(kwargs["bounds"], size)
+            return super().extract_design(png, **kwargs)
+
+    ark = ValidatingArk()
+    result = provider(ark, [design(box)], workers=1).extract(source_image((1000, 1000)))
+    assert len(result.layers) == 1 and len(ark.calls) == 2
+    with Image.open(io.BytesIO(ark.calls[1]["png"])) as reference:
+        assert reference.size == (1000, 1000)
+    assert not any(DENSE_HINT in note for layer in result.layers for note in layer.warnings)

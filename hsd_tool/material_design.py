@@ -108,6 +108,22 @@ def design_share(box, size):
     return max(0, right - left) * max(0, bottom - top) / float(max(1, width * height))
 
 
+def magnified_size(size):
+    width, height = size
+    pixels = float(max(1, width * height))
+    scale = min(math.sqrt(MAGNIFIED_MAX_PIXELS / pixels),
+                max(1.0, math.sqrt(MAGNIFIED_PIXELS / pixels)))
+    return max(2, round(width * scale)), max(2, round(height * scale))
+
+
+def supports_magnified_reference(box, source_size):
+    region = pad_box(box, source_size, ratio=MAGNIFIED_PAD_RATIO)
+    size = region[2] - region[0], region[3] - region[1]
+    # Extremely thin local views exceed Ark's accepted 1:16..16:1 range.
+    # Retain full source context instead, without a failed or extra submission.
+    return all(max(value) <= 16 * min(value) for value in (size, magnified_size(size)))
+
+
 def magnified_reference(source, box):
     """Encode one design enlarged, for sheets too dense to show it clearly.
 
@@ -118,10 +134,7 @@ def magnified_reference(source, box):
     region = pad_box(box, source.size, ratio=MAGNIFIED_PAD_RATIO)
     crop = source.crop(region)
     width, height = crop.size
-    pixels = float(max(1, width * height))
-    scale = min(math.sqrt(MAGNIFIED_MAX_PIXELS / pixels),
-                max(1.0, math.sqrt(MAGNIFIED_PIXELS / pixels)))
-    size = (max(2, round(width * scale)), max(2, round(height * scale)))
+    size = magnified_size((width, height))
     image = crop if size == crop.size else crop.resize(size, Image.Resampling.LANCZOS)
     while True:
         png = _encode(image)
@@ -326,9 +339,11 @@ class MaterialDesignProvider:
         targets = [(index, design, self._native_box(design, source, base))
                    for index, design in enumerate(designs, 1)]
         shares = {index: design_share(native, source.size) for index, _, native in targets}
-        # The whole sheet is only shared when at least one design is big enough to stay
-        # legible inside it; otherwise every design is drawn from its own enlarged crop.
-        need_sheet = any(share >= DENSE_TARGET_SHARE for share in shares.values())
+        magnified = {index: (shares[index] < DENSE_TARGET_SHARE
+                            and supports_magnified_reference(native, source.size))
+                     for index, _, native in targets}
+        # Large designs and over-long local views use the shared whole sheet.
+        need_sheet = not all(magnified.values())
         reference_png, reference_size = prepare_design_reference(source) if need_sheet else (b"", source.size)
         workers = reference_workers(reference_size, self.workers)
         # Every request shares this one reference, so the pool size alone bounds
@@ -339,7 +354,7 @@ class MaterialDesignProvider:
             if _cancelled(check_cancel):
                 raise ArkCancelled()
             share = shares[index]
-            if share < DENSE_TARGET_SHARE:
+            if magnified[index]:
                 payload, region, encoded_size = magnified_reference(source, native)
                 target = design_hint_in_region(native, region, encoded_size)
                 dense_note = ("本设计只占原图约 %d%%，已放大局部参考图重画；清晰度仍受原图分辨率限制。"
