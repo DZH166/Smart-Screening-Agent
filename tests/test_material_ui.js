@@ -18,8 +18,17 @@ function harness(){
     },append(child){this.children.push(child);},replaceChildren(){this.children=[];this.innerHTML="";},remove(){this.removed=true;},setAttribute(k,v){this[k]=v;},getAttribute(k){return this[k]??null;},removeAttribute(k){delete this[k];},focus(){n.focused=true;},addEventListener(k,fn){listeners[k]=fn;},emit(k,event={}){listeners[k]?.({preventDefault(){},target:n,...event});},getBoundingClientRect(){return{left:10,top:20,width:500,height:250};},showModal(){n.open=true;},close(){n.open=false;},setPointerCapture(){}};Object.defineProperty(n,"innerHTML",{get:()=>{const content=nodes.get(id+"-content");return content?html.replace(/(<div data-material-content>)[\s\S]*<\/div>$/,(_,start)=>start+content.innerHTML+"</div>"):html;},set:value=>{html=String(value);n.writes++;const match=html.match(/<div data-material-content>([\s\S]*)<\/div>$/);if(match)node(id+"-content").innerHTML=match[1];const src=html.match(/class="material-item-preview"[\s\S]*?<img src="([^"]*)"/);if(src)node(id+"-image").src=src[1];}});nodes.set(id,n);}return nodes.get(id);}
   const nav=["numbering","material"].map(v=>{const n=node(`nav-${v}`);n.dataset.workspace=v;return n;});
   const sandbox={document:{getElementById:node,querySelectorAll:q=>q==="[data-workspace]"?nav:[],createElement:tag=>node(`${tag}-${++serial}`),documentElement:{dataset:{}},body:node("body"),hidden:false},window:{HSD_TOKEN:"synthetic-token",crypto:{randomUUID:()=>"12345678-1234-4123-8123-123456789abc"},scrollY:30,scrollTo(){},addEventListener(){},setTimeout:fn=>{timers.set(++serial,fn);return serial;},clearTimeout:id=>timers.delete(id)},history:{replaceState(){}},location:{hash:""},URL:{createObjectURL:()=>`blob:synthetic-${++blobSerial}`,revokeObjectURL:v=>revoked.push(v)},sessionStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},setTimeout:fn=>{timers.set(++serial,fn);return serial;},clearTimeout:id=>timers.delete(id),fetch:(url,options)=>{const d=deferred();requests.push({url,options,...d});return d.promise;},FormData:class{constructor(){this.parts=[];}append(...args){this.parts.push(args);}},XMLHttpRequest:class{constructor(){this.listeners={};this.upload={addEventListener:(k,fn)=>this.progress=fn};this.headers={};xhrs.push(this);}open(method,url){this.method=method;this.url=url;}setRequestHeader(k,v){this.headers[k]=v;}addEventListener(k,fn){this.listeners[k]=fn;}send(data){this.data=data;}abort(){this.listeners.abort?.();}reply(status,data){this.status=status;this.responseText=JSON.stringify(data);this.listeners.load();}}};
+  // Browser Image exists in production. Keep callbacks manually controlled so
+  // tests exercise pending, failed and out-of-order full-image downloads.
+  const images=[];
+  class ControlledImage {
+    constructor(){this.naturalWidth=0;this.naturalHeight=0;images.push(this);}
+    succeed(width=2048,height=1024){this.naturalWidth=width;this.naturalHeight=height;this.onload?.();}
+    fail(){this.naturalWidth=0;this.naturalHeight=0;this.onerror?.();}
+  }
+  sandbox.Image=sandbox.window.Image=ControlledImage;
   vm.runInNewContext(source.replace("  boot();","  window.testMaterial={state,workspace,fileError,selectFiles,formatBytes,safeUrl,setJob,loadJob,render,renderCards,renderSources,mutate,start,recoverUpload,stop,reset,openDetail,imagePoint,selectionMove,redo,metrics,controls,selectAllItems,confirmSelected,schedule,closeStream,updateClock};"),sandbox);
-  return{ui:sandbox.window.testMaterial,node,requests,xhrs,timers,storage,revoked,sandbox,async reply(index,data,status=200){requests[index].resolve({ok:status>=200&&status<300,status,json:async()=>data});await flush();}};
+  return{ui:sandbox.window.testMaterial,node,requests,xhrs,timers,storage,revoked,sandbox,images,async reply(index,data,status=200){requests[index].resolve({ok:status>=200&&status<300,status,json:async()=>data});await flush();}};
 }
 function job(overrides={}){return{id:"a".repeat(32),revision:3,status:"ready",progress:{phase:"完成",current:1,total:1},sources:[{id:"s1",name:"原图.png",width:1000,height:500,image_url:`/api/material/jobs/${"a".repeat(32)}/source/s1`}],items:[{id:"i1",source_id:"s1",name:"完整设计",status:"needs_review",warnings:["请核对文字与颜色"],image_url:`/api/material/jobs/${"a".repeat(32)}/item/i1`,download_url:`/api/material/jobs/${"a".repeat(32)}/download/i1`,width:4096,height:2048}],stats:{total:1,ready:0,needs_review:1,skipped:0,failed:0},download_url:null,...overrides};}
 const tests=[];const test=(name,run)=>tests.push({name,run});
@@ -66,7 +75,7 @@ test("per-source progress stays scoped when the next source has a different desi
 test("normal stream renewal reconnects quietly and is cancelled when the workspace is hidden",()=>{const h=harness(),streams=[];h.sandbox.window.EventSource=class{constructor(){this.listeners={};streams.push(this);}addEventListener(name,fn){this.listeners[name]=fn;}close(){this.closed=true;}};h.ui.state.config={available:true};h.ui.state.workspace="material";h.ui.setJob(job({status:"processing"}));h.node("material-stream-state").textContent="进度实时更新中";streams[0].listeners.renew();assert.equal(streams[0].closed,true);assert.equal(h.ui.state.streamDisabled,false);assert.equal(h.node("material-stream-state").textContent,"进度实时更新中");const renewal=h.ui.state.renewTimer;h.ui.schedule();assert.equal(streams.length,1,'snapshot refresh must not bypass renewal delay');h.timers.get(renewal)();assert.equal(streams.length,2);streams[1].listeners.renew();h.ui.workspace("numbering");assert.equal(h.ui.state.renewTimer,null);assert.equal(h.ui.state.stream,null);});
 test("a late renewal timer cannot reconnect the previous task",()=>{const h=harness(),streams=[];h.sandbox.window.EventSource=class{constructor(){this.listeners={};streams.push(this);}addEventListener(name,fn){this.listeners[name]=fn;}close(){this.closed=true;}};h.ui.state.workspace="material";h.ui.setJob(job({status:"processing"}));streams[0].listeners.renew();const previous=h.timers.get(h.ui.state.renewTimer);h.ui.setJob(job({id:"b".repeat(32),status:"processing"}));const count=streams.length;previous();assert.equal(streams.length,count);assert.equal(h.ui.state.streamJob,"b".repeat(32));});
 test("the cumulative clock ticks while a newly opened event stream waits for its first snapshot",()=>{const h=harness();h.sandbox.window.EventSource=class{addEventListener(){}close(){}};let monotonic=1000;h.sandbox.window.performance={now:()=>monotonic};h.ui.state.workspace="material";h.ui.setJob(job({status:"processing",progress:{run_id:"same",task_elapsed_seconds:10}}));assert.ok(h.timers.has(h.ui.state.clockTimer));monotonic=4000;h.timers.get(h.ui.state.clockTimer)();assert.match(h.node("material-progress-detail").textContent,/本批累计用时 13 秒/);h.sandbox.document.hidden=true;h.ui.schedule();assert.equal(h.timers.size,0);});
-test("result cards use task-scoped thumbnails and only the compare dialog loads originals",()=>{const h=harness(),base=job(),item={...base.items[0],thumbnail_url:base.items[0].image_url+"?variant=thumb&v=abc"},source={...base.sources[0],thumbnail_url:base.sources[0].image_url+"?variant=thumb&v=def"};h.ui.setJob(job({items:[item],sources:[source]}));const card=h.ui.state.items.get(item.id);assert.ok(card.node.innerHTML.includes(item.thumbnail_url.replaceAll("&","&amp;")));assert.ok(!card.node.innerHTML.includes(`src="${item.image_url}"`));assert.ok(card.node.innerHTML.includes('loading="lazy"'));assert.ok(card.node.innerHTML.includes('width="640" height="640"'));h.ui.openDetail(source.id,item,false);assert.equal(h.node("material-detail-source").src,source.image_url);assert.equal(h.node("material-detail-output").src,item.image_url);});
+test("result cards use task-scoped thumbnails and only the compare dialog loads originals",()=>{const h=harness(),base=job(),item={...base.items[0],thumbnail_url:base.items[0].image_url+"?variant=thumb&v=abc"},source={...base.sources[0],thumbnail_url:base.sources[0].image_url+"?variant=thumb&v=def"};h.ui.setJob(job({items:[item],sources:[source]}));const card=h.ui.state.items.get(item.id);assert.ok(card.node.innerHTML.includes(item.thumbnail_url.replaceAll("&","&amp;")));assert.ok(!card.node.innerHTML.includes(`src="${item.image_url}"`));assert.ok(card.node.innerHTML.includes('loading="lazy"'));assert.ok(card.node.innerHTML.includes('width="640" height="640"'));h.ui.openDetail(source.id,item,false);assert.equal(h.node("material-detail-source").src,source.thumbnail_url);assert.equal(h.node("material-detail-output").src,item.thumbnail_url);assert.equal(h.images.length,2);assert.ok(h.node("material-detail-output").classList.contains("image-loading"));h.images.forEach(image=>image.succeed());assert.equal(h.node("material-detail-source").src,source.image_url);assert.equal(h.node("material-detail-output").src,item.image_url);assert.equal(h.node("material-detail-output").classList.contains("image-loading"),false);});
 test("a review change replaces only card information and preserves its preview DOM",()=>{const h=harness(),item=job().items[0];h.ui.setJob(job());const record=h.ui.state.items.get(item.id),image=record.node.querySelector(".material-item-preview img"),writes=record.node.writes,loaded=h.ui.metrics.previews_loaded;record.contentNode.querySelector("details").open=true;h.ui.setJob(job({revision:4,items:[{...item,status:"confirmed"}]}));assert.equal(record.node.writes,writes);assert.equal(record.node.querySelector(".material-item-preview img"),image);assert.equal(h.ui.metrics.previews_loaded,loaded);assert.equal(record.contentNode.querySelector("details").open,true);assert.match(record.contentNode.innerHTML,/人工确认/);});
 test("nonvisual result metadata never rebuilds card content or reloads its thumbnail",()=>{const h=harness(),item=job().items[0];h.ui.setJob(job());const record=h.ui.state.items.get(item.id),before={...h.ui.metrics},writes=record.contentNode.writes;h.ui.setJob(job({revision:4,items:[{...item,review:{at:123,method:"employee"},quality:{evidence:"updated"}}]}));assert.equal(h.ui.metrics.cards_updated,before.cards_updated);assert.equal(h.ui.metrics.previews_loaded,before.previews_loaded);assert.equal(record.contentNode.writes,writes);});
 test("new thumbnail content replaces only the preview source and keeps selected context",()=>{const h=harness(),base=job(),item={...base.items[0],thumbnail_url:base.items[0].image_url+"?variant=thumb&v=one"};h.ui.setJob(job({items:[item]}));h.ui.selectAllItems(true);const record=h.ui.state.items.get(item.id),image=record.node.querySelector(".material-item-preview img"),before={...h.ui.metrics},writes=record.node.writes;const next={...item,thumbnail_url:item.image_url+"?variant=thumb&v=two"};h.ui.setJob(job({revision:4,items:[next]}));assert.equal(record.node.writes,writes);assert.equal(record.node.querySelector(".material-item-preview img"),image);assert.equal(image.src,next.thumbnail_url);assert.equal(h.ui.metrics.previews_loaded,before.previews_loaded+1);assert.ok(h.ui.state.selected.has(item.id));});
@@ -74,4 +83,56 @@ test("unsafe or foreign-task thumbnail URLs cannot replace a valid original",()=
 test("original-image drawer builds thumbnails only when opened and ignores metadata-only snapshots",()=>{const h=harness(),base=job(),source={...base.sources[0],thumbnail_url:base.sources[0].image_url+"?variant=thumb&v=one"};h.ui.setJob(job({sources:[source]}));assert.equal(h.node("material-source-grid").innerHTML,"");h.node("material-source-details").open=true;h.ui.renderSources();const writes=h.node("material-source-grid").writes;assert.ok(h.node("material-source-grid").innerHTML.includes("variant=thumb"));h.ui.setJob(job({revision:4,sources:[{...source,status:"done",attempts:[{state:"returned"}]}]}));assert.equal(h.node("material-source-grid").writes,writes);});
 test("source failures remain visible and open the original-image drawer",()=>{const h=harness(),source={...job().sources[0],error:"图片服务未完成，请重试"};h.ui.setJob(job({sources:[source]}));assert.equal(h.node("material-source-details").open,true);assert.match(h.node("material-source-grid").innerHTML,/图片服务未完成/);});
 test("changing or resetting a batch clears old source thumbnails and the open drawer",()=>{const h=harness();h.ui.setJob(job());h.node("material-source-details").open=true;h.ui.renderSources();h.ui.setJob(job({id:"b".repeat(32),sources:[]}));assert.equal(h.node("material-source-grid").innerHTML,"");assert.equal(h.node("material-source-details").open,false);h.node("material-source-grid").innerHTML="old";h.ui.reset();assert.equal(h.node("material-source-grid").innerHTML,"");});
+function thumbnailJob(id="a".repeat(32)) {
+  const base=job({id});
+  const sources=base.sources.map(value=>({...value,image_url:`/api/material/jobs/${id}/source/${value.id}`}));
+  const items=[base.items[0],{...base.items[0],id:"i2",name:"第二张设计"}].map(value=>({...value,image_url:`/api/material/jobs/${id}/item/${value.id}`}));
+  return {...base,sources:sources.map(value=>({...value,thumbnail_url:value.image_url+"?variant=thumb&v=source"})),items:items.map(value=>({...value,thumbnail_url:value.image_url+"?variant=thumb&v="+value.id}))};
+}
+test("late full-image callbacks cannot replace the newly selected item",()=>{
+  const h=harness(),batch=thumbnailJob();h.ui.setJob(batch);
+  h.ui.openDetail("s1",batch.items[0]);h.ui.openDetail("s1",batch.items[1]);
+  assert.equal(h.node("material-detail-output").src,batch.items[1].thumbnail_url);
+  h.images[0].succeed();h.images[1].succeed();
+  assert.equal(h.node("material-detail-output").src,batch.items[1].thumbnail_url);
+  assert.ok(h.node("material-detail-output").classList.contains("image-loading"));
+  h.images[2].succeed();h.images[3].succeed();h.images[1].succeed();
+  assert.equal(h.node("material-detail-output").src,batch.items[1].image_url);
+  assert.equal(h.node("material-detail-title").textContent,batch.items[1].name);
+  assert.equal(h.ui.state.dialog.itemId,"i2");
+  assert.equal(h.requests.length,0);
+});
+test("a failed full image keeps the current thumbnail without a second request",()=>{
+  const h=harness(),batch=thumbnailJob();h.ui.setJob(batch);h.ui.openDetail("s1",batch.items[0]);
+  h.images[1].fail();h.images[0].succeed();
+  assert.equal(h.node("material-detail-output").src,batch.items[0].thumbnail_url);
+  assert.equal(h.node("material-detail-output").classList.contains("image-loading"),false);
+  assert.equal(h.node("material-detail-source").src,batch.sources[0].image_url);
+  assert.equal(h.images.length,2);
+});
+test("identical preview and full URLs do not start redundant preloads",()=>{
+  const h=harness(),batch=job();h.ui.setJob(batch);h.ui.openDetail("s1",batch.items[0]);
+  assert.equal(h.images.length,0);
+  assert.equal(h.node("material-detail-source").src,batch.sources[0].image_url);
+  assert.equal(h.node("material-detail-output").classList.contains("image-loading"),false);
+});
+test("a new task selection is not overwritten by the previous task image callback",()=>{
+  const h=harness(),first=thumbnailJob(),second=thumbnailJob("b".repeat(32));
+  h.ui.setJob(first);h.ui.openDetail("s1",first.items[0]);
+  h.ui.setJob(second);h.ui.openDetail("s1",second.items[0]);
+  h.images[2].succeed();h.images[3].succeed();h.images[0].succeed();h.images[1].fail();
+  assert.equal(h.node("material-detail-source").src,second.sources[0].image_url);
+  assert.equal(h.node("material-detail-output").src,second.items[0].image_url);
+  assert.equal(h.node("material-detail-output").classList.contains("image-loading"),false);
+});
+test("selection coordinates use the source size while a thumbnail is displayed",()=>{
+  const h=harness(),batch=thumbnailJob();h.ui.setJob(batch);h.ui.openDetail("s1",batch.items[0],true);
+  const image=h.node("material-detail-source");image.naturalWidth=640;image.naturalHeight=320;
+  const center=h.ui.imagePoint({clientX:260,clientY:145});
+  assert.equal(center.x,500);assert.equal(center.y,250);assert.equal(center.width,1000);assert.equal(center.height,500);
+  h.ui.state.startPoint=h.ui.imagePoint({clientX:60,clientY:45});h.ui.selectionMove({clientX:360,clientY:195});
+  assert.equal(JSON.stringify(h.ui.state.box),JSON.stringify({x:100,y:50,width:600,height:300}));
+  h.images[0].succeed(1000,500);image.naturalWidth=1000;image.naturalHeight=500;
+  assert.equal(h.ui.imagePoint({clientX:260,clientY:145}).x,500);
+});
 async function main(){let failed=0;for(const t of tests){try{await t.run();console.log(`PASS ${t.name}`);}catch(e){failed++;console.error(`FAIL ${t.name}\n${e.stack}`);}}console.log(`${tests.length-failed} passed, ${failed} failed (synthetic material employee UI)`);if(failed)process.exitCode=1;}main();
