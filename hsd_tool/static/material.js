@@ -251,10 +251,26 @@
     if(action==="download"){download(item.download_url);return;}
     const result=await mutate("resolve",{item_id:item.id,action});if(result){const next=state.job.items.find(value=>value.status==="needs_review");if(state.dialog){if(next)openDetail(next.source_id,next,false);else $("material-detail-dialog").close();}else{const node=next?state.items.get(next.id)?.node:null;node?.querySelector("button")?.focus({preventScroll:true});}}
   }
+  function swapImage(el,value) {
+    // Show the already-cached thumbnail first, then swap in the full file once it
+    // decodes. Without this the previous item's picture stays on screen while the
+    // next multi-megabyte PNG downloads, which looks like a stuck dialog.
+    const full=safeUrl(value&&value.image_url),thumb=safeUrl(value&&value.thumbnail_url)||full;
+    el.dataset.imageToken=String((Number(el.dataset.imageToken||0)+1));
+    const token=el.dataset.imageToken;
+    if(!thumb){el.removeAttribute("src");el.classList.remove("image-loading");return;}
+    if(el.getAttribute("src")!==thumb)el.src=thumb;
+    if(!full||full===thumb){el.classList.remove("image-loading");return;}
+    el.classList.add("image-loading");
+    const preload=new Image();
+    preload.decoding="async";
+    const settle=()=>{if(el.dataset.imageToken===token){if(preload.naturalWidth)el.src=full;el.classList.remove("image-loading");}};
+    preload.onload=settle;preload.onerror=settle;preload.src=full;
+  }
   function openDetail(sourceId,item=null,redo=false) {
     const source=state.job.sources.find(value=>value.id===sourceId);if(!source)return;state.dialog={sourceId,itemId:item?.id||null,redo};state.box=null;state.startPoint=null;
     $("material-detail-title").textContent=redo?(item?"标记需要修改的位置":"框选完整设计"):item?.name||source.name;$("material-detail-note").textContent=source.name;
-    const sourceUrl=safeUrl(source.image_url),outputUrl=item?safeUrl(item.image_url):"";if($("material-detail-source").getAttribute("src")!==sourceUrl)$("material-detail-source").src=sourceUrl;if($("material-detail-output").getAttribute("src")!==outputUrl)$("material-detail-output").src=outputUrl;$("material-detail-output-figure").classList.toggle("hidden",!item);$("material-detail-warning").textContent=(item?.warnings||[]).join("；");
+    swapImage($("material-detail-source"),source);swapImage($("material-detail-output"),item);$("material-detail-output-figure").classList.toggle("hidden",!item);$("material-detail-warning").textContent=(item?.warnings||[]).join("；");
     $("material-redo-controls").classList.toggle("hidden",!redo);$("material-selection-stage").classList.toggle("selecting",redo);$("material-selection-box").classList.add("hidden");$("material-box-note").textContent=item?"在原图拖动标记问题位置。只重做这张素材，不改动其他已完成项。":"在原图拖动框选一个完整设计，文字和装饰一起框入。";$("material-correction-kind").selectedIndex=0;$("material-correction-note").value="";$("material-dialog-message").classList.add("hidden");
     $("material-detail-actions").innerHTML=redo?"":item?`${!completed(item)?`<button class="button button-primary" type="button" data-material-action="confirm" data-item-id="${esc(item.id)}">确认可用</button>`:`<button class="button button-primary" type="button" data-material-action="download" data-item-id="${esc(item.id)}">下载 PNG</button>`}<button class="button button-secondary" type="button" data-material-action="correct" data-item-id="${esc(item.id)}">标记修改</button>${item.status!=="skipped"?`<button class="button button-quiet" type="button" data-material-action="skip" data-item-id="${esc(item.id)}">跳过</button>`:""}`:"";
     $("material-unknown-row").classList.toggle("hidden",!source.submission_unknown);$("material-unknown-ack").checked=false;$("material-redo-submit").textContent=source.submission_unknown?"重新提交，可能重复计费":"只重做框选范围";

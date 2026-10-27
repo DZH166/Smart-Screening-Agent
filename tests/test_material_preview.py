@@ -1,5 +1,6 @@
 """Display derivatives retain ownership/integrity; downloads remain full size."""
 from io import BytesIO
+from pathlib import Path
 from types import SimpleNamespace
 
 from PIL import Image
@@ -170,3 +171,16 @@ def test_unknown_is_source_scoped_and_settled_call_updates_remove_stale_unknown(
     final = complete(manager, result["id"])
     assert final["sources"][1]["submission_unknown"] is False
     assert provider.calls == 3
+
+
+def test_detail_view_shows_the_cached_thumbnail_before_the_full_file():
+    """Opening another item must not keep the previous picture on screen."""
+    script = (Path(__file__).resolve().parents[1] / "hsd_tool" / "static" / "material.js").read_text("utf-8")
+    assert "function swapImage(el,value)" in script
+    body = script.split("function swapImage(el,value)", 1)[1][:1200]
+    assert "thumbnail_url" in body and "image_url" in body
+    assert "new Image()" in body
+    assert "preload.onload=settle" in body and "image-loading" in body
+    assert 'swapImage($("material-detail-source"),source)' in script
+    assert 'swapImage($("material-detail-output"),item)' in script
+    assert 'getAttribute("src")!==sourceUrl' not in script

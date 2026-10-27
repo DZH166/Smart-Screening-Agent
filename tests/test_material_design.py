@@ -1,4 +1,4 @@
-﻿"""Native design extraction, full canvas preservation and bounded concurrency. No real API."""
+"""Native design extraction, full canvas preservation and bounded concurrency. No real API."""
 from concurrent.futures import ThreadPoolExecutor
 import io
 import threading
@@ -403,7 +403,7 @@ def test_every_design_is_extracted_once_regardless_of_size_count_or_transparency
     assert result.provider_usage["seedream"]["input_images"] == 1 + len(boxes)
     assert result.provider_usage["seedream"]["generated_images"] == 1 + 2 * len(boxes)
     assert result.provider_usage["deepseek"]["requests"] == 1
-    assert all("高清清楚" in row["instructions"] for row in ark.calls[1:])
+    assert all("不要白色贴纸边" in row["instructions"] for row in ark.calls[1:])
     assert not any("精修" in note for layer in result.layers for note in layer.warnings)
     for layer in result.layers:
         assert_canvas_preserved(Image.open(io.BytesIO(ark.native)), layer.png)
@@ -544,3 +544,54 @@ def test_extraction_concurrency_uses_shared_reference_pixel_budget(monkeypatch):
     assert len(result.layers) == 8 and ark.peak == 2
     assert [row["operation"] for row in ark.calls] == ["clean"] + ["extract_design"] * 8
     assert ark.refine_calls == 0
+
+
+def busy_sheet(size=(400, 400)):
+    """Every region differs, so a private crop is provably a different payload."""
+    image = Image.new("RGB", size)
+    draw = ImageDraw.Draw(image)
+    for y in range(0, size[1], 8):
+        for x in range(0, size[0], 8):
+            draw.rectangle((x, y, x + 7, y + 7),
+                           fill=((x * 7) % 256, (y * 11) % 256, ((x + y) * 3) % 256))
+    return _encode(image)
+
+DENSE_HINT = "\u653e\u5927\u5c40\u90e8\u53c2\u8003\u56fe"
+
+
+def test_dense_sheet_draws_each_design_from_its_own_enlarged_view():
+    """Sixty-odd tiny designs have too few sheet pixels to stay sharp."""
+    boxes = [(x, y, x + 40, y + 40) for y in (10, 90, 170, 250) for x in (10, 90, 170, 250)]
+    ark = FakeArk()
+    result = provider(ark, [design(box) for box in boxes], workers=1).extract(busy_sheet())
+    assert len(result.layers) == len(boxes)
+    views = [row["png"] for row in ark.calls[1:]]
+    assert all(view != ark.calls[0]["png"] for view in views)
+    assert len(set(views)) == len(boxes)
+    crop = Image.open(io.BytesIO(views[0]))
+    assert max(crop.size) >= 900
+    assert any(DENSE_HINT in note for layer in result.layers for note in layer.warnings)
+    assert all(row["bounds"]["width"] <= crop.width for row in ark.calls[1:])
+
+
+def test_sparse_sheet_still_shares_one_whole_sheet_reference():
+    boxes = [(0, 0, 180, 180), (200, 200, 380, 380)]
+    ark = FakeArk()
+    result = provider(ark, [design(box) for box in boxes], workers=1).extract(busy_sheet())
+    views = [row["png"] for row in ark.calls[1:]]
+    assert views[0] == views[1]
+    assert ark.calls[1]["bounds"] != ark.calls[2]["bounds"]
+    assert not any(DENSE_HINT in note for layer in result.layers for note in layer.warnings)
+
+
+def test_magnified_reference_keeps_the_box_inside_its_own_view():
+    source = Image.open(io.BytesIO(busy_sheet())).convert("RGB")
+    box = (180, 180, 230, 230)
+    png, region = design_module.magnified_reference(source, box)
+    assert region[0] <= box[0] < box[2] <= region[2]
+    assert region[1] <= box[1] < box[3] <= region[3]
+    hint = design_module.design_hint_in_region(box, region)
+    crop = Image.open(io.BytesIO(png))
+    assert 0 <= hint["x"] and hint["x"] + hint["width"] <= crop.width
+    assert 0 <= hint["y"] and hint["y"] + hint["height"] <= crop.height
+    assert max(crop.size) > 50 * 4

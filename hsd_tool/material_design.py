@@ -35,9 +35,18 @@ REFERENCE_MAX_PIXELS = 16_000_000
 CONCURRENT_REFERENCE_PIXELS = 32_000_000
 
 DESIGN_NOTE = (
-    "人物全身、头发、裙摆、鞋子、文字、装饰和内部底板整体保留。"
-    "高清清楚，四周自然留透明空隙，不裁切；保持原文字、配色和平面风格，不编造细节。"
+    "把参考图中的这一个完整设计重画成清晰素材：人物全身、头发、裙摆、鞋子、文字、装饰和内部底板整体保留。"
+    "线条、文字和配饰边缘要锐利清楚，不要发虚、不要像素颗粒感。"
+    "主体尽量占满画面，四周只留很窄的透明空隙，不裁切。"
+    "背景必须是真透明：不要白色底、不要白色贴纸边、不要白色或彩色外描边、不要光晕和投影。"
+    "保持原文字、配色和平面印刷风格，不编造细节。"
 )
+# Below this share of the sheet one design gets too few reference pixels to stay sharp,
+# so it is drawn from an enlarged crop of itself instead of the whole sheet.
+DENSE_TARGET_SHARE = .04
+MAGNIFIED_PIXELS = 2_400_000
+MAGNIFIED_MAX_PIXELS = 4_000_000
+MAGNIFIED_PAD_RATIO = .30
 
 
 def pad_box(box, size, *, ratio=PAD_RATIO):
@@ -90,6 +99,45 @@ def design_target_bounds(box, source_size, reference_size):
     return {"x": x, "y": y,
             "width": min(ref_width, math.ceil(right * ref_width / width)) - x,
             "height": min(ref_height, math.ceil(bottom * ref_height / height)) - y}
+
+
+def design_share(box, size):
+    """How much of the sheet a single design covers, as a fraction."""
+    left, top, right, bottom = box
+    width, height = size
+    return max(0, right - left) * max(0, bottom - top) / float(max(1, width * height))
+
+
+def magnified_reference(source, box):
+    """Encode one design enlarged, for sheets too dense to show it clearly.
+
+    The crop only feeds the model's view of the target; the returned layer canvas is
+    still kept whole. Enlarging an already tiny region adds no real detail, it only
+    lets the model redraw the shape from a cleaner, isolated view.
+    """
+    region = pad_box(box, source.size, ratio=MAGNIFIED_PAD_RATIO)
+    crop = source.crop(region)
+    width, height = crop.size
+    pixels = float(max(1, width * height))
+    scale = min(math.sqrt(MAGNIFIED_MAX_PIXELS / pixels),
+                max(1.0, math.sqrt(MAGNIFIED_PIXELS / pixels)))
+    size = (max(2, round(width * scale)), max(2, round(height * scale)))
+    image = crop if size == crop.size else crop.resize(size, Image.Resampling.LANCZOS)
+    while True:
+        png = _encode(image)
+        if len(png) <= MAX_INPUT_BYTES or max(image.size) <= 64:
+            return png, region
+        # Only a pathological PNG reaches here: shrink the view, never cut it.
+        factor = min(.9, math.sqrt(MAX_INPUT_BYTES / len(png)) * .95)
+        image = image.resize((max(2, round(image.width * factor)),
+                              max(2, round(image.height * factor))), Image.Resampling.LANCZOS)
+
+
+def design_hint_in_region(box, region):
+    """Map the target box into a crop's own pixel coordinates."""
+    left, top, right, bottom = box
+    return {"x": max(0, left - region[0]), "y": max(0, top - region[1]),
+            "width": max(1, right - left), "height": max(1, bottom - top)}
 
 
 def preserve_design(image):
@@ -254,43 +302,61 @@ class MaterialDesignProvider:
                     error.code = "submission_unknown"
             raise
 
+    def _native_box(self, design, source, base):
+        """Design box in the original sheet's pixels, clamped to the image."""
+        scale_x, scale_y = source.width / base.width, source.height / base.height
+        left, top, right, bottom = design.box
+        x = max(0, math.floor(left * scale_x))
+        y = max(0, math.floor(top * scale_y))
+        width = min(max(1, round((right - left) * scale_x)), source.width - x)
+        height = min(max(1, round((bottom - top) * scale_y)), source.height - y)
+        return (x, y, x + width, y + height)
+
     def _generate(self, source, base, designs, instructions, check_cancel, progress, call):
-        """One target per native extraction, sharing the complete source context."""
+        """One target per native extraction; dense sheets get an enlarged local view."""
         total = len(designs)
         note = self._note(instructions)
         layers, failures = [], []
         finished = 0
-        scale_x, scale_y = source.width / base.width, source.height / base.height
-        reference_png, reference_size = prepare_design_reference(source)
+        targets = [(index, design, self._native_box(design, source, base))
+                   for index, design in enumerate(designs, 1)]
+        shares = {index: design_share(native, source.size) for index, _, native in targets}
+        # The whole sheet is only shared when at least one design is big enough to stay
+        # legible inside it; otherwise every design is drawn from its own enlarged crop.
+        need_sheet = any(share >= DENSE_TARGET_SHARE for share in shares.values())
+        reference_png, reference_size = prepare_design_reference(source) if need_sheet else (b"", source.size)
         workers = reference_workers(reference_size, self.workers)
         # Every request shares this one reference, so the pool size alone bounds
         # both concurrent input pixels and the eight-call limit. No automatic
         # second generation is planned from a target's size or transparency.
 
-        def one(index, design):
+        def one(index, design, native):
             if _cancelled(check_cancel):
                 raise ArkCancelled()
-            left, top, right, bottom = design.box
-            bounds = {"x": max(0, math.floor(left * scale_x)), "y": max(0, math.floor(top * scale_y)),
-                      "width": max(1, round((right - left) * scale_x)),
-                      "height": max(1, round((bottom - top) * scale_y))}
-            bounds["width"] = min(bounds["width"], source.width - bounds["x"])
-            bounds["height"] = min(bounds["height"], source.height - bounds["y"])
-            native = (bounds["x"], bounds["y"], bounds["x"] + bounds["width"], bounds["y"] + bounds["height"])
-            target = design_target_bounds(native, source.size, reference_size)
+            share = shares[index]
+            if share < DENSE_TARGET_SHARE:
+                payload, region = magnified_reference(source, native)
+                target = design_hint_in_region(native, region)
+                dense_note = ("本设计只占原图约 %d%%，已放大局部参考图重画；清晰度仍受原图分辨率限制。"
+                              % max(1, round(share * 100)))
+            else:
+                payload = reference_png
+                target = design_target_bounds(native, source.size, reference_size)
+                dense_note = ""
             cleaned = call("seedream", "extract_design", lambda: self.ark.extract_design(
-                reference_png, bounds=target, instructions=note, check_cancel=check_cancel))
+                payload, bounds=target, instructions=note, check_cancel=check_cancel))
             if len(cleaned.layers) != 1:
                 raise ArkProviderError("ambiguous_design", "图片服务没有返回唯一完整设计，请重新框选后重做。")
             native_image = _decode(cleaned.layers[0].png, output=True)
             extra_notes = list(cleaned.warnings) + list(cleaned.layers[0].warnings)
             png, crop_notes = preserve_design(native_image)
-            return ArkLayer(png, design.label, "", bounds, index,
-                            tuple(dict.fromkeys(list(design.warnings) + extra_notes + crop_notes)))
+            return ArkLayer(png, design.label, "", native, index,
+                            tuple(dict.fromkeys(list(design.warnings) + extra_notes + crop_notes
+                                                + ([dense_note] if dense_note else []))))
 
         with ThreadPoolExecutor(max_workers=min(workers, total)) as pool:
-            futures = {pool.submit(one, index, design): (index, design)
-                       for index, design in enumerate(designs, 1)}
+            futures = {pool.submit(one, index, design, native): (index, design)
+                       for index, design, native in targets}
             for future in as_completed(futures):
                 index, design = futures[future]
                 try:
