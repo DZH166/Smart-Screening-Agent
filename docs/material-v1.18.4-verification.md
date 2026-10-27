@@ -49,4 +49,13 @@
 
 ## 部署状态
 
-见下方回执（部署完成后补充）。
+已上线（2026-10-27 15:50 +0800）：
+
+- 提交 `ede5d7e`（`fix: sharpen dense material sheets and switch preview images instantly`），已推送到 `origin/main`。
+- 服务器 `/opt/hsd-agent/releases/ede5d7eee90423b42560d4c011d3a0e082a734e6`，`/opt/hsd-agent/current` 已指向该版本，`hsd-agent.service` 重启后 `ActiveState=active`、`NRestarts=0`，Gunicorn 26.2.0 单 worker 正常监听 `127.0.0.1:8830`。
+- 公开入口 `https://39.106.45.116:8443/` 返回 200；`/api/health` 仍要求员工访问码（未新建临时生产访问码）。
+- 线上文件核对：`hsd_tool/__init__.py` 为 `1.18.4`，`material_design.py` 含 `DENSE_TARGET_SHARE` 与“不要白色贴纸边”，`static/material.js`（46044 字节）含 `function swapImage`，`static/material.css` 含 `image-loading`。
+- 服务器磁盘 12G 卷使用 4.0G、剩余 7.7G；本次测试用的 `/tmp/hsd-test` 与 `/tmp/release.tgz` 已清理，未写入任务目录，不影响员工任务与保留期。
+
+浏览器需要重新加载页面才能拿到新的 JS/CSS（静态资源按版本号引用，未改动文件名）。
+
