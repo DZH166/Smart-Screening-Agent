@@ -587,11 +587,42 @@ def test_sparse_sheet_still_shares_one_whole_sheet_reference():
 def test_magnified_reference_keeps_the_box_inside_its_own_view():
     source = Image.open(io.BytesIO(busy_sheet())).convert("RGB")
     box = (180, 180, 230, 230)
-    png, region = design_module.magnified_reference(source, box)
+    png, region, encoded_size = design_module.magnified_reference(source, box)
     assert region[0] <= box[0] < box[2] <= region[2]
     assert region[1] <= box[1] < box[3] <= region[3]
-    hint = design_module.design_hint_in_region(box, region)
+    hint = design_module.design_hint_in_region(box, region, encoded_size)
     crop = Image.open(io.BytesIO(png))
+    assert encoded_size == crop.size
     assert 0 <= hint["x"] and hint["x"] + hint["width"] <= crop.width
     assert 0 <= hint["y"] and hint["y"] + hint["height"] <= crop.height
     assert max(crop.size) > 50 * 4
+
+
+@pytest.mark.parametrize("limits", ["upscale", "downscale", "byte_shrink"])
+@pytest.mark.parametrize("box", [(400, 400, 500, 500), (0, 50, 100, 150)])
+def test_dense_request_hint_points_at_the_design_in_the_final_encoded_image(monkeypatch, limits, box):
+    # Pixel projection, not just containment: the hint must still surround the
+    # visible subject after up/down-scaling and PNG byte-budget resizing.
+    source = Image.new("RGBA", (1000, 1000), (0, 0, 0, 0))
+    pixels = np.random.default_rng(57).integers(0, 256, (100, 100, 3), dtype=np.uint8)
+    subject = Image.fromarray(pixels).convert("RGBA")
+    source.paste(subject, box[:2])
+    if limits == "downscale":
+        monkeypatch.setattr(design_module, "MAGNIFIED_PIXELS", 10_000)
+        monkeypatch.setattr(design_module, "MAGNIFIED_MAX_PIXELS", 12_000)
+    elif limits == "byte_shrink":
+        monkeypatch.setattr(design_module, "MAX_INPUT_BYTES", 20_000)
+    ark = FakeArk()
+    locator_box = tuple(value * 2 // 5 for value in box)
+    result = provider(ark, [design(locator_box)], workers=1).extract(_encode(source))
+    assert len(result.layers) == 1 and len(ark.calls) == 2
+    request = ark.calls[1]
+    with Image.open(io.BytesIO(request["png"])) as reference:
+        visible = reference.getchannel("A").point(lambda value: 255 if value >= 128 else 0).getbbox()
+        hint = request["bounds"]
+        actual = (hint["x"], hint["y"], hint["x"] + hint["width"], hint["y"] + hint["height"])
+        assert all(abs(sent - seen) <= 2 for sent, seen in zip(actual, visible))
+        assert 0 <= actual[0] < actual[2] <= reference.width
+        assert 0 <= actual[1] < actual[3] <= reference.height
+    if limits == "byte_shrink":
+        assert len(request["png"]) <= 20_000

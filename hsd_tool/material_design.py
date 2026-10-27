@@ -126,18 +126,23 @@ def magnified_reference(source, box):
     while True:
         png = _encode(image)
         if len(png) <= MAX_INPUT_BYTES or max(image.size) <= 64:
-            return png, region
+            return png, region, image.size
         # Only a pathological PNG reaches here: shrink the view, never cut it.
         factor = min(.9, math.sqrt(MAX_INPUT_BYTES / len(png)) * .95)
         image = image.resize((max(2, round(image.width * factor)),
                               max(2, round(image.height * factor))), Image.Resampling.LANCZOS)
 
 
-def design_hint_in_region(box, region):
-    """Map the target box into a crop's own pixel coordinates."""
+def design_hint_in_region(box, region, reference_size):
+    """Project the source target into the final encoded reference's pixels."""
     left, top, right, bottom = box
-    return {"x": max(0, left - region[0]), "y": max(0, top - region[1]),
-            "width": max(1, right - left), "height": max(1, bottom - top)}
+    width, height = region[2] - region[0], region[3] - region[1]
+    ref_width, ref_height = reference_size
+    x = max(0, min(ref_width - 1, math.floor((left - region[0]) * ref_width / width)))
+    y = max(0, min(ref_height - 1, math.floor((top - region[1]) * ref_height / height)))
+    right = min(ref_width, max(x + 1, math.ceil((right - region[0]) * ref_width / width)))
+    bottom = min(ref_height, max(y + 1, math.ceil((bottom - region[1]) * ref_height / height)))
+    return {"x": x, "y": y, "width": right - x, "height": bottom - y}
 
 
 def preserve_design(image):
@@ -335,8 +340,8 @@ class MaterialDesignProvider:
                 raise ArkCancelled()
             share = shares[index]
             if share < DENSE_TARGET_SHARE:
-                payload, region = magnified_reference(source, native)
-                target = design_hint_in_region(native, region)
+                payload, region, encoded_size = magnified_reference(source, native)
+                target = design_hint_in_region(native, region, encoded_size)
                 dense_note = ("本设计只占原图约 %d%%，已放大局部参考图重画；清晰度仍受原图分辨率限制。"
                               % max(1, round(share * 100)))
             else:
