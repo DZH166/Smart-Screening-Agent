@@ -345,10 +345,18 @@ class MaterialDesignProvider:
         # Large designs and over-long local views use the shared whole sheet.
         need_sheet = not all(magnified.values())
         reference_png, reference_size = prepare_design_reference(source) if need_sheet else (b"", source.size)
-        workers = reference_workers(reference_size, self.workers)
-        # Every request shares this one reference, so the pool size alone bounds
-        # both concurrent input pixels and the eight-call limit. No automatic
-        # second generation is planned from a target's size or transparency.
+        planned_sizes = []
+        for index, _, native in targets:
+            if magnified[index]:
+                region = pad_box(native, source.size, ratio=MAGNIFIED_PAD_RATIO)
+                planned_sizes.append(magnified_size((region[2] - region[0], region[3] - region[1])))
+            else:
+                planned_sizes.append(reference_size)
+        # A PNG byte-limit reduction can only shrink these planned views. Bound
+        # every worker by the largest actual reference plan, never source.size
+        # when the whole source is not sent. Mixed views remain conservative.
+        largest = max(planned_sizes, key=lambda size: size[0] * size[1])
+        workers = reference_workers(largest, self.workers)
 
         def one(index, design, native):
             if _cancelled(check_cancel):

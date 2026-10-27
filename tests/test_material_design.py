@@ -645,3 +645,68 @@ def test_thin_design_uses_accepted_whole_reference_without_an_extra_call(box):
     with Image.open(io.BytesIO(ark.calls[1]["png"])) as reference:
         assert reference.size == (1000, 1000)
     assert not any(DENSE_HINT in note for layer in result.layers for note in layer.warnings)
+
+
+@pytest.mark.parametrize("source_size,budget,expected", [
+    ((400, 400), 32_000_000, 8), ((6000, 6000), 32_000_000, 8),
+    ((6000, 6000), 4_800_000, 2)], ids=["small-eight", "large-eight", "large-budget-two"])
+def test_dense_parallelism_uses_sent_reference_pixels(monkeypatch, source_size, budget, expected):
+    monkeypatch.setattr(design_module, "CONCURRENT_REFERENCE_PIXELS", budget)
+    entered, release = threading.Event(), threading.Event()
+
+    class HeldArk(FakeArk):
+        def __init__(self):
+            super().__init__()
+            self.active = self.peak = 0
+            self.sizes = []
+
+        def extract_design(self, png, **kwargs):
+            with Image.open(io.BytesIO(png)) as reference:
+                size = reference.size
+            with self.lock:
+                self.sizes.append(size)
+                self.active += 1
+                self.peak = max(self.peak, self.active)
+                if self.active == expected:
+                    entered.set()
+            try:
+                assert release.wait(20)
+                return super().extract_design(png, **kwargs)
+            finally:
+                with self.lock:
+                    self.active -= 1
+
+    designs = [design((10 + 90 * (i % 4), 10 + 180 * (i // 4),
+                       40 + 90 * (i % 4), 40 + 180 * (i // 4))) for i in range(8)]
+    ark = HeldArk()
+    with ThreadPoolExecutor(max_workers=1) as driver:
+        task = driver.submit(provider(ark, designs, workers=8).extract, source_image(source_size))
+        try:
+            reached = entered.wait(12)
+        finally:
+            release.set()
+        result = task.result(20)
+    assert reached and ark.peak == expected
+    assert len(result.layers) == 8 and len(ark.calls) == 9
+    assert max(width * height for width, height in ark.sizes) * ark.peak <= budget
+
+
+def test_mixed_references_bound_parallelism_by_largest_planned_view(monkeypatch):
+    limits = []
+
+    class ObservedPool(ThreadPoolExecutor):
+        def __init__(self, max_workers):
+            limits.append(max_workers)
+            super().__init__(max_workers=max_workers)
+
+    monkeypatch.setattr(design_module, "ThreadPoolExecutor", ObservedPool)
+    ark = FakeArk()
+    result = provider(ark, [design((0, 0, 200, 200)), design((250, 250, 280, 280))]).extract(
+        source_image((6000, 6000)))
+    assert len(result.layers) == 2 and len(ark.calls) == 3
+    assert limits == [2]
+    pixels = []
+    for request in ark.calls[1:]:
+        with Image.open(io.BytesIO(request["png"])) as image:
+            pixels.append(image.width * image.height)
+    assert max(pixels) * limits[0] <= design_module.CONCURRENT_REFERENCE_PIXELS
