@@ -565,7 +565,8 @@ def test_refine_is_one_transparent_native_2k_request_and_preserves_every_output_
     body = json.loads(transport.calls[0][0].data)
     assert body["size"] == "2K" and body["background"] == "transparent"
     assert "layer_decomposition" not in body
-    assert "约80%" in body["prompt"] and "保留鞋子" in body["prompt"]
+    assert "约80%" not in body["prompt"] and "保留鞋子" in body["prompt"]
+    assert "保持原有构图、位置、比例" in body["prompt"] and "不移动或重新排版" in body["prompt"]
     assert "不新增白色贴纸边、黑色外描边、光晕或投影" in body["prompt"]
     assert "保留原设计内部线条及白色内容" in body["prompt"]
     with Image.open(io.BytesIO(output.layers[0].png)) as actual:
@@ -574,11 +575,38 @@ def test_refine_is_one_transparent_native_2k_request_and_preserves_every_output_
     assert output.usage == {"generated_images": 1, "input_images": 1}
 
 
-def test_refine_requires_real_transparency_before_spending():
+@pytest.mark.parametrize("format", ["PNG", "JPEG", "WEBP", "RGBA"])
+def test_refine_opaque_input_uses_one_official_opaque_request_without_cutting_or_fake_alpha(format):
+    native = Image.new("RGB", (320, 640), (253, 242, 231))
+    native.putpixel((0, 0), (80, 20, 90))
+    native.putpixel((319, 639), (50, 120, 30))
+    transport = Recorder(single_image_data(ark._encode(native)))
+    source = ark._encode(Image.new("RGBA", (512, 512), (110, 25, 190, 255))) if format == "RGBA" else picture(format=format)
+    result = provider(transport).refine_design(source)
+    assert len(transport.calls) == 1
+    body = json.loads(transport.calls[0][0].data)
+    assert body["background"] == "opaque" and body["size"] == "2K"
+    assert body["output_format"] == "png" and body["response_format"] == "b64_json"
+    assert body["watermark"] is False and "layer_decomposition" not in body
+    assert "保持原有背景和内部底板" in body["prompt"] and "不擅自抠图" in body["prompt"]
+    raw = base64.b64decode(body["image"].split(",", 1)[1])
+    with Image.open(io.BytesIO(raw)) as sent:
+        assert sent.size == (512, 512) and sent.getchannel("A").getextrema() == (255, 255)
+    with Image.open(io.BytesIO(result.layers[0].png)) as actual:
+        assert actual.size == native.size and actual.tobytes() == native.convert("RGBA").tobytes()
+    assert result.no_upscale and result.rectangular_crops
+    assert any("原素材无透明背景" in warning for warning in result.warnings)
+    assert result.usage == {"generated_images": 1, "input_images": 1}
+
+
+def test_refine_empty_image_and_cancel_before_dispatch_never_spend():
     transport = Recorder(single_image_data())
     with pytest.raises(ark.ArkProviderError) as error:
-        provider(transport).refine_design(picture())
-    assert error.value.code == "missing_alpha" and not transport.calls
+        provider(transport).refine_design(picture(alpha=True, empty=True))
+    assert error.value.code == "empty_layer" and not transport.calls
+    with pytest.raises(ark.ArkCancelled):
+        provider(transport).refine_design(picture(alpha=True), check_cancel=lambda: True)
+    assert not transport.calls
 
 
 def test_refine_opaque_return_is_preserved_with_visible_warning_instead_of_mask_deletion():

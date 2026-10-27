@@ -55,6 +55,10 @@ class Provider:
         self.edit_raw = raw
         return self.extract(raw, **kwargs)
 
+    def refine(self, raw, **kwargs):
+        self.edit_raw = raw
+        return self.extract(raw, **kwargs)
+
 
 @pytest.fixture
 def service(tmp_path):
@@ -75,17 +79,19 @@ def complete(manager, identifier):
     return manager.snapshot(identifier, "employee-a")
 
 
-def test_generated_proposal_needs_review_until_explicit_confirm(service):
+def test_generated_proposal_downloads_without_claiming_employee_or_quality_review(service):
     manager, provider = service
     result = complete(manager, upload(manager))
     assert result["status"] == "ready"
-    assert result["stats"] == {"total": 1, "ready": 0, "needs_review": 1, "skipped": 0, "failed": 0}
-    assert result["download_url"] is None
+    assert result["stats"] == {"total": 1, "ready": 0, "downloadable": 1, "needs_review": 0, "skipped": 0, "failed": 0}
+    assert result["download_url"]
     item = result["items"][0]
     assert max(item["width"], item["height"]) == 4096
     assert "放大不等于恢复" in " ".join(item["warnings"])
-    with pytest.raises(Conflict):
-        manager.asset(result["id"], "employee-a", "item", item["id"], download=True)
+    assert item["status"] == "generated" and item["downloadable"] is True and "review" not in item
+    manager.asset(result["id"], "employee-a", "item", item["id"], download=True)
+    manager.download(result["id"], "employee-a")
+    assert "review" not in manager.jobs[result["id"]]["items"][0]
     updated = manager.resolve(result["id"], "employee-a", {"expected_revision": result["revision"], "item_id": item["id"], "action": "confirm"})
     assert updated["stats"]["ready"] == 1
     path, digest = manager.download(result["id"], "employee-a")
@@ -342,7 +348,7 @@ def test_batch_confirm_is_explicit_employee_decision_and_undo_is_atomic(service)
     assert all(row["status"] == "confirmed" and row["review"]["method"] == "employee_batch" for row in updated["items"])
     assert [row["warnings"] for row in updated["items"]] == [row["warnings"] for row in result["items"]]
     restored = manager.undo_batch(result["id"], "employee-a", {"expected_revision": updated["revision"]})
-    assert restored["stats"]["ready"] == 0 and restored["stats"]["needs_review"] == 2
+    assert restored["stats"]["ready"] == 0 and restored["stats"]["downloadable"] == 2
     assert restored["can_undo_batch"] is False
     assert all("review" not in row for row in restored["items"])
     with pytest.raises(Conflict):
@@ -373,7 +379,7 @@ def test_batch_failure_never_confirms_other_selected_rows(service, problem):
     before = (manager._directory(result["id"]) / "manifest.json").read_bytes()
     with pytest.raises((KeyError, ValueError, Conflict)):
         manager.resolve_batch(result["id"], owner, {"expected_revision": revision, "item_ids": identifiers})
-    assert manager.snapshot(result["id"], "employee-a")["items"][0]["status"] == "needs_review"
+    assert manager.snapshot(result["id"], "employee-a")["items"][0]["status"] == "generated"
     assert (manager._directory(result["id"]) / "manifest.json").read_bytes() == before
 
 
@@ -389,7 +395,7 @@ def test_batch_save_failure_does_not_publish_success_and_retry_still_works(servi
     monkeypatch.setattr(manager, "_write", fail_manifest)
     with pytest.raises(OSError):
         manager.resolve_batch(result["id"], "employee-a", payload)
-    assert manager.snapshot(result["id"], "employee-a")["stats"]["needs_review"] == 2
+    assert manager.snapshot(result["id"], "employee-a")["stats"]["downloadable"] == 2
     assert manager.snapshot(result["id"], "employee-a")["revision"] == result["revision"]
     monkeypatch.setattr(manager, "_write", original)
     assert manager.resolve_batch(result["id"], "employee-a", payload)["stats"]["ready"] == 2
@@ -489,7 +495,7 @@ def test_new_pipeline_opaque_crops_are_not_mislabeled_transparent_or_auto_ready(
     provider.extract = opaque
     manager.quality_hook = lambda *args, **kwargs: {"auto_ready": True, "warnings": [], "evidence": {}}
     result = complete(manager, upload(manager))
-    assert result["status"] == "ready" and result["stats"]["needs_review"] == 1
+    assert result["status"] == "ready" and result["stats"]["downloadable"] == 1
     item = result["items"][0]
     assert item["rectangular_crop"] is True and "未做透明抠图" in " ".join(item["warnings"])
 
@@ -551,3 +557,30 @@ def test_material_availability_honors_shared_key_pool_pause_and_rejects_legacy_g
             upload(manager)
     finally:
         manager.close()
+
+
+@pytest.mark.parametrize("failure_index", [1, 2], ids=["first-fails", "second-fails"])
+@pytest.mark.parametrize("unknown", [False, True], ids=["settled", "unknown"])
+def test_multisource_candidate_commit_keeps_later_source_state_and_failure_counts(service, failure_index, unknown):
+    manager, provider = service
+    original = provider.extract
+    def staged(raw, **kwargs):
+        if provider.calls + 1 == failure_index:
+            provider.failures.append(ArkProviderError("submission_unknown" if unknown else "provider_busy",
+                "private provider text", settled=not unknown, usage={"images": 1}))
+        result = original(raw, **kwargs)
+        result.no_upscale = result.rectangular_crops = True
+        return result
+    provider.extract = staged
+    result = upload_two(manager)
+    expected = ["error" if index == failure_index else "done" for index in (1, 2)]
+    assert [source["status"] for source in result["sources"]] == expected
+    assert result["status"] == "ready" and result["stats"]["failed"] == 1
+    assert result["stats"]["downloadable"] == 1 and provider.calls == 2
+    assert result["sources"][failure_index - 1]["submission_unknown"] is unknown
+    assert result["sources"][2 - failure_index]["submission_unknown"] is False
+    persisted = manager._read(manager._directory(result["id"]))
+    assert [source["status"] for source in persisted["sources"]] == expected
+    assert len(persisted["attempts"]) == 2
+    assert persisted["attempts"][failure_index - 1]["state"] == ("unknown" if unknown else "failed")
+    assert [item["source_id"] for item in result["items"]] == [result["sources"][2 - failure_index]["id"]]

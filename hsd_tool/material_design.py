@@ -5,8 +5,8 @@ source reference and a target hint are sent to each native extraction, accepting
 nonempty foreground. The returned canvas and alpha are kept unchanged: no white
 mask, connected-component deletion, content crop or server-added frame.
 Each design is extracted once with the HD requirements in the same request;
-only an explicit employee edit submits it again. Generated pixels remain
-proposals; an employee must confirm each item.
+only an explicit employee edit or refinement submits it again. Generated pixels remain
+unverified proposals; download availability is not a quality qualification.
 
 Upstream concurrency was measured on 2026-10-25 with one key: 8 calls returned
 in 23.0 s, 10 in 27.1 s, 16 in 34.3 s with one failed response.  Past eight the
@@ -202,7 +202,12 @@ class MaterialDesignProvider:
     def edit(self, image_bytes, *, instructions, bounds=None, check_cancel=None, on_progress=None, on_attempt=None):
         return self._run(image_bytes, instructions, check_cancel, on_progress, on_attempt, edit=True, bounds=bounds)
 
-    def _run(self, raw, instructions, check_cancel, on_progress, on_attempt, *, edit, bounds):
+    def refine(self, image_bytes, *, check_cancel=None, on_progress=None, on_attempt=None):
+        """One employee-requested clarity pass on this current result only."""
+        return self._run(image_bytes, "", check_cancel, on_progress, on_attempt,
+                         edit=False, bounds=None, refine=True)
+
+    def _run(self, raw, instructions, check_cancel, on_progress, on_attempt, *, edit, bounds, refine=False):
         attempts, lock = [], threading.Lock()
         provider_usage = {"seedream": {}, "deepseek": empty_usage()}
 
@@ -261,6 +266,20 @@ class MaterialDesignProvider:
             progress("preparing", "正在检查图片和服务设置。")
             cancel()
             source = _decode(raw)
+            if refine:
+                progress("refining", "正在精修这张素材，请稍候。")
+                cleaned = call("seedream", "refine", lambda: self.ark.refine_design(
+                    raw, check_cancel=check_cancel))
+                cancel()
+                if len(cleaned.layers) != 1:
+                    raise ArkProviderError("invalid_response", "图片服务没有返回唯一完整的精修结果。")
+                png, notes = preserve_design(_decode(cleaned.layers[0].png, output=True))
+                warnings = tuple(dict.fromkeys(list(cleaned.warnings) + list(cleaned.layers[0].warnings) + notes))
+                layer = ArkLayer(png, "精修后的素材", "", {"x": 0, "y": 0,
+                                 "width": source.width, "height": source.height}, 1, warnings)
+                progress("saving")
+                return ArkResult((layer,), provider_usage["seedream"], warnings,
+                                 b"", source.size, cleaned.request_id, tuple(attempts), provider_usage, True, True)
             self.locator.available()
             if edit:
                 progress("cleanup", "正在按标记位置修改素材并保留完整画布。")

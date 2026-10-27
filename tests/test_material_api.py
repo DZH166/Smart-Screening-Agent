@@ -69,12 +69,13 @@ def test_employee_real_multipart_upload_review_and_download(application):
     result = call(client, f"/api/material/jobs/{identifier}")
     assert result.status_code == 200
     state = result.json
-    assert state["stats"]["needs_review"] == 2
+    assert state["stats"]["downloadable"] == 2 and state["stats"]["needs_review"] == 0
     assert state["sources"][0]["name"] == "同名图片.png"
     assert state["sources"][0]["id"] != state["sources"][1]["id"]
     assert call(client, state["sources"][0]["image_url"]).status_code == 200
     item = state["items"][0]
-    assert call(client, f"/api/material/jobs/{identifier}/download/{item['id']}").status_code == 409
+    assert call(client, f"/api/material/jobs/{identifier}/download/{item['id']}").status_code == 200
+    assert item["status"] == "generated" and "review" not in item
     resolved = call(client, f"/api/material/jobs/{identifier}/resolve", method="POST", payload={
         "expected_revision": state["revision"], "item_id": item["id"], "action": "confirm"})
     assert resolved.status_code == 200
@@ -112,6 +113,42 @@ def test_other_browser_cannot_read_preview_resolve_or_download(application):
     assert call(other, f"/api/material/jobs/{identifier}/download").status_code == 404
     assert call(other, f"/api/material/jobs/{identifier}/resolve", method="POST", payload={
         "expected_revision": state["revision"], "item_id": state["items"][0]["id"], "action": "confirm"}).status_code == 404
+
+
+def test_refine_and_before_preview_are_owner_csrf_revision_and_hash_guarded(application):
+    app, manager, provider = application
+    client = app.test_client(); login(client)
+    identifier = upload(client).json["id"]
+    manager.futures[identifier].result(20)
+    state = call(client, f"/api/material/jobs/{identifier}").json
+    item = state["items"][0]
+    endpoint = f"/api/material/jobs/{identifier}/refine"
+    payload = {"expected_revision": state["revision"], "item_id": item["id"]}
+    assert call(client, endpoint, method="POST", payload=payload, token=None).status_code == 403
+    assert call(client, endpoint, method="POST", payload={**payload, "instruction": "unexpected"}).status_code == 400
+    other = app.test_client(); login(other)
+    assert call(other, endpoint, method="POST", payload=payload).status_code == 404
+    accepted = call(client, endpoint, method="POST", payload=payload)
+    assert accepted.status_code == 200
+    manager.futures[identifier].result(20)
+    assert provider.calls == 3  # Two source extractions plus one refinement.
+    current = call(client, f"/api/material/jobs/{identifier}").json
+    refined = next(row for row in current["items"] if row["refined"])
+    assert len(current["items"]) == 2 and refined["downloadable"]
+    assert call(client, endpoint, method="POST", payload=payload).status_code == 409
+    before = refined["previous_image"]["image_url"]
+    assert call(other, before).status_code == 404
+    assert call(client, item["image_url"]).status_code == 404
+    response = call(client, before)
+    assert response.status_code == 200 and "private" in response.headers["Cache-Control"]
+    cached = call(client, before, headers={"If-None-Match": response.headers["ETag"]})
+    assert cached.status_code == 304
+    assert call(client, refined["previous_image"]["thumbnail_url"]).status_code == 200
+    assert call(client, before + "?variant=unknown").status_code == 400
+    assert call(client, before + "?variant=thumb&variant=full").status_code == 400
+    path = manager._directory(identifier) / (refined["id"] + ".png")
+    path.write_bytes(b"changed")
+    assert call(client, before, headers={"If-None-Match": response.headers["ETag"]}).status_code == 400
 
 
 def test_duplicate_upload_request_does_not_repeat_provider_work(application):

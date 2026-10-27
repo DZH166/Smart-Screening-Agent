@@ -132,7 +132,7 @@ def test_partial_refinement_unknown_preserves_usage_successes_and_redo_ack(servi
     assert result["status"] == "ready" and source["status"] == "done"
     assert source["submission_unknown"] is True
     assert "部分调用结果尚未确认" in source["error"]
-    assert item["status"] == "needs_review"
+    assert item["status"] == "generated" and item["downloadable"]
     attempt = manager._read(manager._directory(result["id"]))["attempts"][0]
     assert attempt["state"] == "returned"
     assert attempt["provider_usage"] == {"seedream": {"generated_images": 2}}
@@ -181,6 +181,6 @@ def test_detail_view_shows_the_cached_thumbnail_before_the_full_file():
     assert "thumbnail_url" in body and "image_url" in body
     assert "new Image()" in body
     assert "preload.onload=settle" in body and "image-loading" in body
-    assert 'swapImage($("material-detail-source"),source)' in script
+    assert 'swapImage($("material-detail-source"),before||source)' in script
     assert 'swapImage($("material-detail-output"),item)' in script
     assert 'getAttribute("src")!==sourceUrl' not in script

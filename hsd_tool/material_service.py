@@ -2,8 +2,8 @@
 
 The independent namespace uses signed manifests and derived paths. Unknown or
 changed manifests are preserved, never guessed at by the retention sweeper.
-Provider output is a proposal until independent evidence or an employee accepts
-it. Resampling to 4096 pixels is recorded separately from recovered detail.
+Generated output is an unverified, downloadable proposal. Downloads never imply
+an employee review or a quality qualification.
 """
 from __future__ import annotations
 
@@ -40,19 +40,21 @@ _MAX_PIXELS = 36_000_000
 _MAX_FILES = 100
 _RETENTION = 3 * 86400
 _THUMBNAIL_EDGE = 640
+_DOWNLOADABLE = {"generated", "needs_review", "ready", "confirmed"}
 _STAGES = {
     "queued": ("排队", "等待开始处理"),
     "preparing": ("准备图片", "正在检查图片"),
     "cleanup": ("清理整图", "正在清理水印和杂质，等待图片服务返回"),
     "locating": ("识别设计范围", "正在识别完整设计的位置，等待识别服务返回"),
     "designs": ("生成素材", "正在逐个生成高清素材，等待图片服务返回"),
+    "refining": ("精修素材", "正在精修这一张素材，等待图片服务返回"),
     "cropping": ("裁剪素材", "正在按设计范围裁剪素材"),
     "saving": ("保存素材", "正在保存本张图片的结果"),
     "source_done": ("本张已完成", "本张素材已生成，继续处理其余图片"),
     "source_error": ("本张未完成", "本张处理遇到问题，继续处理其余图片"),
     "cancelling": ("正在停止", "已发出的请求返回或超时后，本批才会停止"),
     "cancelled": ("已停止", "未发送的图片不再处理"),
-    "done": ("处理完成", "可选中素材批量确认后下载"),
+    "done": ("处理完成", "素材已生成，可直接下载或按需精修"),
     "error": ("处理未完成", "请查看提示后重试或联系管理员"),
 }
 
@@ -286,6 +288,10 @@ class MaterialManager:
                     for attempt in job["attempts"]:
                         if attempt["state"] == "submitted":
                             attempt["state"] = "unknown"
+                    for item in job["items"]:
+                        if item["status"] != "superseded" and self._refine_submission_unknown(job, item["id"]):
+                            item.update(refine_submission_unknown=True,
+                                refine_error="上次精修被中断，是否扣费尚未确定；原素材已保留，重新精修前请先核对。")
                     self._save(job, touch=True)
                 self.jobs[job["id"]] = job
             except (OSError, ValueError, KeyError, TypeError):
@@ -411,13 +417,13 @@ class MaterialManager:
                 value.close()
             self.discard(directory)
 
-    def _runtime(self):
+    def _runtime(self, *, require_locator=True):
         config = self.settings.runtime()
         if not config.get("ark_key") or not config.get("model_id"):
             raise ValueError("素材服务尚未配置，请联系管理员。")
         if not config.get("enabled"):
             raise ValueError("素材处理尚未开启，请联系管理员开启后再试。")
-        if not self._deepseek_available():
+        if require_locator and not self._deepseek_available():
             raise ValueError("素材范围识别需要可用的 DeepSeek 服务，请联系管理员配置并开启。")
         return config
 
@@ -474,12 +480,21 @@ class MaterialManager:
                 return True
         return False
 
-    def _invoke(self, job, provider, raw, instructions, edit=False, bounds=None, source_id=""):
+    @staticmethod
+    def _refine_submission_unknown(job, item_id):
+        attempt = next((row for row in reversed(job.get("attempts", ()))
+                        if row.get("operation") == "refine" and row.get("item_id") == item_id), None)
+        return bool(attempt and (attempt.get("state") in {"unknown", "submitted"}
+            or any(row.get("state") in {"unknown", "submitted"} for row in attempt.get("pipeline_attempts", ()))))
+
+    def _invoke(self, job, provider, raw, instructions, edit=False, bounds=None, source_id="", refine=False, item_id=""):
         # Retry only a definite provider rejection marked safe by the adapter.
-        for number in range(2):
+        for number in range(1 if refine else 2):
             self._check(job)
-            attempt = {"at": self.clock(), "operation": "edit" if edit else "extract",
+            attempt = {"at": self.clock(), "operation": "refine" if refine else "edit" if edit else "extract",
                        "number": number + 1, "state": "submitted", "usage": {}, "source_id": source_id}
+            if refine:
+                attempt["item_id"] = item_id
             with self.lock:
                 job["attempts"].append(attempt); self._save(job)
             try:
@@ -508,7 +523,10 @@ class MaterialManager:
                                 existing.update(data)
                             self._save(job)
                     kwargs.update(on_progress=progress, on_attempt=record)
-                if edit:
+                if refine:
+                    kwargs.pop("instructions")
+                    result = provider.refine(raw, **kwargs)
+                elif edit:
                     result = provider.edit(raw, bounds=bounds, **kwargs)
                 else:
                     result = provider.extract(raw, **kwargs)
@@ -537,10 +555,11 @@ class MaterialManager:
                 attempt["provider_usage"] = deepcopy(getattr(exc, "provider_usage", {}) or {})
                 with self.lock:
                     self._save(job)
-                if number or not retry:
+                if refine or number or not retry:
                     raise
 
     def _run(self, identifier, redo=None):
+        refining = bool(redo and redo.get("_refine"))
         with self.lock:
             job = self.jobs[identifier]
             if job["cancel_requested"]:
@@ -551,20 +570,40 @@ class MaterialManager:
                 for source in job["sources"]:
                     if source["status"] == "queued":
                         source["status"] = "cancelled"
+                if refining:
+                    self._refine_failure(job, redo, "本次精修已停止，仍保留精修前的素材。", False)
                 self._save(job, touch=True); return
             job["status"] = "processing"; job["revision"] += 1
             # Accepted/queued time is part of this run. Do not restart its clock
             # when execution begins, or when switching sources/stages/designs.
             self._progress(job, "preparing")
-            self._save(job)
+            try:
+                self._save(job)
+            except Exception as exc:
+                if not refining:
+                    raise
+                # No provider has been called. A failed local transition must
+                # not leave the previous downloadable image stuck in "busy".
+                job.update(status="error", error="精修未能开始，原素材已保留，请稍后重试。", run_finished_at=self.clock())
+                self._refine_failure(job, redo, job["error"], self._refine_submission_unknown(job, redo["item_id"]))
+                self._progress(job, "error")
+                job["revision"] += 1
+                try:
+                    self._save(job, touch=True)
+                except (OSError, ValueError):
+                    pass  # Preserve files; a later restart treats the saved queued operation as interrupted.
+                return
         try:
-            provider = self._provider(self._runtime())
-            sources = [self._source(job, redo["source_id"])] if redo else job["sources"]
-            for index, source in enumerate(sources):
+            provider = self._provider(self._runtime(require_locator=not refining))
+            # A committed candidate replaces nested objects. Keep stable IDs,
+            # then reacquire the current source before every mutation.
+            source_ids = [redo["source_id"]] if redo else [source["id"] for source in job["sources"]]
+            for index, source_id in enumerate(source_ids):
+                source = self._source(job, source_id)
                 self._check(job)
                 with self.lock:
                     source["status"] = "processing"
-                    self._progress(job, "preparing", current=index, total=len(sources), source_id=source["id"])
+                    self._progress(job, "preparing", current=index, total=len(source_ids), source_id=source["id"])
                     self._save(job)
                 try:
                     original = self._source_path(job, source).read_bytes()
@@ -593,10 +632,19 @@ class MaterialManager:
                         raw = _png(image.crop((box["x"], box["y"], box["x"] + box["width"],
                                                box["y"] + box["height"])))
                         offset = (box["x"], box["y"])
+                    if refining:
+                        with self.lock:
+                            self._progress(job, "refining", current=0, total=1, source_id=source["id"])
+                            self._save(job)
                     result = self._invoke(job, provider, raw, (redo or {}).get("instruction", ""),
-                                          edit=bool(old_item), bounds=edit_bounds, source_id=source["id"])
+                                          edit=bool(old_item), bounds=edit_bounds, source_id=source["id"], refine=refining,
+                                          item_id=old_item["id"] if refining else "")
                     self._check(job)
                     self._source_path(job, source)
+                    if old_item:
+                        self._item_path(job, old_item)
+                    if refining and len(getattr(result, "layers", ())) != 1:
+                        raise ValueError("精修没有返回唯一素材，原素材已保留。")
                     with self.lock:
                         self._check(job)
                         self._progress(job, "saving", source_id=source["id"])
@@ -605,19 +653,37 @@ class MaterialManager:
                     if old_item:
                         for item in new_items:
                             item["bounds"] = deepcopy(old_item["bounds"])
+                            if refining:
+                                item.update(name=old_item["name"], previous_item_id=old_item["id"])
                     with self.lock:
                         self._check(job)
+                        self._source_path(job, source)
+                        if old_item:
+                            self._item_path(job, old_item)
+                        candidate = deepcopy(job)
+                        replacement_index = None
                         if redo and redo.get("item_id"):
-                            for old in job["items"]:
+                            for position, old in enumerate(candidate["items"]):
                                 if old["id"] == redo["item_id"]:
                                     old["status"] = "superseded"
-                        job["items"].extend(new_items)
-                        unknown = self._source_submission_unknown(job, source["id"])
-                        source.update(status="done", submission_unknown=unknown,
-                                      error="部分调用结果尚未确认，已完成素材可继续确认；重新处理前请先核对，可能重复计费。" if unknown else "")
-                        self._progress(job, "source_done", current=index + 1, total=len(sources), source_id=source["id"])
-                        job["revision"] += 1
-                        self._save(job)
+                                    if refining:
+                                        replacement_index = position + 1
+                        if replacement_index is not None:
+                            candidate["items"][replacement_index:replacement_index] = new_items
+                        else:
+                            candidate["items"].extend(new_items)
+                        updated_source = self._source(candidate, source["id"])
+                        unknown = self._source_submission_unknown(candidate, source["id"])
+                        common = list(getattr(result, "warnings", ()) or ())
+                        if len(new_items) >= (128 if getattr(result, "rectangular_crops", False) else 16):
+                            common.append("本图设计较多，可能还有漏提取；请查看原图并框选补提取。")
+                        updated_source.update(status="done", submission_unknown=unknown,
+                            warnings=list(dict.fromkeys(list(updated_source.get("warnings", ())) + common)),
+                            error="部分调用结果尚未确认，已完成素材可下载；重新处理前请先核对，可能重复计费。" if unknown else "")
+                        self._progress(candidate, "source_done", current=index + 1, total=len(source_ids), source_id=source["id"])
+                        candidate["revision"] += 1
+                        self._save(candidate)
+                        job.clear(); job.update(candidate)
                 except TaskCancelled:
                     raise
                 except Exception as exc:
@@ -628,16 +694,22 @@ class MaterialManager:
                                    self._source_submission_unknown(job, source["id"]))
                         message = ("接口返回中断，是否扣费尚未确定；未自动重发。请联系管理员核对后再重做。"
                                    if unknown else self._public_error(exc))
+                        refine_unknown = self._refine_submission_unknown(job, redo["item_id"]) if refining else False
+                        if refining and not refine_unknown:
+                            message = self._public_error(exc)
                         source.update(status="error", error=message, submission_unknown=unknown)
-                        self._progress(job, "source_error", current=index + 1, total=len(sources), source_id=source["id"])
+                        if refining:
+                            self._refine_failure(job, redo, message, refine_unknown)
+                        self._progress(job, "source_error", current=index + 1, total=len(source_ids), source_id=source["id"])
                         job["revision"] += 1
                         self._save(job)
             with self.lock:
                 self._check(job)
                 job["status"] = "ready" if any(s["status"] == "done" for s in job["sources"]) else "error"
-                job["error"] = "" if job["status"] == "ready" else "本批未能生成素材，请查看图片旁的原因后重试。"
+                job["error"] = "" if job["status"] == "ready" else (
+                    "本次精修未完成，原素材已保留，可下载原结果。" if refining else "本批未能生成素材，请查看图片旁的原因后重试。")
                 job["run_finished_at"] = self.clock()
-                self._progress(job, "done" if job["status"] == "ready" else "error", current=len(sources), total=len(sources))
+                self._progress(job, "done" if job["status"] == "ready" else "error", current=len(source_ids), total=len(source_ids))
                 job["revision"] += 1; self._save(job, touch=True)
         except TaskCancelled:
             with self.lock:
@@ -650,13 +722,26 @@ class MaterialManager:
                             source["submission_unknown"] = True
                             source["error"] = "上次已发送请求的结果和扣费尚未确定；重新提交前请先核对。"
                         source["status"] = "cancelled"
+                if refining:
+                    unknown = self._refine_submission_unknown(job, redo["item_id"])
+                    self._refine_failure(job, redo, "本次精修已停止，仍保留精修前的素材。" if not unknown else
+                        "精修返回中断，是否扣费尚未确定；原素材已保留，重新精修前请先核对。", unknown)
                 job["revision"] += 1; self._save(job, touch=True)
         except Exception as exc:
             with self.lock:
+                if refining:
+                    self._refine_failure(job, redo, self._public_error(exc),
+                        self._refine_submission_unknown(job, redo["item_id"]))
                 job["status"] = "error"; job["error"] = self._public_error(exc)
                 job["run_finished_at"] = self.clock()
                 self._progress(job, "error")
                 job["revision"] += 1; self._save(job, touch=True)
+
+    @staticmethod
+    def _refine_failure(job, redo, message, unknown):
+        item = next((row for row in job["items"] if row["id"] == redo["item_id"] and row["status"] != "superseded"), None)
+        if item is not None:
+            item.update(refine_error=message, refine_submission_unknown=bool(unknown))
 
     @staticmethod
     def _public_error(exc):
@@ -680,9 +765,6 @@ class MaterialManager:
         rectangular = getattr(result, "rectangular_crops", False) is True
         if not layers or len(layers) > (128 if rectangular else 16):
             raise ValueError("素材服务未返回有效设计。")
-        warnings_common = list(getattr(result, "warnings", ()) or ())
-        if len(layers) >= (128 if rectangular else 16):
-            warnings_common.append("本图设计较多，可能还有漏提取；请查看原图并框选补提取。")
         items = []
         for layer in layers:
             self._check(job)
@@ -702,7 +784,7 @@ class MaterialManager:
                 quality["evidence"] = {"version": ("material-preserved-canvas-1" if getattr(result, "no_upscale", False)
                                                    else "material-rectangular-crop-1"),
                                        "scope": "unverified_generated_content"}
-            notices = list(dict.fromkeys(warnings_common + list(getattr(layer, "warnings", ()) or ()) +
+            notices = list(dict.fromkeys(list(getattr(layer, "warnings", ()) or ()) +
                                         list(quality.get("warnings", ()))))
             original_size = image.size
             if getattr(result, "no_upscale", False):
@@ -724,7 +806,7 @@ class MaterialManager:
                 bounds = {**bounds, "x": bounds["x"] + offset[0], "y": bounds["y"] + offset[1]}
             label = str(getattr(layer, "label", "素材"))[:80]
             items.append({"id": identifier, "source_id": source["id"], "name": label or "素材",
-                          "status": "ready" if quality.get("auto_ready") is True else "needs_review",
+                          "status": "generated",
                           "warnings": notices, "width": image.width, "height": image.height,
                           "native_width": original_size[0], "native_height": original_size[1],
                           "bounds": bounds, "sha256": hashlib.sha256(content).hexdigest(),
@@ -799,6 +881,9 @@ class MaterialManager:
             job = self._get(identifier, owner)
             result = {key: deepcopy(job[key]) for key in ("id", "revision", "status", "progress", "warnings", "error")}
             result["update_seq"] = job.get("update_seq", 0)
+            result["has_generation_failures"] = any(
+                call.get("operation") == "extract_design" and call.get("state") in {"failed", "unknown"}
+                for attempt in job.get("attempts", ()) for call in attempt.get("pipeline_attempts", ()))
             result["can_undo_batch"] = bool(job.get("batch_undo") and
                                            job["batch_undo"]["revision"] == job["revision"] and job["status"] not in _BUSY)
             end = (self.clock() if job["status"] in _BUSY else
@@ -817,18 +902,27 @@ class MaterialManager:
             for item in job["items"]:
                 if item["status"] == "superseded":
                     continue
-                row = {key: deepcopy(value) for key, value in item.items() if key not in {"sha256", "thumbnail_sha256", "evidence"}}
+                row = {key: deepcopy(value) for key, value in item.items() if key not in {"sha256", "thumbnail_sha256", "evidence", "previous_item_id"}}
                 row["image_url"] = f"/api/material/jobs/{identifier}/item/{row['id']}"
                 row["thumbnail_url"] = row["image_url"] + "?variant=thumb&v=" + item["thumbnail_sha256"][:16]
-                row["download_url"] = (f"/api/material/jobs/{identifier}/download/{row['id']}"
-                                       if row["status"] in {"ready", "confirmed"} else None)
+                row["downloadable"] = item["status"] in _DOWNLOADABLE and job["status"] not in _BUSY
+                row["download_url"] = (f"/api/material/jobs/{identifier}/download/{row['id']}" if row["downloadable"] else None)
+                previous = next((value for value in job["items"] if value["id"] == item.get("previous_item_id")
+                                 and value["source_id"] == item["source_id"] and value["status"] == "superseded"), None)
+                row["refined"] = previous is not None
+                if previous:
+                    before = f"/api/material/jobs/{identifier}/item/{item['id']}/before"
+                    row["previous_image"] = {"image_url": before,
+                        "thumbnail_url": before + "?variant=thumb&v=" + previous["thumbnail_sha256"][:16],
+                        "width": previous["width"], "height": previous["height"]}
                 result["items"].append(row)
             items = result["items"]
             result["stats"] = {"total": len(items), "ready": sum(row["status"] in {"ready", "confirmed"} for row in items),
+                               "downloadable": sum(row["downloadable"] for row in items),
                                "needs_review": sum(row["status"] == "needs_review" for row in items),
                                "skipped": sum(row["status"] == "skipped" for row in items),
                                "failed": sum(row["status"] == "error" for row in job["sources"])}
-            result["download_url"] = f"/api/material/jobs/{identifier}/download" if result["stats"]["ready"] and job["status"] not in _BUSY else None
+            result["download_url"] = f"/api/material/jobs/{identifier}/download" if result["stats"]["downloadable"] else None
             if job["status"] == "queued":
                 result["progress"]["queue_position"] = 1 + sum(
                     row["status"] in _BUSY and row["created_at"] < job["created_at"] for row in self.jobs.values())
@@ -845,8 +939,8 @@ class MaterialManager:
     def resolve(self, identifier, owner, payload):
         with self.lease(identifier, owner), self.lock:
             job = self._get(identifier, owner); self._editable(job, payload.get("expected_revision"))
-            if set(payload) != {"expected_revision", "item_id", "action"} or payload["action"] not in {"confirm", "skip"}:
-                raise ValueError("请选择确认或跳过。")
+            if set(payload) != {"expected_revision", "item_id", "action"} or payload["action"] not in {"confirm", "skip", "restore"}:
+                raise ValueError("请选择舍弃或恢复。")
             item = next((row for row in job["items"] if row["id"] == payload["item_id"] and row["status"] != "superseded"), None)
             if item is None:
                 raise KeyError("找不到此素材。")
@@ -854,8 +948,11 @@ class MaterialManager:
             self._item_path(job, item)
             candidate = deepcopy(job)
             changed = next(row for row in candidate["items"] if row["id"] == item["id"])
-            changed["status"] = "confirmed" if payload["action"] == "confirm" else "skipped"
-            changed["review"] = {"method": "employee_single", "action": payload["action"], "at": self.clock()}
+            changed["status"] = {"confirm": "confirmed", "skip": "skipped", "restore": "generated"}[payload["action"]]
+            if payload["action"] == "restore":
+                changed.pop("review", None)
+            else:
+                changed["review"] = {"method": "employee_single", "action": payload["action"], "at": self.clock()}
             candidate.pop("batch_undo", None)
             candidate["revision"] += 1
             self._save(candidate, touch=True)
@@ -879,7 +976,7 @@ class MaterialManager:
                 item = items.get(item_id)
                 if item is None:
                     raise KeyError("所选素材不存在，请刷新后重试。")
-                if item["status"] != "needs_review":
+                if item["status"] not in {"needs_review", "generated"}:
                     raise Conflict("所选素材状态已改变，请重新选择待确认素材。")
                 if item["source_id"] not in verified_sources:
                     self._source_path(job, self._source(job, item["source_id"]))
@@ -930,6 +1027,57 @@ class MaterialManager:
             candidate["revision"] += 1
             self._save(candidate, touch=True)
             self.jobs[identifier] = candidate
+            return self.snapshot(identifier, owner)
+
+    def refine(self, identifier, owner, payload):
+        """One explicit refinement request; never locate or retry a paid call."""
+        if (not isinstance(payload, dict) or set(payload) - {"expected_revision", "item_id", "acknowledge_unknown"}
+                or not {"expected_revision", "item_id"} <= set(payload)):
+            raise ValueError("精修参数无效。")
+        with self.lease(identifier, owner), self.lock:
+            job = self._get(identifier, owner); self._editable(job, payload["expected_revision"])
+            item = next((row for row in job["items"] if row["id"] == payload["item_id"] and row["status"] in _DOWNLOADABLE), None)
+            if item is None:
+                raise KeyError("找不到可精修的素材，请先恢复已舍弃的素材。")
+            if "acknowledge_unknown" in payload and type(payload["acknowledge_unknown"]) is not bool:
+                raise ValueError("请明确确认未知请求是否重新提交。")
+            if item.get("refine_submission_unknown") and payload.get("acknowledge_unknown") is not True:
+                raise Conflict("上次精修是否扣费尚未确定，请核对后明确确认重新提交，可能重复计费。")
+            source = self._source(job, item["source_id"])
+            self._source_path(job, source); self._item_path(job, item)
+            self._runtime(require_locator=False)
+            candidate = deepcopy(job)
+            candidate.pop("batch_undo", None)
+            candidate.update(status="queued", cancel_requested=False, error="", settled_at=None, expires_at=None,
+                       run_id=secrets.token_hex(16), run_started_at=self.clock(), run_finished_at=None)
+            self._progress(candidate, "queued", current=0, total=1, source_id=source["id"])
+            candidate["revision"] += 1; self._save(candidate)
+            job.clear(); job.update(candidate)
+            operation = {"source_id": source["id"], "item_id": item["id"], "_refine": True}
+            try:
+                future = self.executor.submit(self._run, identifier, operation)
+            except Exception:
+                # The queue rejected the work: no provider request was sent.
+                # Publish a new terminal revision rather than leaving the saved
+                # queued state (or a previous completed future) looking active.
+                message = "精修未能排队，原素材已保留，请稍后重试。"
+                rejected = deepcopy(job)
+                rejected.update(status="error", error=message, run_finished_at=self.clock())
+                self._refine_failure(rejected, operation, message, bool(item.get("refine_submission_unknown")))
+                self._progress(rejected, "error")
+                rejected["revision"] += 1
+                try:
+                    self._save(rejected, touch=True)
+                finally:
+                    # Even a second local write failure must not lock the old
+                    # image in memory. Saved queued work is recovered as an
+                    # interrupted, never-replayed operation after restart.
+                    job.clear(); job.update(rejected)
+                    previous_future = self.futures.get(identifier)
+                    if previous_future is not None and previous_future.done():
+                        self.futures.pop(identifier, None)
+                raise Conflict(message) from None
+            self.futures[identifier] = future
             return self.snapshot(identifier, owner)
 
     def redo(self, identifier, owner, payload):
@@ -992,20 +1140,27 @@ class MaterialManager:
 
     def asset(self, identifier, owner, kind, item_id, *, download=False, thumbnail=False, content_version=None):
         with self.lock:
-            if kind not in {"source", "item"} or (download and thumbnail):
+            if kind not in {"source", "item", "before"} or (download and thumbnail) or (download and kind == "before"):
                 raise ValueError("图片预览参数无效。")
             job = self._get(identifier, owner)
             rows = job["sources"] if kind == "source" else job["items"]
             item = next((row for row in rows if row["id"] == item_id and row.get("status") != "superseded"), None)
             if item is None:
                 raise KeyError("找不到此图片。")
-            if download and (job["status"] in _BUSY or item["status"] not in {"ready", "confirmed"}):
-                raise Conflict("这张素材尚未确认，不能下载。")
+            if download and (job["status"] in _BUSY or item["status"] not in _DOWNLOADABLE):
+                raise Conflict("这张素材正在处理或已舍弃，暂不能下载。")
             if kind == "source":
                 original = self._source_path(job, item)
             else:
                 self._source_path(job, self._source(job, item["source_id"]))
                 original = self._item_path(job, item)
+                if kind == "before":
+                    previous = next((row for row in job["items"] if row["id"] == item.get("previous_item_id")
+                                     and row["source_id"] == item["source_id"] and row["status"] == "superseded"), None)
+                    if previous is None:
+                        raise KeyError("这张素材还没有精修前的对照图。")
+                    original = self._item_path(job, previous)
+                    item = previous
             if not thumbnail:
                 return original, item["sha256"]
             # Keep all original integrity checks above even for a cached/304
@@ -1023,9 +1178,9 @@ class MaterialManager:
             job = self._get(identifier, owner)
             if job["status"] in _BUSY:
                 raise Conflict("素材仍在处理中，请稍候再下载。")
-            items = [row for row in job["items"] if row["status"] in {"ready", "confirmed"}]
+            items = [row for row in job["items"] if row["status"] in _DOWNLOADABLE]
             if not items:
-                raise ValueError("还没有可下载的素材，请先确认标记的疑难项。")
+                raise ValueError("还没有可下载的素材，请等待生成完成或恢复已舍弃的素材。")
             target = self._directory(identifier) / "materials.zip"
             temporary = self._directory(identifier) / (".zip-" + secrets.token_hex(16))
             try:
@@ -1039,8 +1194,8 @@ class MaterialManager:
                         records.append({"file": f"素材-{index:03d}.png", "name": item["name"],
                                         "source": self._source(job, item["source_id"])["name"],
                                         "bounds": item["bounds"], "status": item["status"], "warnings": item["warnings"]})
-                    archive.writestr("素材说明.json", json.dumps({"note": "4096 像素尺寸不等于原图细节已恢复；已确认素材仍保留问题提示。",
-                                    "items": records, "unhandled": sum(row["status"] in {"needs_review", "skipped"} for row in job["items"]),
+                    archive.writestr("素材说明.json", json.dumps({"note": "生成素材未经质量核验；下载不代表人工确认，请检查文字、配色和设计完整性。",
+                                    "items": records, "unhandled": sum(row["status"] == "skipped" for row in job["items"]),
                                     "failed_sources": sum(row["status"] == "error" for row in job["sources"]),
                                     "unprocessed_sources": sum(row["status"] in {"queued", "processing", "cancelled"} for row in job["sources"])}, ensure_ascii=False, indent=2))
                 os.chmod(temporary, 0o600); os.replace(temporary, target)

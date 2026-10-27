@@ -710,3 +710,134 @@ def test_mixed_references_bound_parallelism_by_largest_planned_view(monkeypatch)
         with Image.open(io.BytesIO(request["png"])) as image:
             pixels.append(image.width * image.height)
     assert max(pixels) * limits[0] <= design_module.CONCURRENT_REFERENCE_PIXELS
+
+
+class ManualRefineArk(FakeArk):
+    def __init__(self, native=None, *, error=None, cancelled=None, layers=1):
+        super().__init__()
+        self.native = native if native is not None else transparent_card()
+        self.error = error
+        self.cancelled = cancelled
+        self.layer_count = layers
+
+    def refine_design(self, png, *, check_cancel=None):
+        self.refine_calls += 1
+        self.calls.append({"png": png, "operation": "refine"})
+        if self.cancelled is not None:
+            self.cancelled.set()
+        if self.error is not None:
+            raise self.error
+        layer = ArkLayer(self.native, "单张精修", "", {"x": 0, "y": 0, "width": 400, "height": 400},
+                         1, ("上游图层提示",))
+        return ArkResult((layer,) * self.layer_count, {"input_images": 1, "generated_images": 1},
+                         ("上游处理提示",), b"", (400, 400), "manual-refine-1")
+
+
+class ForbiddenLocator:
+    def available(self):
+        raise AssertionError("Manual refinement must not require DeepSeek")
+
+    def locate(self, *args, **kwargs):
+        raise AssertionError("Manual refinement must not locate or regenerate designs")
+
+
+def manual_refine_provider(ark):
+    return MaterialDesignProvider(CONFIG, None, ark=ark, locator=ForbiddenLocator())
+
+
+@pytest.mark.parametrize("opaque", [False, True])
+def test_manual_refine_is_one_current_image_request_without_locator_cleanup_or_local_crop(opaque):
+    native = card(size=(320, 640), box=(0, 0, 319, 639)) if opaque else transparent_card((320, 640))
+    ark = ManualRefineArk(native)
+    progress, attempts = [], []
+    raw = source_image() if opaque else transparent_card()
+    result = manual_refine_provider(ark).refine(raw,
+        on_progress=lambda code, *args, **kwargs: progress.append(code), on_attempt=attempts.append)
+    assert ark.refine_calls == 1 and ark.calls == [{"png": raw, "operation": "refine"}]
+    assert progress == ["preparing", "refining", "saving"]
+    assert len(result.layers) == 1 and result.no_upscale and result.rectangular_crops
+    assert result.base_size == (400, 400)
+    assert result.layers[0].bounds == {"x": 0, "y": 0, "width": 400, "height": 400}
+    assert_canvas_preserved(Image.open(io.BytesIO(native)), result.layers[0].png)
+    assert "上游图层提示" in result.warnings and "上游处理提示" in result.layers[0].warnings
+    assert result.provider_usage["seedream"] == {"input_images": 1, "generated_images": 1}
+    assert result.provider_usage["deepseek"]["requests"] == 0
+    assert [row["state"] for row in attempts] == ["submitted", "returned"]
+    assert all(row["operation"] == "refine" and row["provider"] == "seedream" for row in attempts)
+    assert len({row["id"] for row in attempts}) == 1
+    assert attempts[-1]["settled"] and attempts[-1]["usage"] == result.provider_usage["seedream"]
+
+
+@pytest.mark.parametrize("settled", [False, True])
+def test_manual_refine_failure_keeps_one_complete_attempt_and_never_retries_or_returns_old_image(settled):
+    error = ArkProviderError("provider_busy" if settled else "submission_unknown", "safe static error",
+                             safe_retry=True, settled=settled, usage={"input_images": 1}, request_id="refine-error")
+    ark = ManualRefineArk(error=error)
+    attempts = []
+    with pytest.raises(ArkProviderError) as raised:
+        manual_refine_provider(ark).refine(transparent_card(), on_attempt=attempts.append)
+    assert ark.refine_calls == len(ark.calls) == 1
+    assert not raised.value.safe_retry and not raised.value.retryable
+    assert raised.value.settled is settled
+    assert raised.value.provider_usage["seedream"] == {"input_images": 1}
+    assert raised.value.provider_usage["deepseek"]["requests"] == 0
+    assert attempts[-1]["state"] == ("failed" if settled else "unknown")
+    assert attempts[-1]["request_id"] == "refine-error"
+    assert all(row["operation"] == "refine" for row in raised.value.attempts)
+
+
+@pytest.mark.parametrize("settled", [False, True])
+def test_manual_refine_cancelled_submission_retains_settlement_and_paid_history(settled):
+    cancelled = threading.Event()
+    error = ArkCancelled(settled=settled, usage={"input_images": 1}, request_id="refine-cancel")
+    ark = ManualRefineArk(error=error, cancelled=cancelled)
+    with pytest.raises(ArkCancelled) as raised:
+        manual_refine_provider(ark).refine(transparent_card(), check_cancel=cancelled.is_set)
+    assert ark.refine_calls == len(ark.calls) == 1
+    assert raised.value.settled is settled and not raised.value.safe_retry
+    assert raised.value.provider_usage["seedream"] == {"input_images": 1}
+    assert raised.value.attempts[-1]["state"] == ("cancelled" if settled else "unknown")
+    assert raised.value.attempts[-1]["operation"] == "refine"
+    assert raised.value.attempts[-1]["request_id"] == "refine-cancel"
+
+
+def test_manual_refine_cancel_before_request_does_not_dispatch_and_after_return_keeps_actual_usage():
+    ark = ManualRefineArk()
+    with pytest.raises(ArkCancelled) as raised:
+        manual_refine_provider(ark).refine(transparent_card(), check_cancel=lambda: True)
+    assert not ark.calls and not raised.value.attempts
+    cancelled = threading.Event()
+    ark = ManualRefineArk(cancelled=cancelled)
+    with pytest.raises(ArkCancelled) as raised:
+        manual_refine_provider(ark).refine(transparent_card(), check_cancel=cancelled.is_set)
+    assert ark.refine_calls == 1
+    assert raised.value.attempts[-1]["state"] == "returned" and raised.value.settled
+    assert raised.value.provider_usage["seedream"] == {"input_images": 1, "generated_images": 1}
+
+
+@pytest.mark.parametrize("layers", [0, 2])
+def test_manual_refine_rejects_nonunique_return_without_second_call_or_paid_usage_loss(layers):
+    ark = ManualRefineArk(layers=layers)
+    with pytest.raises(ArkProviderError) as raised:
+        manual_refine_provider(ark).refine(transparent_card())
+    assert raised.value.code == "invalid_response" and not raised.value.safe_retry
+    assert ark.refine_calls == 1 and raised.value.attempts[-1]["state"] == "returned"
+    assert raised.value.provider_usage["seedream"] == {"input_images": 1, "generated_images": 1}
+
+
+def test_manual_refine_blank_output_fails_without_replacing_it_with_the_input():
+    ark = ManualRefineArk(_encode(Image.new("RGBA", (400, 400), (255, 0, 0, 0))))
+    with pytest.raises(ArkProviderError) as raised:
+        manual_refine_provider(ark).refine(transparent_card())
+    assert raised.value.code == "empty_crop" and not raised.value.safe_retry
+    assert ark.refine_calls == 1 and raised.value.provider_usage["seedream"]["generated_images"] == 1
+
+
+def test_manual_refine_unexpected_transport_failure_is_unknown_without_retry_or_input_fallback():
+    ark = ManualRefineArk(error=RuntimeError("upstream/internal message must not escape"))
+    with pytest.raises(ArkProviderError) as raised:
+        manual_refine_provider(ark).refine(transparent_card())
+    assert raised.value.code == "submission_unknown" and not raised.value.settled
+    assert not raised.value.safe_retry and ark.refine_calls == 1
+    assert raised.value.attempts[-1]["state"] == "unknown"
+    assert "upstream/internal" not in str(raised.value)

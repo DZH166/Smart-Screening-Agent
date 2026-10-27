@@ -149,7 +149,7 @@ def test_review_and_retention_touches_never_extend_finished_processing_time(cont
         assert result["progress"]["task_elapsed_seconds"] == 13
         clock.advance(200)
         result = manager.undo_batch(identifier, "employee-a", {"expected_revision": result["revision"]})
-        assert result["stats"]["needs_review"] == 1
+        assert result["stats"]["downloadable"] == 1 and result["items"][0]["status"] == "generated"
     else:
         result = manager.resolve(identifier, "employee-a", {"expected_revision": result["revision"],
             "item_id": result["items"][0]["id"], "action": action})
@@ -249,7 +249,7 @@ def test_service_preserves_native_canvas_soft_alpha_and_separate_edge_details(co
     item = completed["items"][0]
     assert (item["width"], item["height"]) == native.size
     assert (item["native_width"], item["native_height"]) == native.size
-    assert item["status"] == "needs_review" and completed["download_url"] is None
+    assert item["status"] == "generated" and completed["download_url"] and "review" not in item
     assert not any("4096" in warning for warning in item["warnings"])
     internal_item = manager.jobs[identifier]["items"][0]
     assert internal_item["evidence"] == {"version": "material-preserved-canvas-1",

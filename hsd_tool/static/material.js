@@ -3,8 +3,17 @@
   const $ = id => document.getElementById(id);
   const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const activeStatuses = new Set(["queued", "processing", "cancelling"]);
-  const completed = item => ["ready", "confirmed"].includes(item.status);
-  const state = {workspace:"numbering",config:null,job:null,files:[],objectUrls:[],busy:false,uploading:false,uncertain:false,retryUpload:false,stopRequested:false,uploadId:null,xhr:null,timer:null,polling:false,authLost:false,filter:"needs_review",newBatch:false,dialog:null,box:null,startPoint:null,sourcesSignature:"",items:new Map(),scroll:{numbering:0,material:0},epoch:0,selected:new Set(),stream:null,streamJob:null,streamErrors:0,streamDisabled:false,clockTimer:null,clockAnchor:null,progressCounts:null,renewTimer:null};
+  const downloadable = item => item?.downloadable===true&&!!safeUrl(item.download_url);
+  const guidance = "如需再次优化，可选择精修，或自行使用 GPT 图像模型处理。";
+  const routineNotes = new Set([
+    "请核对文字、配色和设计是否完整；修补细节可能与原图不同。",
+    "已保留模型返回的完整画布，系统没有裁剪或删除边缘内容。",
+    "模型提取可能改变文字、配色或细节，请对照原图确认。",
+    "精修内容由模型生成，文字、配色和完整性仍需对照确认。",
+    "清理可能改变文字、配色或细节，请对照原图确认。",
+    "已按标记位置提出修改要求，模型仍可能改变其他区域，请对照确认。"
+  ]);
+  const state = {workspace:"numbering",config:null,job:null,files:[],objectUrls:[],busy:false,uploading:false,uncertain:false,retryUpload:false,stopRequested:false,uploadId:null,xhr:null,timer:null,polling:false,authLost:false,filter:"available",newBatch:false,dialog:null,box:null,startPoint:null,sourcesSignature:"",items:new Map(),scroll:{numbering:0,material:0},epoch:0,refineAcks:new Set(),stream:null,streamJob:null,streamErrors:0,streamDisabled:false,clockTimer:null,clockAnchor:null,progressCounts:null,renewTimer:null};
   const metrics = {cards_created:0,cards_updated:0,previews_loaded:0,polls:0};
   function count(name) {metrics[name]++;document.documentElement.dataset.materialUiMetrics=JSON.stringify(metrics);}
   function stored(key) {try{return sessionStorage.getItem(key);}catch(_){return null;}}
@@ -38,10 +47,13 @@
     $("material-download-all").disabled=locked||!safeUrl(state.job?.download_url);
     $("material-recheck").disabled=state.busy||state.polling||state.authLost;
     $("material-upload-check").disabled=state.busy||state.authLost;
-    $("material-grid").querySelectorAll("button,input").forEach(button=>{button.disabled=locked;});
-    updateSelection();
+    const itemControl=button=>{const item=state.job?.items.find(value=>value.id===button.dataset.itemId);button.disabled=locked||(button.dataset.materialAction==="download"&&!downloadable(item))||(button.dataset.materialAction==="refine"&&(!item||item.status==="skipped"||!safeUrl(item.image_url)||(item.refine_submission_unknown&&!state.refineAcks.has(item.id))));};
+    $("material-grid").querySelectorAll("button").forEach(itemControl);
+    const inputControl=input=>{input.disabled=locked;if(input.dataset.refineAck)input.checked=state.refineAcks.has(input.dataset.refineAck);};
+    $("material-grid").querySelectorAll("input").forEach(inputControl);
     $("material-source-grid").querySelectorAll("button").forEach(button=>{button.disabled=locked;});
-    $("material-detail-actions").querySelectorAll("button").forEach(button=>{button.disabled=locked;});
+    $("material-detail-actions").querySelectorAll("button").forEach(itemControl);
+    $("material-detail-actions").querySelectorAll("input").forEach(inputControl);
     const unknown=state.job?.sources.find(source=>source.id===state.dialog?.sourceId)?.submission_unknown===true;
     $("material-redo-submit").disabled=locked||!state.box||(unknown&&!$("material-unknown-ack").checked);
     $("material-selected-files").querySelectorAll("button").forEach(button=>{button.disabled=locked;});
@@ -132,15 +144,15 @@
   function setJob(job) {
     if(!job||typeof job.id!=="string"||!Array.isArray(job.items)||!Array.isArray(job.sources))throw new Error("素材结果格式异常，请刷新页面后重试。");
     if(state.job?.id===job.id&&(Number(job.revision)<Number(state.job.revision)||(job.revision===state.job.revision&&Number(job.update_seq)<Number(state.job.update_seq))))return;
-    const changed=state.job?.id!==job.id,finished=activeStatuses.has(state.job?.status)&&!activeStatuses.has(job.status);state.job=job;remember("hsd-material-job",job.id);
-    if(changed){closeStream();state.streamDisabled=false;state.streamErrors=0;state.selected.clear();state.items.clear();$("material-grid").replaceChildren();$("material-source-grid").replaceChildren();$("material-source-details").open=false;state.sourcesSignature="";state.filterTouched=false;}
+    const changed=state.job?.id!==job.id;state.job=job;remember("hsd-material-job",job.id);
+    if(changed){closeStream();state.streamDisabled=false;state.streamErrors=0;state.refineAcks.clear();state.items.clear();$("material-grid").replaceChildren();$("material-source-grid").replaceChildren();$("material-source-details").open=false;state.sourcesSignature="";state.filter="available";}
+    for(const item of job.items)if(!item.refine_submission_unknown)state.refineAcks.delete(item.id);
     const clockKey=JSON.stringify([job.id,job.progress?.run_id||job.progress?.run_started_at||job.id]),now=window.performance?.now()||0,elapsed=Math.max(0,Number(job.progress?.task_elapsed_seconds)||0);
     if(state.clockAnchor?.key!==clockKey)state.clockAnchor={key:clockKey,elapsed,received:now};
     else if(elapsed>state.clockAnchor.elapsed+(now-state.clockAnchor.received)/1000){state.clockAnchor.elapsed=elapsed;state.clockAnchor.received=now;}
     const progressKey=JSON.stringify([clockKey,job.progress?.source_id]),done=job.progress?.designs_completed,total=job.progress?.designs_total;
     if(state.progressCounts?.key!==progressKey)state.progressCounts={key:progressKey,done:0,total:0};
     if(Number.isInteger(done)&&Number.isInteger(total)&&total>0&&done>=0&&done<=total){if(state.progressCounts.total!==total)state.progressCounts={key:progressKey,done,total};else state.progressCounts.done=Math.max(state.progressCounts.done,done);}
-    if(changed||(finished&&!state.filterTouched))state.filter=job.items.some(item=>item.status==="needs_review")||activeStatuses.has(job.status)?"needs_review":"all";
     render();schedule();
   }
   function render() {
@@ -161,49 +173,48 @@
       if(known){$("material-progress-track").setAttribute("aria-valuenow",String(percent));$("material-progress-message").textContent=`已处理 ${counts.done} / ${counts.total} 个素材${phase==="saving"?"，正在保存结果。":"。"}`;}else $("material-progress-track").removeAttribute("aria-valuenow");
       $("material-progress-detail").textContent=progressDetail();
       const step=/clean|清理/.test(phase)?0:/locat|detect|识别/.test(phase)?1:/design|crop|sav|生成|保存/.test(phase)?2:-1;
-      const steps=["清理整图","识别设计","生成并保存"].map((name,index)=>`<li${step===index?' class="current" aria-current="step"':""}>${index+1}. ${name}</li>`).join("");if($("material-stage-list").innerHTML!==steps)$("material-stage-list").innerHTML=steps;
+      const steps=phase==="refining"?'<li class="current" aria-current="step">精修当前素材</li>':["清理整图","识别设计","生成并保存"].map((name,index)=>`<li${step===index?' class="current" aria-current="step"':""}>${index+1}. ${name}</li>`).join("");if($("material-stage-list").innerHTML!==steps)$("material-stage-list").innerHTML=steps;
     }
     if(job.status==="error")notify(job.error||"本批未能处理，请查看原图下的问题提示。",true);else if(job.status==="cancelled")notify("本批已停止。已经完成的素材仍可查看和下载。");
-    const stats=job.stats||{},pending=job.items.filter(item=>item.status==="needs_review").length,ready=job.items.filter(completed).length,skipped=job.items.filter(item=>item.status==="skipped").length;
-    $("material-summary").textContent=`${job.sources.length} 张原图 · ${job.items.length} 个素材 · ${pending} 个待确认 · ${ready} 个可下载${skipped?` · ${skipped} 个已跳过`:""}${stats.failed?` · ${stats.failed} 张处理失败`:""}${!running?` · 本批累计用时 ${duration(elapsedSeconds())}`:""}`;
-    $("material-result-title").textContent=running?"正在生成本批素材":pending?`还有 ${pending} 个素材需要确认`:"本批提取结果";$("material-review-count").textContent=String(pending);
+    const stats=job.stats||{},ready=job.items.filter(downloadable).length,skipped=job.items.filter(item=>item.status==="skipped").length;
+    $("material-summary").textContent=`${job.sources.length} 张原图 · ${job.items.length} 个素材${!running?` · ${ready} 个可下载`:""}${skipped?` · ${skipped} 个已舍弃`:""}${stats.failed?` · ${stats.failed} 张处理失败`:""}${!running?` · 本批累计用时 ${duration(elapsedSeconds())}`:""}`;
+    $("material-result-title").textContent=running?(job.progress?.stage_code==="refining"?"正在精修素材":"正在生成本批素材"):"本批提取结果";$("material-available-count").textContent=String(job.items.length-skipped);
     document.querySelectorAll("[data-material-filter]").forEach(button=>{const active=button.dataset.materialFilter===state.filter;button.classList.toggle("active",active);button.setAttribute("aria-pressed",String(active));});
     const shared=sharedWarnings();$("material-shared-warning").textContent=shared.join("；");$("material-shared-warning").classList.toggle("hidden",!shared.length);
+    $("material-generation-warning").classList.toggle("hidden",job.has_generation_failures!==true);
     renderCards();renderSources();
-    const warnings=[...(job.warnings||[]),...(job.sources||[]).filter(source=>source.error).map(source=>`${source.name}：${source.error}`)];
-    $("material-batch-info").innerHTML=`<p>可下载 ${ready} 个；待确认 ${pending} 个；已跳过 ${skipped} 个。只导出已完成项。</p><p>按生成图片的完整画布保存；尺寸不代表恢复了原本看不清的细节。人工确认后的问题提示仍保留。</p>${warnings.map(warning=>`<p>${esc(warning)}</p>`).join("")}<p>云端副本保留三天，请将结果下载到自己的电脑。</p>`;
+    const warnings=[...new Set([...(job.warnings||[]),...(job.sources||[]).flatMap(source=>[source.error,...(source.warnings||[])].filter(Boolean).map(warning=>`${source.name}：${warning}`))])];
+    $("material-batch-info").innerHTML=`<p>可下载 ${ready} 个${skipped?`；已舍弃 ${skipped} 个`:""}。舍弃及失败项不加入下载包。</p><p>图片可下载不表示画质已经过核验，请自行检查文字、配色和完整性。</p>${warnings.map(warning=>`<p>${esc(warning)}</p>`).join("")}<p>云端副本保留三天，请将结果下载到自己的电脑。</p>`;
     controls();
   }
-  function visibleItem(item) {return state.filter==="all"||(state.filter==="completed"&&completed(item))||state.filter===item.status;}
+  function visibleItem(item) {return state.filter==="all"||(state.filter==="skipped"?item.status==="skipped":item.status!=="skipped");}
+  function itemWarnings(item) {return [...new Set([item.refine_error,...(item.warnings||[])].filter(Boolean))];}
+  function routineWarning(warning) {return routineNotes.has(warning)||/^本设计只占原图约 \d+%，已放大局部参考图重画；清晰度仍受原图分辨率限制。$/.test(warning);}
+  function specificWarnings(item) {return itemWarnings(item).filter(warning=>warning===item.refine_error||!routineWarning(warning));}
+  function processingNotes(item) {return itemWarnings(item).filter(warning=>warning!==item.refine_error&&routineWarning(warning));}
   let warningItems=null,warningCache=[];
-  function sharedWarnings() {if(warningItems===state.job?.items)return warningCache;warningItems=state.job?.items;const counts=new Map();for(const item of state.job?.items||[])for(const warning of new Set(item.warnings||[]))counts.set(warning,(counts.get(warning)||0)+1);warningCache=[...counts].filter(([,count])=>count>1&&count===state.job.items.length).map(([warning])=>warning);return warningCache;}
-  function selectableItems() {return (state.job?.items||[]).filter(item=>item.status==="needs_review"&&visibleItem(item)&&safeUrl(item.image_url));}
-  function updateSelection() {
-    const items=selectableItems(),ids=new Set(items.map(item=>item.id));for(const id of state.selected)if(!ids.has(id))state.selected.delete(id);
-    const locked=busy()||state.authLost;$("material-undo-batch").classList.toggle("hidden",!state.job?.can_undo_batch);$("material-undo-batch").disabled=locked;const all=$("material-select-all");all.checked=!!items.length&&state.selected.size===items.length;all.indeterminate=state.selected.size>0&&!all.checked;all.disabled=locked||!items.length;
-    $("material-selected-count").textContent=`已选 ${state.selected.size} 项`;
-    $("material-confirm-selected").disabled=locked||!state.selected.size;$("material-confirm-selected").textContent=state.busy?"正在保存…":`确认所选可用${state.selected.size?`（${state.selected.size}）`:""}`;
-    $("material-grid").querySelectorAll("[data-select-item]").forEach(input=>{input.checked=state.selected.has(input.dataset.selectItem);input.disabled=locked;});
-  }
-  function selectAllItems(checked) {state.selected.clear();if(checked)selectableItems().forEach(item=>state.selected.add(item.id));updateSelection();}
-  async function confirmSelected() {
-    if(busy()||state.authLost)return;const item_ids=selectableItems().filter(item=>state.selected.has(item.id)).map(item=>item.id);if(!item_ids.length)return;
-    const success=await mutate("resolve-batch",{item_ids});if(success){state.selected.clear();notify(`已人工确认 ${item_ids.length} 个素材，可下载；可撤销本次批量确认或在“可下载”中逐项更正。`);updateSelection();$("material-download-all").focus({preventScroll:true});}
+  function sharedWarnings() {if(warningItems===state.job?.items)return warningCache;warningItems=state.job?.items;const counts=new Map();for(const item of state.job?.items||[])for(const warning of specificWarnings(item))counts.set(warning,(counts.get(warning)||0)+1);warningCache=[...counts].filter(([,count])=>count>1&&count===state.job.items.length).map(([warning])=>warning);return warningCache;}
+  function itemActions(item) {
+    const skipped=item.status==="skipped",unknown=item.refine_submission_unknown===true;
+    if(skipped)return `<button class="button button-secondary" type="button" data-material-action="restore" data-item-id="${esc(item.id)}">恢复素材</button>`;
+    return `${unknown?`<label class="material-refine-ack"><input type="checkbox" data-refine-ack="${esc(item.id)}"${state.refineAcks.has(item.id)?" checked":""}>上次精修结果尚未确定。重新提交可能重复计费，我确认继续。</label>`:""}<button class="button button-primary" type="button" data-material-action="download" data-item-id="${esc(item.id)}"${downloadable(item)?"":" disabled"}>下载</button><button class="button button-secondary" type="button" data-material-action="refine" data-item-id="${esc(item.id)}"${unknown&&!state.refineAcks.has(item.id)?" disabled":""}>精修</button><button class="button button-quiet" type="button" data-material-action="skip" data-item-id="${esc(item.id)}">舍弃</button>`;
   }
   function itemContent(item) {
-    const done=completed(item),skipped=item.status==="skipped",warnings=item.warnings||[],shared=new Set(sharedWarnings()),specific=warnings.filter(w=>!shared.has(w));
-    return `${item.status==="needs_review"?`<label class="material-item-select"><input type="checkbox" data-select-item="${esc(item.id)}" aria-label="选择 ${esc(item.name)}">选择</label>`:""}<div class="material-item-info"><div class="material-item-heading"><strong class="material-item-name">${esc(item.name)}</strong><span class="material-item-badge ${done?"completed":skipped?"skipped":""}">${done?(item.status==="confirmed"?"人工确认":"可下载"):skipped?"已跳过":"待确认"}</span></div>${specific.length?`<p class="material-item-warning">${esc(specific[0])}</p>`:""}<details><summary>查看详情</summary><ul>${warnings.map(w=>`<li>${esc(w)}</li>`).join("")}</ul><p>${Number(item.width)||0} × ${Number(item.height)||0} 像素 · PNG</p></details><div class="material-item-actions">${!done?`<button class="button button-primary" type="button" data-material-action="confirm" data-item-id="${esc(item.id)}">${skipped?"恢复并确认":"确认"}</button>`:`<button class="button button-primary" type="button" data-material-action="download" data-item-id="${esc(item.id)}">下载</button>`}<button class="button button-secondary" type="button" data-material-action="correct" data-item-id="${esc(item.id)}">修改</button>${!skipped?`<button class="button button-quiet" type="button" data-material-action="skip" data-item-id="${esc(item.id)}">${done?"撤回完成":"跳过"}</button>`:""}</div></div>`;
+    const skipped=item.status==="skipped",shared=new Set(sharedWarnings()),specific=specificWarnings(item).filter(w=>!shared.has(w)),inline=specific[0],remaining=[...specific.slice(1),...processingNotes(item)];
+    return `<div class="material-item-info"><div class="material-item-heading"><strong class="material-item-name">${esc(item.name)}</strong>${skipped||item.refined?`<span class="material-item-badge ${skipped?"skipped":"completed"}">${skipped?"已舍弃":"已精修"}</span>`:""}</div>${inline?`<p class="material-item-warning">${esc(inline)}</p>`:""}<div class="material-item-actions">${itemActions(item)}</div><details><summary>详情</summary>${remaining.length?`<ul>${remaining.map(w=>`<li>${esc(w)}</li>`).join("")}</ul>`:""}<p>${Number(item.width)||0} × ${Number(item.height)||0} 像素 · PNG</p><p>${guidance}</p></details></div>`;
   }
   function previewUrl(value) {return safeUrl(value.thumbnail_url)||safeUrl(value.image_url);}
   function previewHtml(item) {return `<button class="material-item-preview" data-material-action="compare" data-item-id="${esc(item.id)}" type="button" aria-label="放大对照 ${esc(item.name)}"><img src="${esc(previewUrl(item))}" alt="${esc(item.name)}" width="640" height="640" loading="lazy" decoding="async" fetchpriority="low"></button>`;}
   function renderCards() {
     const grid=$("material-grid"),visible=[];
+    const nextExisting=new Map();let anchor=null;
+    for(let index=state.job.items.length-1;index>=0;index--){const item=state.job.items[index];nextExisting.set(item.id,anchor);if(state.items.has(item.id))anchor=state.items.get(item.id).node;}
     for(const item of state.job.items){
-      const key=JSON.stringify([item.name,item.status,item.warnings,item.width,item.height,sharedWarnings()]),preview=previewHtml(item);let record=state.items.get(item.id);
+      const key=JSON.stringify([item.name,item.status,item.warnings,item.width,item.height,item.downloadable,item.refined,item.refine_error,item.refine_submission_unknown,sharedWarnings()]),preview=previewHtml(item);let record=state.items.get(item.id);
       const content=!record||record.key!==key?itemContent(item):record.content;
       if(!record){
         const node=document.createElement("article");node.className="material-item";node.dataset.itemId=item.id;
-        node.innerHTML=preview+`<div data-material-content>${content}</div>`;grid.append(node);
+        node.innerHTML=preview+`<div data-material-content>${content}</div>`;grid.insertBefore(node,nextExisting.get(item.id)||null);
         record={node,key,content,preview,contentNode:node.querySelector("[data-material-content]")};state.items.set(item.id,record);count("cards_created");count("cards_updated");count("previews_loaded");
       }else{
         // Keep the image element when only review/status/details change. A new
@@ -223,7 +234,7 @@
       const shown=visibleItem(item);record.node.classList.toggle("hidden",!shown);if(shown)visible.push(item);
     }
     const ids=new Set(state.job.items.map(item=>item.id));for(const [id,record]of state.items){if(!ids.has(id)){record.node.remove();state.items.delete(id);}}
-    $("material-empty").classList.toggle("hidden",visible.length>0);$("material-empty").textContent=activeStatuses.has(state.job.status)?"完成的素材会陆续显示在这里。":state.filter==="needs_review"?"没有仍需确认的素材。可下载已完成项，或按需查看全部。":"这里暂无素材，请切换筛选，或从原图框选补提。";
+    $("material-empty").classList.toggle("hidden",visible.length>0);$("material-empty").textContent=activeStatuses.has(state.job.status)?"完成的素材会陆续显示在这里。":state.filter==="skipped"?"没有已舍弃的素材。":"这里暂无素材，请从原图框选补提，或查看已舍弃的素材。";
   }
   function renderSources() {
     const details=$("material-source-details");if(state.job.sources.some(source=>source.error))details.open=true;
@@ -247,10 +258,20 @@
   async function itemAction(event) {
     const button=event.target.closest("[data-material-action]");if(!button||busy()||state.authLost)return;const item=state.job.items.find(item=>item.id===button.dataset.itemId);if(!item)return;
     const action=button.dataset.materialAction;
-    if(action==="compare"||action==="correct"){openDetail(item.source_id,item,action==="correct");return;}
-    if(action==="download"){download(item.download_url);return;}
-    const result=await mutate("resolve",{item_id:item.id,action});if(result){const next=state.job.items.find(value=>value.status==="needs_review");if(state.dialog){if(next)openDetail(next.source_id,next,false);else $("material-detail-dialog").close();}else{const node=next?state.items.get(next.id)?.node:null;node?.querySelector("button")?.focus({preventScroll:true});}}
+    if(action==="compare"){openDetail(item.source_id,item,false);return;}
+    if(action==="download"){if(downloadable(item))download(item.download_url);return;}
+    if(action==="refine"){
+      if(item.status==="skipped"||!safeUrl(item.image_url))return;
+      const unknown=item.refine_submission_unknown===true;if(unknown&&!state.refineAcks.has(item.id)){notify("上次精修结果尚未确定，请先确认重新提交可能重复计费。",true);return;}
+      state.refineAcks.delete(item.id);
+      if(await mutate("refine",{item_id:item.id,...(unknown?{acknowledge_unknown:true}:{})})){if(state.dialog?.itemId===item.id)$("material-detail-dialog").close();}
+      return;
+    }
+    if(!["skip","restore"].includes(action))return;
+    const result=await mutate("resolve",{item_id:item.id,action});if(result){if(state.dialog)$("material-detail-dialog").close();else{const next=state.job.items.find(value=>visibleItem(value)&&value.id!==item.id);state.items.get(next?.id)?.node.querySelector("button")?.focus({preventScroll:true});}notify(action==="skip"?"已舍弃，可在“已舍弃”中恢复。":"已恢复素材。");}
   }
+  function acknowledgeRefine(event) {const input=event.target.closest("[data-refine-ack]");if(!input||busy()||state.authLost)return;const item=state.job?.items.find(value=>value.id===input.dataset.refineAck);if(!item?.refine_submission_unknown)return;if(input.checked)state.refineAcks.add(item.id);else state.refineAcks.delete(item.id);controls();}
+  function showBatchRecords() {const details=$("material-batch-details");details.open=true;details.querySelector("summary")?.focus({preventScroll:true});details.scrollIntoView({block:"nearest",behavior:"smooth"});}
   function swapImage(el,value) {
     // Show the already-cached thumbnail first, then swap in the full file once it
     // decodes. Without this the previous item's picture stays on screen while the
@@ -269,10 +290,14 @@
   }
   function openDetail(sourceId,item=null,redo=false) {
     const source=state.job.sources.find(value=>value.id===sourceId);if(!source)return;state.dialog={sourceId,itemId:item?.id||null,redo};state.box=null;state.startPoint=null;
-    $("material-detail-title").textContent=redo?(item?"标记需要修改的位置":"框选完整设计"):item?.name||source.name;$("material-detail-note").textContent=source.name;
-    swapImage($("material-detail-source"),source);swapImage($("material-detail-output"),item);$("material-detail-output-figure").classList.toggle("hidden",!item);$("material-detail-warning").textContent=(item?.warnings||[]).join("；");
+    const before=!redo&&item?.refined&&safeUrl(item.previous_image?.image_url)?item.previous_image:null;
+    $("material-detail-title").textContent=redo?(item?"标记需要修改的位置":"框选完整设计"):item?.name||source.name;$("material-detail-note").textContent=redo?source.name:before?"精修前后对照":"查看生成结果";
+    $("material-detail-source-caption").textContent=before?"精修前":"上传原图";$("material-detail-output-caption").textContent=before?"精修后":"当前结果";
+    swapImage($("material-detail-source"),before||source);swapImage($("material-detail-output"),item);$("material-detail-output-figure").classList.toggle("hidden",!item);$("material-detail-warning").textContent=(item?specificWarnings(item):source.error?[source.error]:[]).join("；");
+    $("material-detail-guidance").textContent=item?guidance:"";$("material-detail-guidance").classList.toggle("hidden",!item);
+    const notes=item?processingNotes(item):[];$("material-detail-processing-notes").open=false;$("material-detail-processing-notes").classList.toggle("hidden",!notes.length);$("material-detail-processing-notes-list").innerHTML=notes.map(note=>`<li>${esc(note)}</li>`).join("");
     $("material-redo-controls").classList.toggle("hidden",!redo);$("material-selection-stage").classList.toggle("selecting",redo);$("material-selection-box").classList.add("hidden");$("material-box-note").textContent=item?"在原图拖动标记问题位置。只重做这张素材，不改动其他已完成项。":"在原图拖动框选一个完整设计，文字和装饰一起框入。";$("material-correction-kind").selectedIndex=0;$("material-correction-note").value="";$("material-dialog-message").classList.add("hidden");
-    $("material-detail-actions").innerHTML=redo?"":item?`${!completed(item)?`<button class="button button-primary" type="button" data-material-action="confirm" data-item-id="${esc(item.id)}">确认可用</button>`:`<button class="button button-primary" type="button" data-material-action="download" data-item-id="${esc(item.id)}">下载 PNG</button>`}<button class="button button-secondary" type="button" data-material-action="correct" data-item-id="${esc(item.id)}">标记修改</button>${item.status!=="skipped"?`<button class="button button-quiet" type="button" data-material-action="skip" data-item-id="${esc(item.id)}">跳过</button>`:""}`:"";
+    $("material-detail-actions").innerHTML=redo?"":item?itemActions(item):"";
     $("material-unknown-row").classList.toggle("hidden",!source.submission_unknown);$("material-unknown-ack").checked=false;$("material-redo-submit").textContent=source.submission_unknown?"重新提交，可能重复计费":"只重做框选范围";
     if(!$("material-detail-dialog").open)$("material-detail-dialog").showModal();controls();
   }
@@ -286,16 +311,16 @@
     const dialog={...state.dialog};const source=state.job.sources.find(value=>value.id===dialog.sourceId);const unknown=source?.submission_unknown===true;if(unknown&&!$("material-unknown-ack").checked){$("material-dialog-message").textContent="请先确认重新提交可能重复计费，再继续。";$("material-dialog-message").classList.remove("hidden");return;}
     const box={...state.box};const instruction=[$("material-correction-kind").value,$("material-correction-note").value.trim()].filter(Boolean).join("；");const success=await mutate("redo",{source_id:dialog.sourceId,...(dialog.itemId?{item_id:dialog.itemId}:{}),box,instruction,...(unknown?{acknowledge_unknown:true}:{})});if(success)$("material-detail-dialog").close();else{$("material-dialog-message").textContent=$("material-notice").textContent;$("material-dialog-message").classList.remove("hidden");}
   }
-  function reset() {if(busy()||state.authLost)return;state.epoch++;closeStream();clearTimeout(state.timer);state.selected.clear();state.polling=false;state.job=null;state.clockAnchor=null;state.progressCounts=null;state.items.clear();state.sourcesSignature="";state.newBatch=true;state.files=[];releaseUrls();remember("hsd-material-job",null);remember("hsd-material-new","1");$("material-files").value="";$("material-selected-files").replaceChildren();$("material-grid").replaceChildren();$("material-source-grid").replaceChildren();$("material-source-details").open=false;$("material-upload-form").classList.remove("hidden");$("material-results").classList.add("hidden");$("material-progress").classList.add("hidden");$("material-new").classList.add("hidden");notify("");controls();$("material-files").focus();}
+  function reset() {if(busy()||state.authLost)return;state.epoch++;closeStream();clearTimeout(state.timer);state.refineAcks.clear();state.polling=false;state.job=null;state.clockAnchor=null;state.progressCounts=null;state.items.clear();state.sourcesSignature="";state.newBatch=true;state.files=[];releaseUrls();remember("hsd-material-job",null);remember("hsd-material-new","1");$("material-files").value="";$("material-selected-files").replaceChildren();$("material-grid").replaceChildren();$("material-source-grid").replaceChildren();$("material-source-details").open=false;$("material-upload-form").classList.remove("hidden");$("material-results").classList.add("hidden");$("material-progress").classList.add("hidden");$("material-new").classList.add("hidden");notify("");controls();$("material-files").focus();}
   function boot() {
     document.querySelectorAll("[data-workspace]").forEach(link=>link.addEventListener("click",event=>{event.preventDefault();workspace(link.dataset.workspace,true);}));window.addEventListener("hashchange",()=>workspace(location.hash.slice(1)));
     $("material-files").addEventListener("change",event=>selectFiles(event.target.files));$("material-upload-form").addEventListener("submit",start);$("material-selected-files").addEventListener("click",event=>{const button=event.target.closest("[data-remove-file]");if(!button||busy())return;state.files.splice(Number(button.dataset.removeFile),1);renderSelected();controls();});
     const drop=$("material-dropzone");drop.addEventListener("keydown",event=>{if(event.target===drop&&["Enter"," "].includes(event.key)){event.preventDefault();$("material-files").click();}});["dragenter","dragover"].forEach(name=>drop.addEventListener(name,event=>{event.preventDefault();if(!busy())drop.classList.add("dragging");}));["dragleave","drop"].forEach(name=>drop.addEventListener(name,event=>{event.preventDefault();drop.classList.remove("dragging");if(name==="drop")selectFiles(event.dataTransfer.files,true);}));
-    $("material-undo-batch").addEventListener("click",async()=>{if(await mutate("undo-batch",{})){state.filter="needs_review";render();notify("已撤销本次批量确认。");}});
     $("material-source-details").addEventListener("toggle",()=>{if(state.job){renderSources();controls();}});
-    $("material-select-all").addEventListener("change",event=>selectAllItems(event.target.checked));$("material-confirm-selected").addEventListener("click",confirmSelected);$("material-grid").addEventListener("change",event=>{const input=event.target.closest("[data-select-item]");if(!input||busy())return;if(input.checked)state.selected.add(input.dataset.selectItem);else state.selected.delete(input.dataset.selectItem);updateSelection();});
+    $("material-generation-warning").addEventListener("click",showBatchRecords);
+    $("material-grid").addEventListener("change",acknowledgeRefine);$("material-detail-actions").addEventListener("change",acknowledgeRefine);
     $("material-stop").addEventListener("click",stop);$("material-upload-check").addEventListener("click",recoverUpload);$("material-new").addEventListener("click",reset);$("material-recheck").addEventListener("click",poll);$("material-download-all").addEventListener("click",()=>download(state.job?.download_url));$("material-grid").addEventListener("click",itemAction);$("material-detail-actions").addEventListener("click",itemAction);$("material-source-grid").addEventListener("click",event=>{const button=event.target.closest("[data-source-id]");if(button&&!busy())openDetail(button.dataset.sourceId,null,true);});
-    $("material-filter").addEventListener("click",event=>{const button=event.target.closest("[data-material-filter]");if(button){state.filter=button.dataset.materialFilter;state.filterTouched=true;render();}});$("material-detail-close").addEventListener("click",()=>$("material-detail-dialog").close());$("material-detail-dialog").addEventListener("close",()=>{state.dialog=null;state.box=null;state.startPoint=null;});$("material-redo-submit").addEventListener("click",redo);$("material-unknown-ack").addEventListener("change",controls);
+    $("material-filter").addEventListener("click",event=>{const button=event.target.closest("[data-material-filter]");if(button){state.filter=button.dataset.materialFilter;render();}});$("material-detail-close").addEventListener("click",()=>$("material-detail-dialog").close());$("material-detail-dialog").addEventListener("close",()=>{state.dialog=null;state.box=null;state.startPoint=null;});$("material-redo-submit").addEventListener("click",redo);$("material-unknown-ack").addEventListener("change",controls);
     const stage=$("material-selection-stage");stage.addEventListener("pointerdown",event=>{if(!state.dialog?.redo||busy())return;const point=imagePoint(event);if(!point)return;event.preventDefault();state.startPoint=point;stage.setPointerCapture(event.pointerId);selectionMove(event);});stage.addEventListener("pointermove",selectionMove);stage.addEventListener("pointerup",event=>{if(!state.startPoint)return;selectionMove(event);state.startPoint=null;if(state.box&&state.box.width>=8&&state.box.height>=8){$("material-box-note").textContent=`已框选 ${state.box.width} × ${state.box.height} 像素；可重新拖动修改范围。`;}else state.box=null;controls();});stage.addEventListener("pointercancel",()=>{state.startPoint=null;state.box=null;$("material-selection-box").classList.add("hidden");controls();});
     document.addEventListener("visibilitychange",()=>{if(document.hidden){clearTimeout(state.timer);closeStream();}else schedule();});window.addEventListener("pagehide",()=>{state.epoch++;closeStream();clearTimeout(state.timer);releaseUrls();});window.addEventListener("pageshow",event=>{if(event.persisted){state.epoch++;state.busy=false;state.polling=false;state.uploading=false;state.config=null;$("material-detail-dialog").close();state.dialog=null;if(state.files.length)renderSelected();if(state.workspace==="material")loadConfig();}});
     state.newBatch=stored("hsd-material-new")==="1";

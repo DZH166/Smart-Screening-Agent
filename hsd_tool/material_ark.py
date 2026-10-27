@@ -576,38 +576,46 @@ class ArkMaterialProvider:
 
     def refine_design(self, image_bytes: bytes, *, instructions="",
                       check_cancel: Callable | None = None) -> ArkResult:
-        """One planned clarity pass on an already extracted transparent design.
+        """One requested clarity pass on the complete current design.
 
-        This is not a failed-request retry or local upscaling. Reframe the full
-        subject on its own native 2K canvas; never crop/morph the input/output.
+        This is not a retry or local upscaling. Keep the existing composition;
+        transparent edits require a real alpha input, opaque images use the
+        ordinary single-image PNG path. Never crop/morph either canvas locally.
         """
         if _cancelled(check_cancel):
             raise ArkCancelled()
         if not isinstance(instructions, str) or len(instructions) > 1000:
             raise ArkProviderError("invalid_instructions", "处理要求过长，请简要描述。")
         image, source_size, data_uri, notes = _input(image_bytes, decomposition=False)
-        if image.getchannel("A").getextrema()[0] == 255:
-            raise ArkProviderError("missing_alpha", "精修需要已提取且带真实透明区域的完整设计。")
+        alpha = image.getchannel("A")
+        if alpha.getbbox() is None:
+            raise ArkProviderError("empty_layer", "当前素材为空白图片，无法精修。")
+        transparent = alpha.getextrema()[0] < 255
         prompt = (
-            "将这一张透明素材中的完整设计高清精修，作为单独一张透明PNG返回。"
-            "整个人物、头发、手脚、裙摆、文字、装饰和内部底板一起保留，自然居中，占画面约80%，四周留透明空隙。"
-            "清楚呈现轮廓、五官和纹理，不模糊涂抹，不裁边，不新增内容。"
-            "忠于原文字、配色、形状和风格；去除外加水印。"
-            "不新增白色贴纸边、黑色外描边、光晕或投影，保留原设计内部线条及白色内容。"
+            "只对当前这一张完整设计做高清精修，作为单独一张PNG返回。"
+            "提升高清图像画质、细腻度和清晰度，清楚呈现轮廓、五官和原有纹理，不模糊涂抹。"
+            "保持原有构图、位置、比例、人物姿态、文字、配色、形状和风格，不改字、换色或新增元素。"
+            "整个人物、头发、手脚、裙摆、文字、装饰和内部底板一起完整保留，不裁边，不移动或重新排版。"
+            "不新增白色贴纸边、黑色外描边、光晕或投影，也不增加彩色描边；保留原设计内部线条及白色内容。"
+            + ("保持原有透明背景和完整轮廓，输出真实透明通道。" if transparent else
+               "保持原有背景和内部底板，不擅自抠图或改变画面。")
             + ("补充要求：" + instructions.strip() if instructions.strip() else ""))
-        return self._transparent_single(data_uri, source_size, prompt, notes,
-                                        "高清精修后的素材", check_cancel)
+        if not transparent:
+            notes.append("原素材无透明背景，按整图精修；请核对背景。")
+        return self._single_native(data_uri, source_size, prompt, notes,
+                                   "高清精修后的素材", check_cancel,
+                                   background="transparent" if transparent else "opaque")
 
-    def _transparent_single(self, data_uri, source_size, prompt, notes, label, check_cancel):
+    def _single_native(self, data_uri, source_size, prompt, notes, label, check_cancel, *, background="transparent"):
         parsed, usage, request_id = self._submit(
             {"model": self.model_id, "image": data_uri, "prompt": prompt,
              "size": "2K", "output_format": "png", "response_format": "b64_json",
-             "background": "transparent", "watermark": False}, check_cancel)
+              "background": background, "watermark": False}, check_cancel)
         try:
             data = parsed.get("data")
             if not isinstance(data, list) or len(data) != 1 or not isinstance(data[0], dict) or "error" in data[0]:
                 raise ArkProviderError("invalid_response", "图片服务没有返回唯一完整的处理结果。")
-            output = _decode(_image_field(data[0]), output=True, require_alpha=True)
+            output = _decode(_image_field(data[0]), output=True, require_alpha=background == "transparent")
             _size(data[0], output)
             if not output.getchannel("A").getbbox():
                 raise ArkProviderError("empty_layer", "图片服务返回了空白素材。")
@@ -639,5 +647,5 @@ class ArkMaterialProvider:
                   + location + "修改要求：" + instructions.strip())
         if bounds:
             notes.append("已按标记位置提出修改要求，模型仍可能改变其他区域，请对照确认。")
-        return self._transparent_single(data_uri, source_size, prompt, notes,
-                                        "修改后的素材", check_cancel)
+        return self._single_native(data_uri, source_size, prompt, notes,
+                                   "修改后的素材", check_cancel)

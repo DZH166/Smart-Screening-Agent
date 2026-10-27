@@ -887,10 +887,15 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
     def material_redo_job(material_id):
         return jsonify(material_manager.redo(material_id, employee_id(), request.get_json()))
 
+    @app.post("/api/material/jobs/<material_id>/refine")
+    def material_refine_job(material_id):
+        return jsonify(material_manager.refine(material_id, employee_id(), request.get_json()))
+
     @app.get("/api/material/jobs/<material_id>/source/<item_id>")
     @app.get("/api/material/jobs/<material_id>/item/<item_id>")
+    @app.get("/api/material/jobs/<material_id>/item/<item_id>/before")
     def material_image(material_id, item_id):
-        kind = "source" if "/source/" in request.path else "item"
+        kind = "source" if "/source/" in request.path else "before" if request.path.endswith("/before") else "item"
         variant = request.args.get("variant", "full")
         if (variant not in {"full", "thumb"} or set(request.args) - {"variant", "v"}
                 or any(len(values) != 1 for _, values in request.args.lists())):
