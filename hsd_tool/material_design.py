@@ -350,7 +350,11 @@ class MaterialDesignProvider:
             native_image = _decode(cleaned.layers[0].png, output=True)
             extra_notes = list(cleaned.warnings) + list(cleaned.layers[0].warnings)
             png, crop_notes = preserve_design(native_image)
-            return ArkLayer(png, design.label, "", native, index,
+            # Persist source coordinates in ArkLayer's public bounds contract;
+            # reference hints and native (left, top, right, bottom) are private.
+            bounds = {"x": native[0], "y": native[1],
+                      "width": native[2] - native[0], "height": native[3] - native[1]}
+            return ArkLayer(png, design.label, "", bounds, index,
                             tuple(dict.fromkeys(list(design.warnings) + extra_notes + crop_notes
                                                 + ([dense_note] if dense_note else []))))
 
