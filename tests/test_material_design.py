@@ -71,6 +71,7 @@ class FakeArk:
         self.barrier_from = barrier_from
         self.delay = delay
         self.calls = []
+        self.refine_calls = 0
         self.lock = threading.Lock()
 
     def clean(self, png, *, instructions="", bounds=None, check_cancel=None, _operation="clean"):
@@ -94,9 +95,9 @@ class FakeArk:
         return self.clean(png, instructions=instructions, bounds=bounds,
                           check_cancel=check_cancel, _operation="extract_design")
 
-    def refine_design(self, png, *, instructions="", check_cancel=None):
-        return self.clean(png, instructions=instructions, check_cancel=check_cancel,
-                          _operation="refine_design")
+    def refine_design(self, *args, **kwargs):
+        self.refine_calls += 1
+        raise AssertionError("Default extraction must never dispatch a refinement")
 
     def edit(self, png, *, instructions="", bounds=None, check_cancel=None):
         return self.clean(png, instructions=instructions, bounds=bounds,
@@ -370,86 +371,97 @@ def transparent_card(size=(400, 400)):
     return _encode(image)
 
 
-class RefineArk(FakeArk):
-    def __init__(self, *, refine_error=None, native_size=(400, 400), **kwargs):
+class NativeArk(FakeArk):
+    """Return a known native canvas; any automatic second call is a trap."""
+
+    def __init__(self, *, transparent=True, **kwargs):
         super().__init__(**kwargs)
-        self.refine_error = refine_error
-        self.native = transparent_card(native_size)
-        self.refined = transparent_card((320, 640))
+        self.native = transparent_card() if transparent else card()
 
     def extract_design(self, png, **kwargs):
         result = super().extract_design(png, **kwargs)
         layer = ArkLayer(self.native, "完整设计", "", result.layers[0].bounds, 1)
-        return ArkResult((layer,), result.usage, (), result.base_png, result.base_size, result.request_id)
-
-    def refine_design(self, png, **kwargs):
-        result = super().refine_design(png, **kwargs)
-        if self.refine_error:
-            raise self.refine_error
-        layer = ArkLayer(self.refined, "精修设计", "", result.layers[0].bounds, 1)
-        return ArkResult((layer,), result.usage, (), result.base_png, result.base_size, result.request_id)
+        # The adapter must keep the provider's actual image accounting, which
+        # may count both the base and foreground even though it is one call.
+        usage = {**result.usage, "generated_images": 2}
+        return ArkResult((layer,), usage, (), result.base_png, result.base_size, result.request_id)
 
 
-def test_only_small_targets_in_multiple_designs_get_one_planned_refinement():
-    ark = RefineArk()
-    result = provider(ark, [design((10, 10, 110, 110)), design((160, 20, 390, 390))], workers=1).extract(source_image())
-    assert [row["operation"] for row in ark.calls] == ["clean", "extract_design", "refine_design", "extract_design"]
-    assert result.provider_usage["seedream"]["input_images"] == 4
-    assert_canvas_preserved(Image.open(io.BytesIO(ark.refined)), result.layers[0].png)
-    assert_canvas_preserved(Image.open(io.BytesIO(ark.native)), result.layers[1].png)
-    assert any("已单独请求高清精修" in note for note in result.layers[0].warnings)
-    assert not any("已单独请求高清精修" in note for note in result.layers[1].warnings)
-
-
-def test_single_design_and_exact_ratio_boundary_do_not_add_refinement():
-    ark = RefineArk()
-    provider(ark, [design((10, 10, 110, 110))]).extract(source_image())
-    assert [row["operation"] for row in ark.calls] == ["clean", "extract_design"]
-    ark = RefineArk()
-    provider(ark, [design((0, 0, 240, 100)), design((240, 0, 400, 200))]).extract(source_image())
-    assert [row["operation"] for row in ark.calls].count("refine_design") == 0
-
-
-def test_small_opaque_native_result_keeps_its_pixels_with_warning_without_extra_spending():
-    ark = FakeArk()
-    result = provider(ark, [design((10, 10, 110, 110)), design((200, 200, 300, 300))]).extract(source_image())
-    assert len(ark.calls) == 3
-    assert all(any("未继续精修" in note for note in layer.warnings) for layer in result.layers)
-    assert_canvas_preserved(Image.open(io.BytesIO(card())), result.layers[0].png)
+@pytest.mark.parametrize("transparent", [False, True])
+@pytest.mark.parametrize("boxes", [
+    [(10, 10, 110, 110)],
+    [(10, 10, 60, 60), (200, 200, 250, 250)],
+    [(10, 10, 110, 110), (160, 20, 390, 390)],
+    [(0, 0, 240, 100), (240, 0, 400, 200)],
+])
+def test_every_design_is_extracted_once_regardless_of_size_count_or_transparency(transparent, boxes):
+    ark = NativeArk(transparent=transparent)
+    result = provider(ark, [design(box) for box in boxes], workers=1).extract(source_image())
+    assert [row["operation"] for row in ark.calls] == ["clean"] + ["extract_design"] * len(boxes)
+    assert ark.refine_calls == 0
+    assert len(result.layers) == len(boxes)
+    assert result.provider_usage["seedream"]["input_images"] == 1 + len(boxes)
+    assert result.provider_usage["seedream"]["generated_images"] == 1 + 2 * len(boxes)
+    assert result.provider_usage["deepseek"]["requests"] == 1
+    assert all("高清清楚" in row["instructions"] for row in ark.calls[1:])
+    assert not any("精修" in note for layer in result.layers for note in layer.warnings)
+    for layer in result.layers:
+        assert_canvas_preserved(Image.open(io.BytesIO(ark.native)), layer.png)
+    final = {row["id"]: row for row in result.attempts}
+    assert [row["operation"] for row in final.values()].count("extract_design") == len(boxes)
+    assert not any(row["operation"] == "refine_design" for row in final.values())
+    if not transparent:
+        assert all(any("未返回透明区域" in note for note in layer.warnings) for layer in result.layers)
 
 
 @pytest.mark.parametrize("settled,code", [(True, "provider_failed"), (False, "submission_unknown")])
-def test_refinement_failure_never_falls_back_or_retries_and_other_design_remains(settled, code):
-    ark = RefineArk(refine_error=ArkProviderError(code, "static message", settled=settled,
-                                               usage={"input_images": 1}, request_id="refine-failed"))
+def test_native_failure_is_not_retried_and_the_other_design_keeps_its_original_canvas(settled, code):
+    class FailFirstNative(NativeArk):
+        def extract_design(self, png, **kwargs):
+            result = super().extract_design(png, **kwargs)
+            if len(self.calls) == 2:
+                raise ArkProviderError(code, "static message", settled=settled,
+                                       usage={"input_images": 1}, request_id="native-failed")
+            return result
+
+    ark = FailFirstNative()
     result = provider(ark, [design((10, 10, 110, 110), "较小设计"),
                             design((160, 20, 390, 390), "较大设计")], workers=1).extract(source_image())
     assert [layer.label for layer in result.layers] == ["较大设计"]
-    assert [row["operation"] for row in ark.calls] == ["clean", "extract_design", "refine_design", "extract_design"]
+    assert [row["operation"] for row in ark.calls] == ["clean", "extract_design", "extract_design"]
+    assert ark.refine_calls == 0
     assert any("较小设计" in note and "未能生成" in note for note in result.warnings)
     final = {row["id"]: row for row in result.attempts}
-    refine = [row for row in final.values() if row["operation"] == "refine_design"]
-    assert len(refine) == 1 and refine[0]["state"] == ("failed" if settled else "unknown")
-    assert refine[0]["request_id"] == "refine-failed"
-    assert result.provider_usage["seedream"]["input_images"] == 4
+    failed = [row for row in final.values() if row["request_id"] == "native-failed"]
+    assert len(failed) == 1 and failed[0]["state"] == ("failed" if settled else "unknown")
+    assert failed[0]["operation"] == "extract_design"
+    assert result.provider_usage["seedream"]["input_images"] == 3
+    assert_canvas_preserved(Image.open(io.BytesIO(ark.native)), result.layers[0].png)
 
 
-def test_all_refinements_unknown_raise_with_complete_paid_history_without_native_fallback():
-    ark = RefineArk(refine_error=ArkProviderError("submission_unknown", "static", settled=False,
-                                               usage={"input_images": 1}))
+
+def test_all_native_submissions_unknown_raise_with_complete_paid_history_and_no_new_requests():
+    class UnknownNative(NativeArk):
+        def extract_design(self, png, **kwargs):
+            super().extract_design(png, **kwargs)
+            raise ArkProviderError("submission_unknown", "static", settled=False,
+                                   usage={"input_images": 1})
+
+    ark = UnknownNative()
     with pytest.raises(ArkProviderError) as raised:
         provider(ark, [design((10, 10, 110, 110)), design((200, 200, 300, 300))], workers=1).extract(source_image())
     final = {row["id"]: row for row in raised.value.attempts}
-    assert len(ark.calls) == 5
+    assert [row["operation"] for row in ark.calls] == ["clean", "extract_design", "extract_design"]
+    assert ark.refine_calls == 0
     assert sum(row["state"] == "unknown" for row in final.values()) == 2
-    assert raised.value.provider_usage["seedream"]["input_images"] == 5
-    assert not raised.value.safe_retry
+    assert raised.value.provider_usage["seedream"]["input_images"] == 3
+    assert not raised.value.safe_retry and not raised.value.settled
 
 
-def test_cancel_between_successful_extraction_and_planned_refinement_does_not_dispatch_refinement():
+def test_cancel_after_successful_native_extraction_prevents_the_next_design_request():
     cancelled = threading.Event()
 
-    class CancelAfterExtract(RefineArk):
+    class CancelAfterExtract(NativeArk):
         def extract_design(self, png, **kwargs):
             result = super().extract_design(png, **kwargs)
             cancelled.set()
@@ -460,62 +472,75 @@ def test_cancel_between_successful_extraction_and_planned_refinement_does_not_di
         provider(ark, [design((10, 10, 110, 110)), design((200, 200, 300, 300))], workers=1).extract(
             source_image(), check_cancel=cancelled.is_set)
     assert [row["operation"] for row in ark.calls] == ["clean", "extract_design"]
+    assert ark.refine_calls == 0
     assert raised.value.provider_usage["seedream"]["input_images"] == 2
 
 
-def test_cancelled_refinement_with_lost_reply_stays_unknown_after_parallel_drain():
+def test_cancelled_native_with_lost_reply_stays_unknown_after_parallel_drain():
     cancelled = threading.Event()
 
-    class LostRefinement(RefineArk):
-        def refine_design(self, png, **kwargs):
-            result = super().refine_design(png, **kwargs)
+    class LostNative(NativeArk):
+        def extract_design(self, png, **kwargs):
+            super().extract_design(png, **kwargs)
             cancelled.set()
-            raise ArkCancelled(settled=False, usage={"input_images": 1}, request_id="refine-unknown")
+            raise ArkCancelled(settled=False, usage={"input_images": 1}, request_id="native-unknown")
 
-    ark = LostRefinement()
+    ark = LostNative()
     with pytest.raises(ArkCancelled) as raised:
         provider(ark, [design((10, 10, 110, 110)), design((200, 200, 300, 300))], workers=1).extract(
             source_image(), check_cancel=cancelled.is_set)
-    # Cleanup, native extraction, and the planned refinement only. The lost
-    # reply does not dispatch any retry or start the second queued design.
-    assert [row["operation"] for row in ark.calls] == ["clean", "extract_design", "refine_design"]
+    assert [row["operation"] for row in ark.calls] == ["clean", "extract_design"]
+    assert ark.refine_calls == 0
     final = {row["id"]: row for row in raised.value.attempts}
     unknown = [row for row in final.values() if row["state"] == "unknown"]
-    assert len(unknown) == 1 and unknown[0]["operation"] == "refine_design"
-    assert unknown[0]["request_id"] == "refine-unknown" and not unknown[0]["settled"]
+    assert len(unknown) == 1 and unknown[0]["operation"] == "extract_design"
+    assert unknown[0]["request_id"] == "native-unknown" and not unknown[0]["settled"]
     assert not raised.value.settled and raised.value.code == "submission_unknown"
-    assert raised.value.provider_usage["seedream"]["input_images"] == 3
-    assert raised.value.provider_usage["seedream"]["generated_images"] == 2
+    assert raised.value.provider_usage["seedream"]["input_images"] == 2
+    assert raised.value.provider_usage["seedream"]["generated_images"] == 1
+
+
+def test_explicit_employee_edit_adds_only_one_edit_request_after_extraction():
+    ark = NativeArk()
+    pipeline = provider(ark, [design((10, 10, 110, 110)), design((200, 200, 300, 300))], workers=1)
+    result = pipeline.extract(source_image())
+    assert [row["operation"] for row in ark.calls] == ["clean", "extract_design", "extract_design"]
+    edited = pipeline.edit(result.layers[0].png, instructions="不要白色贴纸边")
+    assert [row["operation"] for row in ark.calls] == ["clean", "extract_design", "extract_design", "edit"]
+    assert ark.refine_calls == 0 and len(edited.layers) == 1
+    assert edited.provider_usage["deepseek"]["requests"] == 0
+    assert edited.provider_usage["seedream"]["input_images"] == 1
 
 
 def test_transparent_edit_uses_existing_one_call_protocol_and_keeps_returned_canvas():
     ark = FakeArk(payloads=[transparent_card()])
     result = provider(ark, []).edit(transparent_card(), instructions="不要白色贴纸边",
                                     bounds={"x": 10, "y": 10, "width": 50, "height": 50})
-    assert len(ark.calls) == 1 and ark.calls[0]["operation"] == "edit"
+    assert len(ark.calls) == 1 and ark.calls[0]["operation"] == "edit" and ark.refine_calls == 0
     assert_canvas_preserved(Image.open(io.BytesIO(transparent_card())), result.layers[0].png)
 
 
-def test_refinement_concurrency_uses_pixel_budget_even_when_original_is_small(monkeypatch):
-    monkeypatch.setattr(design_module, "CONCURRENT_REFERENCE_PIXELS", 640_000)
+def test_extraction_concurrency_uses_shared_reference_pixel_budget(monkeypatch):
+    monkeypatch.setattr(design_module, "CONCURRENT_REFERENCE_PIXELS", 320_000)
 
-    class CountActive(RefineArk):
+    class CountActive(NativeArk):
         def __init__(self):
-            super().__init__(native_size=(800, 800))
+            super().__init__()
             self.active = self.peak = 0
 
-        def refine_design(self, png, **kwargs):
+        def extract_design(self, png, **kwargs):
             with self.lock:
                 self.active += 1
                 self.peak = max(self.peak, self.active)
             try:
                 time.sleep(.01)
-                return super().refine_design(png, **kwargs)
+                return super().extract_design(png, **kwargs)
             finally:
                 with self.lock:
                     self.active -= 1
 
     ark = CountActive()
     result = provider(ark, eight_designs()).extract(source_image())
-    assert len(result.layers) == 8 and ark.peak == 1
-    assert [row["operation"] for row in ark.calls].count("refine_design") == 8
+    assert len(result.layers) == 8 and ark.peak == 2
+    assert [row["operation"] for row in ark.calls] == ["clean"] + ["extract_design"] * 8
+    assert ark.refine_calls == 0

@@ -4,7 +4,9 @@ DeepSeek locates complete designs after one whole-sheet cleanup. A shared whole
 source reference and a target hint are sent to each native extraction, accepting one
 nonempty foreground. The returned canvas and alpha are kept unchanged: no white
 mask, connected-component deletion, content crop or server-added frame.
-Generated pixels remain proposals; an employee must confirm each item.
+Each design is extracted once with the HD requirements in the same request;
+only an explicit employee edit submits it again. Generated pixels remain
+proposals; an employee must confirm each item.
 
 Upstream concurrency was measured on 2026-10-25 with one key: 8 calls returned
 in 23.0 s, 10 in 27.1 s, 16 in 34.3 s with one failed response.  Past eight the
@@ -31,7 +33,6 @@ MIN_PAD = 6
 EDGE_PIXELS = 2
 REFERENCE_MAX_PIXELS = 16_000_000
 CONCURRENT_REFERENCE_PIXELS = 32_000_000
-REFINE_SMALL_TARGET_RATIO = .15
 
 DESIGN_NOTE = (
     "人物全身、头发、裙摆、鞋子、文字、装饰和内部底板整体保留。"
@@ -262,28 +263,9 @@ class MaterialDesignProvider:
         scale_x, scale_y = source.width / base.width, source.height / base.height
         reference_png, reference_size = prepare_design_reference(source)
         workers = reference_workers(reference_size, self.workers)
-        budget = threading.Condition()
-        in_flight_pixels = 0
-
-        def limited(pixels, invoke):
-            # Refinement inputs may be larger than the source reference. Share
-            # one32MP request-input budget across both operations, so a tiny
-            # collage cannot dispatch eight large refinement inputs at once.
-            nonlocal in_flight_pixels
-            with budget:
-                while in_flight_pixels + pixels > CONCURRENT_REFERENCE_PIXELS:
-                    if _cancelled(check_cancel):
-                        raise ArkCancelled()
-                    budget.wait(timeout=.1)
-                if _cancelled(check_cancel):
-                    raise ArkCancelled()
-                in_flight_pixels += pixels
-            try:
-                return invoke()
-            finally:
-                with budget:
-                    in_flight_pixels -= pixels
-                    budget.notify_all()
+        # Every request shares this one reference, so the pool size alone bounds
+        # both concurrent input pixels and the eight-call limit. No automatic
+        # second generation is planned from a target's size or transparency.
 
         def one(index, design):
             if _cancelled(check_cancel):
@@ -296,32 +278,12 @@ class MaterialDesignProvider:
             bounds["height"] = min(bounds["height"], source.height - bounds["y"])
             native = (bounds["x"], bounds["y"], bounds["x"] + bounds["width"], bounds["y"] + bounds["height"])
             target = design_target_bounds(native, source.size, reference_size)
-            cleaned = limited(reference_size[0] * reference_size[1], lambda: call(
-                "seedream", "extract_design", lambda: self.ark.extract_design(
-                    reference_png, bounds=target, instructions=note, check_cancel=check_cancel)))
+            cleaned = call("seedream", "extract_design", lambda: self.ark.extract_design(
+                reference_png, bounds=target, instructions=note, check_cancel=check_cancel))
             if len(cleaned.layers) != 1:
                 raise ArkProviderError("ambiguous_design", "图片服务没有返回唯一完整设计，请重新框选后重做。")
             native_image = _decode(cleaned.layers[0].png, output=True)
             extra_notes = list(cleaned.warnings) + list(cleaned.layers[0].warnings)
-            small_target = (total > 1 and bounds["width"] * bounds["height"]
-                            < source.width * source.height * REFINE_SMALL_TARGET_RATIO)
-            if small_target:
-                if native_image.getchannel("A").getextrema()[0] < 255:
-                    if _cancelled(check_cancel):
-                        raise ArkCancelled()
-                    # One planned pass after successful native extraction. A
-                    # failure never falls back to the old image as a completed
-                    # refined design and never triggers another paid request.
-                    refined = limited(native_image.width * native_image.height, lambda: call(
-                        "seedream", "refine_design", lambda: self.ark.refine_design(
-                            cleaned.layers[0].png, instructions=note, check_cancel=check_cancel)))
-                    if len(refined.layers) != 1:
-                        raise ArkProviderError("ambiguous_design", "精修没有返回唯一完整设计，请重新框选后重做。")
-                    native_image = _decode(refined.layers[0].png, output=True)
-                    extra_notes.extend(list(refined.warnings) + list(refined.layers[0].warnings))
-                    extra_notes.append("原图中较小的设计已单独请求高清精修；尺寸不代表恢复细节，仍需核对完整性。")
-                else:
-                    extra_notes.append("该设计在原图中占比较小，但未返回真实透明区域，未继续精修；请核对清晰度和背景。")
             png, crop_notes = preserve_design(native_image)
             return ArkLayer(png, design.label, "", bounds, index,
                             tuple(dict.fromkeys(list(design.warnings) + extra_notes + crop_notes)))
