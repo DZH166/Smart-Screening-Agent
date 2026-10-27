@@ -891,7 +891,12 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
     @app.get("/api/material/jobs/<material_id>/item/<item_id>")
     def material_image(material_id, item_id):
         kind = "source" if "/source/" in request.path else "item"
-        path, digest = material_manager.asset(material_id, employee_id(), kind, item_id)
+        variant = request.args.get("variant", "full")
+        if (variant not in {"full", "thumb"} or set(request.args) - {"variant", "v"}
+                or any(len(values) != 1 for _, values in request.args.lists())):
+            raise ValueError("图片预览参数无效。")
+        path, digest = material_manager.asset(material_id, employee_id(), kind, item_id,
+            thumbnail=variant == "thumb", content_version=request.args.get("v"))
         response = send_file(path, etag=digest, conditional=True, max_age=0)
         response.headers["Cache-Control"] = "private, no-cache, must-revalidate"
         return response

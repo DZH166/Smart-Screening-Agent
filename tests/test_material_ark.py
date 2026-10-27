@@ -166,6 +166,8 @@ def test_native_design_is_one_submission_and_keeps_complete_layer_canvas_and_sof
     payload = json.loads(transport.calls[0][0].data)
     assert payload["layer_decomposition"] is True and payload["size"] == "2K"
     assert "一个前景图层" in payload["prompt"] and "不画白底或棋盘格" in payload["prompt"]
+    assert "不新增白色贴纸边、黑色外描边、光晕或投影" in payload["prompt"]
+    assert "保留原设计内部线条和白色内容" in payload["prompt"]
     assert "保留完整裙摆和鞋子" in payload["prompt"]
     with Image.open(io.BytesIO(result.layers[0].png)) as actual:
         assert actual.size == image.size and actual.tobytes() == image.tobytes()
@@ -210,7 +212,7 @@ def test_native_target_is_a_prompt_hint_and_maps_the_whole_image_upscale():
     result = provider(transport).extract_design(
         picture((256, 256)), bounds={"x": 10, "y": 20, "width": 100, "height": 150})
     payload = json.loads(transport.calls[0][0].data)
-    assert "<bbox>20 40 220 340</bbox>" in payload["prompt"]
+    assert "<bbox>39 78 430 665</bbox>" in payload["prompt"]
     assert "延伸到框外时仍整体保留" in payload["prompt"]
     with Image.open(io.BytesIO(base64.b64decode(payload["image"].split(",", 1)[1]))) as reference:
         assert reference.size == (512, 512), "the hint must not crop the reference"
@@ -490,7 +492,7 @@ def test_edit_uses_transparent_image_protocol_and_marks_generated_changes():
     request = json.loads(transport.calls[0][0].data)
     assert request["background"] == "transparent"
     assert "layer_decomposition" not in request
-    assert "<bbox>10 20 110 100</bbox>" in request["prompt"]
+    assert "<bbox>19 39 215 196</bbox>" in request["prompt"]
     assert len(output.layers) == 1
     assert output.base_png == b""
     assert any("其他区域" in note for note in output.warnings)
@@ -520,6 +522,90 @@ def test_edit_bad_result_preserves_usage_and_does_not_retry():
     assert error.value.settled
     assert not error.value.safe_retry
     assert error.value.usage["generated_images"] == 1
+
+
+@pytest.mark.parametrize("operation", ["clean", "edit", "extract_design"])
+def test_every_interaction_prompt_uses_normalized_0_999_not_pixel_coordinates(operation):
+    data = result_data()
+    if operation != "extract_design":
+        data["data"] = [item(1)]
+    transport = Recorder(data)
+    getattr(provider(transport), operation)(
+        picture(alpha=True), instructions="保留原图",
+        bounds={"x": 128, "y": 64, "width": 256, "height": 384})
+    prompt = json.loads(transport.calls[0][0].data)["prompt"]
+    assert "<bbox>250 125 750 875</bbox>" in prompt
+    assert "<bbox>128 64 384 448</bbox>" not in prompt
+    assert "描边" in prompt and "白色内容" in prompt
+
+
+def test_input_bounds_clamp_at_999_while_response_normalized_bounds_still_accept_1000():
+    assert ark._prompt_bounds({"x": 0, "y": 0, "width": 512, "height": 512}, (512, 512)) == (0, 0, 999, 999)
+    assert ark._prompt_bounds({"x": 5999, "y": 5999, "width": 1, "height": 1}, (6000, 6000)) == (998, 998, 999, 999)
+    assert provider(Recorder()).extract(picture()).layers[0].bounds["width"] == 512
+
+
+def single_image_data(png=None):
+    png = picture(alpha=True) if png is None else png
+    with Image.open(io.BytesIO(png)) as image:
+        size = image.size
+    return {"data": [{"size": f"{size[0]}x{size[1]}", "output_format": "png",
+                      "b64_json": base64.b64encode(png).decode()}],
+            "usage": {"generated_images": 1, "input_images": 1}}
+
+
+def test_refine_is_one_transparent_native_2k_request_and_preserves_every_output_pixel():
+    image = Image.new("RGBA", (320, 640), (0, 0, 0, 0))
+    image.putpixel((0, 0), (255, 255, 255, 255))
+    image.putpixel((160, 300), (10, 20, 30, 37))
+    image.putpixel((319, 639), (10, 20, 30, 255))
+    transport = Recorder(single_image_data(ark._encode(image)))
+    output = provider(transport).refine_design(picture(alpha=True), instructions="保留鞋子")
+    assert len(transport.calls) == 1
+    body = json.loads(transport.calls[0][0].data)
+    assert body["size"] == "2K" and body["background"] == "transparent"
+    assert "layer_decomposition" not in body
+    assert "约80%" in body["prompt"] and "保留鞋子" in body["prompt"]
+    assert "不新增白色贴纸边、黑色外描边、光晕或投影" in body["prompt"]
+    assert "保留原设计内部线条及白色内容" in body["prompt"]
+    with Image.open(io.BytesIO(output.layers[0].png)) as actual:
+        assert actual.size == image.size and actual.tobytes() == image.tobytes()
+    assert output.no_upscale and output.rectangular_crops
+    assert output.usage == {"generated_images": 1, "input_images": 1}
+
+
+def test_refine_requires_real_transparency_before_spending():
+    transport = Recorder(single_image_data())
+    with pytest.raises(ark.ArkProviderError) as error:
+        provider(transport).refine_design(picture())
+    assert error.value.code == "missing_alpha" and not transport.calls
+
+
+def test_refine_opaque_return_is_preserved_with_visible_warning_instead_of_mask_deletion():
+    rgba = ark._encode(Image.new("RGBA", (512, 512), (255, 255, 255, 255)))
+    output = provider(Recorder(single_image_data(rgba))).refine_design(picture(alpha=True))
+    assert any("未返回透明区域" in warning for warning in output.warnings)
+    with Image.open(io.BytesIO(output.layers[0].png)) as actual:
+        assert actual.getchannel("A").getextrema() == (255, 255)
+
+
+@pytest.mark.parametrize("data", [{"data": []}, {"data": [item(1), item(2)]}])
+def test_refine_invalid_or_multiple_results_keep_paid_usage_without_fallback(data):
+    data["usage"] = {"generated_images": 2}
+    transport = Recorder(data)
+    with pytest.raises(ark.ArkProviderError) as error:
+        provider(transport).refine_design(picture(alpha=True))
+    assert error.value.code == "invalid_response" and error.value.settled
+    assert error.value.usage == {"generated_images": 2}
+    assert not error.value.safe_retry and len(transport.calls) == 1
+
+
+def test_refine_lost_reply_stays_unknown_and_never_posts_again():
+    transport = Recorder(raw=b"not-json")
+    with pytest.raises(ark.ArkProviderError) as error:
+        provider(transport).refine_design(picture(alpha=True))
+    assert not error.value.settled and not error.value.safe_retry
+    assert len(transport.calls) == 1
 
 
 def test_default_transport_builds_no_redirect_opener_and_uses_fixed_destination(monkeypatch):

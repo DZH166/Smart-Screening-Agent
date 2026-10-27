@@ -109,7 +109,7 @@ def test_clean_accepts_opaque_edit_with_valid_local_bounds():
     result = ArkMaterialProvider(KEY, MODEL, transport=t).clean(image(), instructions="去掉水印",
                        bounds={"x": 10, "y": 10, "width": 100, "height": 100})
     assert result.rectangular_crops
-    assert "<bbox>10 10 110 110</bbox>" in json.loads(t.calls[0][0].data)["prompt"]
+    assert "<bbox>10 20 110 220</bbox>" in json.loads(t.calls[0][0].data)["prompt"]
 
 
 @pytest.mark.parametrize("size", [(64, 64), (1600, 100), (100, 1600), (3200, 2400)])

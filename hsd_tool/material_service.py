@@ -39,6 +39,7 @@ _TERMINAL = {"ready", "cancelled", "error"}
 _MAX_PIXELS = 36_000_000
 _MAX_FILES = 100
 _RETENTION = 3 * 86400
+_THUMBNAIL_EDGE = 640
 _STAGES = {
     "queued": ("排队", "等待开始处理"),
     "preparing": ("准备图片", "正在检查图片"),
@@ -111,6 +112,13 @@ def _png(image):
     clean.info.clear()
     clean.save(result, "PNG", **({"icc_profile": profile} if profile else {}))
     return result.getvalue()
+
+
+def _thumbnail(image):
+    """Display-only derivative; never resize or overwrite a downloadable PNG."""
+    preview = image.copy()
+    preview.thumbnail((_THUMBNAIL_EDGE, _THUMBNAIL_EDGE), Image.Resampling.LANCZOS)
+    return _png(preview)
 
 
 class MaterialManager:
@@ -268,8 +276,7 @@ class MaterialManager:
                     self._progress(job, "error")
                     for source in job["sources"]:
                         if source["status"] == "processing":
-                            unknown = any(attempt["state"] in {"submitted", "unknown"} and
-                                          attempt.get("source_id", source["id"]) == source["id"] for attempt in job["attempts"])
+                            unknown = self._source_submission_unknown(job, source["id"], include_pending=True)
                             source.update(status="error", submission_unknown=unknown,
                                           error="上次请求是否完成和扣费尚未确定；未自动重发，请核对后再重试。" if unknown else
                                                 "上次处理被中断，尚未发送这张图片，可重新处理。")
@@ -361,8 +368,11 @@ class MaterialManager:
                 image = _decode(stream)
                 raw = _png(image)
                 self._write(directory / (source_id + ".png"), raw)
+                thumbnail = _thumbnail(image)
+                self._write(directory / (source_id + ".thumb.png"), thumbnail)
                 sources.append({"id": source_id, "name": name, "width": image.width,
                                 "height": image.height, "sha256": hashlib.sha256(raw).hexdigest(),
+                                "thumbnail_sha256": hashlib.sha256(thumbnail).hexdigest(),
                                 "status": "queued", "error": ""})
             if ensure_active:
                 ensure_active()
@@ -375,6 +385,7 @@ class MaterialManager:
                 try:
                     for source in sources:
                         os.replace(directory / (source["id"] + ".png"), target / (source["id"] + ".png"))
+                        os.replace(directory / (source["id"] + ".thumb.png"), target / (source["id"] + ".thumb.png"))
                     now = self.clock()
                     job = {"schema": 1, "implementation": self.implementation, "id": identifier,
                            "owner": str(owner or "local"), "revision": 0, "status": "queued",
@@ -446,6 +457,22 @@ class MaterialManager:
 
     def _source(self, job, source_id):
         return next((row for row in job["sources"] if row["id"] == source_id), None)
+
+    @staticmethod
+    def _source_submission_unknown(job, source_id, *, include_pending=False):
+        """A successful source may still contain an unsettled per-design call.
+
+        Pipeline callbacks upsert each call by ID, so only its latest state is
+        examined. Never let another source's uncertainty block this source.
+        """
+        states = {"unknown", "submitted"} if include_pending else {"unknown"}
+        for attempt in job.get("attempts", ()):
+            if attempt.get("source_id") != source_id:
+                continue
+            if attempt.get("state") in states or any(
+                    call.get("state") in states for call in attempt.get("pipeline_attempts", ())):
+                return True
+        return False
 
     def _invoke(self, job, provider, raw, instructions, edit=False, bounds=None, source_id=""):
         # Retry only a definite provider rejection marked safe by the adapter.
@@ -585,7 +612,9 @@ class MaterialManager:
                                 if old["id"] == redo["item_id"]:
                                     old["status"] = "superseded"
                         job["items"].extend(new_items)
-                        source.update(status="done", error="", submission_unknown=False)
+                        unknown = self._source_submission_unknown(job, source["id"])
+                        source.update(status="done", submission_unknown=unknown,
+                                      error="部分调用结果尚未确认，已完成素材可继续确认；重新处理前请先核对，可能重复计费。" if unknown else "")
                         self._progress(job, "source_done", current=index + 1, total=len(sources), source_id=source["id"])
                         job["revision"] += 1
                         self._save(job)
@@ -596,8 +625,7 @@ class MaterialManager:
                         # Never return upstream exception text (may contain a
                         # credential, base64 request or internal filesystem path).
                         unknown = (getattr(exc, "settled", True) is False or
-                                   any(attempt.get("source_id") == source["id"] and attempt["state"] == "unknown"
-                                       for attempt in job["attempts"]))
+                                   self._source_submission_unknown(job, source["id"]))
                         message = ("接口返回中断，是否扣费尚未确定；未自动重发。请联系管理员核对后再重做。"
                                    if unknown else self._public_error(exc))
                         source.update(status="error", error=message, submission_unknown=unknown)
@@ -618,7 +646,7 @@ class MaterialManager:
                 self._progress(job, "cancelled")
                 for source in job["sources"]:
                     if source["status"] in {"queued", "processing"}:
-                        if source["status"] == "processing" and job["attempts"] and job["attempts"][-1]["state"] == "unknown":
+                        if source["status"] == "processing" and self._source_submission_unknown(job, source["id"]):
                             source["submission_unknown"] = True
                             source["error"] = "上次已发送请求的结果和扣费尚未确定；重新提交前请先核对。"
                         source["status"] = "cancelled"
@@ -690,6 +718,8 @@ class MaterialManager:
             identifier = secrets.token_hex(16)
             content = _png(image)
             self._write(self._directory(job["id"]) / (identifier + ".png"), content)
+            thumbnail = _thumbnail(image)
+            self._write(self._directory(job["id"]) / (identifier + ".thumb.png"), thumbnail)
             if set(bounds) == {"x", "y", "width", "height"}:
                 bounds = {**bounds, "x": bounds["x"] + offset[0], "y": bounds["y"] + offset[1]}
             label = str(getattr(layer, "label", "素材"))[:80]
@@ -698,6 +728,7 @@ class MaterialManager:
                           "warnings": notices, "width": image.width, "height": image.height,
                           "native_width": original_size[0], "native_height": original_size[1],
                           "bounds": bounds, "sha256": hashlib.sha256(content).hexdigest(),
+                          "thumbnail_sha256": hashlib.sha256(thumbnail).hexdigest(),
                           "rectangular_crop": rectangular,
                           "evidence": quality.get("evidence", {})})
         return items
@@ -778,15 +809,17 @@ class MaterialManager:
                                        run_started_at=job.get("run_started_at", job["created_at"]))
             result["sources"] = []
             for source in job["sources"]:
-                row = {key: deepcopy(value) for key, value in source.items() if key != "sha256"}
+                row = {key: deepcopy(value) for key, value in source.items() if key not in {"sha256", "thumbnail_sha256"}}
                 row["image_url"] = f"/api/material/jobs/{identifier}/source/{row['id']}"
+                row["thumbnail_url"] = row["image_url"] + "?variant=thumb&v=" + source["thumbnail_sha256"][:16]
                 result["sources"].append(row)
             result["items"] = []
             for item in job["items"]:
                 if item["status"] == "superseded":
                     continue
-                row = {key: deepcopy(value) for key, value in item.items() if key not in {"sha256", "evidence"}}
+                row = {key: deepcopy(value) for key, value in item.items() if key not in {"sha256", "thumbnail_sha256", "evidence"}}
                 row["image_url"] = f"/api/material/jobs/{identifier}/item/{row['id']}"
+                row["thumbnail_url"] = row["image_url"] + "?variant=thumb&v=" + item["thumbnail_sha256"][:16]
                 row["download_url"] = (f"/api/material/jobs/{identifier}/download/{row['id']}"
                                        if row["status"] in {"ready", "confirmed"} else None)
                 result["items"].append(row)
@@ -957,8 +990,10 @@ class MaterialManager:
             raise ValueError("素材文件发生变化，请重新处理。")
         return path
 
-    def asset(self, identifier, owner, kind, item_id, *, download=False):
+    def asset(self, identifier, owner, kind, item_id, *, download=False, thumbnail=False, content_version=None):
         with self.lock:
+            if kind not in {"source", "item"} or (download and thumbnail):
+                raise ValueError("图片预览参数无效。")
             job = self._get(identifier, owner)
             rows = job["sources"] if kind == "source" else job["items"]
             item = next((row for row in rows if row["id"] == item_id and row.get("status") != "superseded"), None)
@@ -967,9 +1002,21 @@ class MaterialManager:
             if download and (job["status"] in _BUSY or item["status"] not in {"ready", "confirmed"}):
                 raise Conflict("这张素材尚未确认，不能下载。")
             if kind == "source":
-                return self._source_path(job, item), item["sha256"]
-            self._source_path(job, self._source(job, item["source_id"]))
-            return self._item_path(job, item), item["sha256"]
+                original = self._source_path(job, item)
+            else:
+                self._source_path(job, self._source(job, item["source_id"]))
+                original = self._item_path(job, item)
+            if not thumbnail:
+                return original, item["sha256"]
+            # Keep all original integrity checks above even for a cached/304
+            # derivative. A stale thumbnail cannot hide a changed source/result.
+            digest = item["thumbnail_sha256"]
+            if content_version is not None and content_version != digest[:16]:
+                raise KeyError("图片预览已更新，请刷新页面。")
+            path = self._private(self._directory(identifier) / (item["id"] + ".thumb.png"))
+            if _digest(path) != digest:
+                raise ValueError("图片预览发生变化，请重新处理。")
+            return path, digest
 
     def download(self, identifier, owner):
         with self.lease(identifier, owner), self.lock:

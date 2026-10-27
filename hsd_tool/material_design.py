@@ -20,7 +20,7 @@ import uuid
 from PIL import Image
 
 from .ai_usage import empty_usage, merge_usage
-from .material_ark import (ArkCancelled, ArkLayer, ArkMaterialProvider, ArkProviderError,
+from .material_ark import (MAX_INPUT_BYTES, ArkCancelled, ArkLayer, ArkMaterialProvider, ArkProviderError,
                            ArkResult, _cancelled, _decode, _encode)
 from .material_locate import DeepSeekMaterialLocator
 
@@ -29,14 +29,13 @@ MAX_WORKERS = 8
 PAD_RATIO = .12
 MIN_PAD = 6
 EDGE_PIXELS = 2
-REFERENCE_MAX_PIXELS = 4_000_000
+REFERENCE_MAX_PIXELS = 16_000_000
+CONCURRENT_REFERENCE_PIXELS = 32_000_000
+REFINE_SMALL_TARGET_RATIO = .15
 
 DESIGN_NOTE = (
-    "只保留指定的这一个完整设计：人物全身、头发、裙摆、鞋子、文字、装饰及内部底板整体保留，"
-    "其他图案和外加水印去掉，不要拆成零件或多个前景图层。"
-    "设计外部用真实透明背景，不画白底、棋盘格或边框。"
-    "四周自然留白，完整保留全部轮廓，不裁切人物、饰物和文字。"
-    "保持原有文字、配色和平面印刷风格，不增删或编造图案。"
+    "人物全身、头发、裙摆、鞋子、文字、装饰和内部底板整体保留。"
+    "高清清楚，四周自然留透明空隙，不裁切；保持原文字、配色和平面风格，不编造细节。"
 )
 
 
@@ -60,12 +59,25 @@ def prepare_design_reference(source):
     avoids decoding a 36 MP original separately in each of the eight requests.
     This downsampling only limits request resources; it does not restore detail.
     """
-    image = source
-    if source.width * source.height > REFERENCE_MAX_PIXELS:
-        scale = math.sqrt(REFERENCE_MAX_PIXELS / (source.width * source.height))
-        size = (max(2, math.floor(source.width * scale)), max(2, math.floor(source.height * scale)))
-        image = source.resize(size, Image.Resampling.LANCZOS)
-    return _encode(image), image.size
+    width, height = source.size
+    scale = min(1.0, math.sqrt(REFERENCE_MAX_PIXELS / (width * height)))
+    while True:
+        size = (max(2, math.floor(width * scale)), max(2, math.floor(height * scale)))
+        image = source if size == source.size else source.resize(size, Image.Resampling.LANCZOS)
+        png = _encode(image)
+        if len(png) <= MAX_INPUT_BYTES:
+            return png, image.size
+        # High-entropy RGBA PNG can exceed30MB even below the pixel budget.
+        # Shrink the complete source proportionally, never cut it or drop alpha.
+        if size == (2, 2):
+            raise ArkProviderError("image_resource_limit", "完整参考图超过图片服务资源要求，请缩小后重试。")
+        scale *= min(.9, math.sqrt(MAX_INPUT_BYTES / len(png)) * .95)
+
+
+def reference_workers(size, requested=MAX_WORKERS):
+    """Bound decoded concurrent input pixels while retaining the eight-call cap."""
+    pixels = max(1, size[0] * size[1])
+    return max(1, min(MAX_WORKERS, int(requested), CONCURRENT_REFERENCE_PIXELS // pixels))
 
 
 def design_target_bounds(box, source_size, reference_size):
@@ -158,8 +170,10 @@ class MaterialDesignProvider:
             try:
                 result = invoke()
             except (ArkProviderError, ArkCancelled) as error:
-                attempt.update(state=("cancelled" if isinstance(error, ArkCancelled) else
-                                      ("failed" if error.settled else "unknown")),
+                # A stopped wait does not prove that an already sent request
+                # settled. Preserve unknown billing before labelling cancellation.
+                attempt.update(state=("unknown" if not error.settled else
+                                      ("cancelled" if isinstance(error, ArkCancelled) else "failed")),
                                usage=dict(error.usage), request_id=error.request_id,
                                settled=error.settled, code=error.code)
                 aggregate(provider, attempt["usage"])
@@ -183,7 +197,10 @@ class MaterialDesignProvider:
             self.locator.available()
             if edit:
                 progress("cleanup", "正在按标记位置修改素材并保留完整画布。")
-                cleaned = call("seedream", "edit", lambda: self.ark.clean(
+                # Preserve real transparency for edits; an opaque card cannot
+                # become a transparent input merely by converting its mode.
+                edit_call = self.ark.edit if source.getchannel("A").getextrema()[0] < 255 else self.ark.clean
+                cleaned = call("seedream", "edit", lambda: edit_call(
                     raw, instructions=self._note(instructions), bounds=bounds, check_cancel=check_cancel))
                 cancel()
                 png, notes = preserve_design(_decode(cleaned.layers[0].png, output=True))
@@ -227,6 +244,13 @@ class MaterialDesignProvider:
             error.attempts = tuple(attempts)
             error.provider_usage = provider_usage
             error.usage = dict(provider_usage["seedream"])
+            if any(attempt.get("state") == "unknown" for attempt in attempts):
+                # Parallel cancellation may raise a fresh outer cancellation
+                # after its unknown child was drained. Never turn that history
+                # into a claim that every dispatched request is settled.
+                error.settled = False
+                if isinstance(error, ArkCancelled):
+                    error.code = "submission_unknown"
             raise
 
     def _generate(self, source, base, designs, instructions, check_cancel, progress, call):
@@ -237,6 +261,29 @@ class MaterialDesignProvider:
         finished = 0
         scale_x, scale_y = source.width / base.width, source.height / base.height
         reference_png, reference_size = prepare_design_reference(source)
+        workers = reference_workers(reference_size, self.workers)
+        budget = threading.Condition()
+        in_flight_pixels = 0
+
+        def limited(pixels, invoke):
+            # Refinement inputs may be larger than the source reference. Share
+            # one32MP request-input budget across both operations, so a tiny
+            # collage cannot dispatch eight large refinement inputs at once.
+            nonlocal in_flight_pixels
+            with budget:
+                while in_flight_pixels + pixels > CONCURRENT_REFERENCE_PIXELS:
+                    if _cancelled(check_cancel):
+                        raise ArkCancelled()
+                    budget.wait(timeout=.1)
+                if _cancelled(check_cancel):
+                    raise ArkCancelled()
+                in_flight_pixels += pixels
+            try:
+                return invoke()
+            finally:
+                with budget:
+                    in_flight_pixels -= pixels
+                    budget.notify_all()
 
         def one(index, design):
             if _cancelled(check_cancel):
@@ -249,15 +296,37 @@ class MaterialDesignProvider:
             bounds["height"] = min(bounds["height"], source.height - bounds["y"])
             native = (bounds["x"], bounds["y"], bounds["x"] + bounds["width"], bounds["y"] + bounds["height"])
             target = design_target_bounds(native, source.size, reference_size)
-            cleaned = call("seedream", "extract_design", lambda: self.ark.extract_design(
-                reference_png, bounds=target, instructions=note, check_cancel=check_cancel))
+            cleaned = limited(reference_size[0] * reference_size[1], lambda: call(
+                "seedream", "extract_design", lambda: self.ark.extract_design(
+                    reference_png, bounds=target, instructions=note, check_cancel=check_cancel)))
             if len(cleaned.layers) != 1:
                 raise ArkProviderError("ambiguous_design", "图片服务没有返回唯一完整设计，请重新框选后重做。")
-            png, crop_notes = preserve_design(_decode(cleaned.layers[0].png, output=True))
+            native_image = _decode(cleaned.layers[0].png, output=True)
+            extra_notes = list(cleaned.warnings) + list(cleaned.layers[0].warnings)
+            small_target = (total > 1 and bounds["width"] * bounds["height"]
+                            < source.width * source.height * REFINE_SMALL_TARGET_RATIO)
+            if small_target:
+                if native_image.getchannel("A").getextrema()[0] < 255:
+                    if _cancelled(check_cancel):
+                        raise ArkCancelled()
+                    # One planned pass after successful native extraction. A
+                    # failure never falls back to the old image as a completed
+                    # refined design and never triggers another paid request.
+                    refined = limited(native_image.width * native_image.height, lambda: call(
+                        "seedream", "refine_design", lambda: self.ark.refine_design(
+                            cleaned.layers[0].png, instructions=note, check_cancel=check_cancel)))
+                    if len(refined.layers) != 1:
+                        raise ArkProviderError("ambiguous_design", "精修没有返回唯一完整设计，请重新框选后重做。")
+                    native_image = _decode(refined.layers[0].png, output=True)
+                    extra_notes.extend(list(refined.warnings) + list(refined.layers[0].warnings))
+                    extra_notes.append("原图中较小的设计已单独请求高清精修；尺寸不代表恢复细节，仍需核对完整性。")
+                else:
+                    extra_notes.append("该设计在原图中占比较小，但未返回真实透明区域，未继续精修；请核对清晰度和背景。")
+            png, crop_notes = preserve_design(native_image)
             return ArkLayer(png, design.label, "", bounds, index,
-                            tuple(list(design.warnings) + list(cleaned.warnings) + crop_notes))
+                            tuple(dict.fromkeys(list(design.warnings) + extra_notes + crop_notes)))
 
-        with ThreadPoolExecutor(max_workers=min(self.workers, total)) as pool:
+        with ThreadPoolExecutor(max_workers=min(workers, total)) as pool:
             futures = {pool.submit(one, index, design): (index, design)
                        for index, design in enumerate(designs, 1)}
             for future in as_completed(futures):

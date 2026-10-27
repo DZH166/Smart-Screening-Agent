@@ -65,12 +65,10 @@ _INVENTORY_PROMPT = (
     "实物上的设计尽量展平，遮挡和模糊处仅谨慎修补，不要凭空添加内容。"
 )
 _SINGLE_DESIGN_PROMPT = (
-    "只提取指定的一个完整设计，作为一个前景图层返回，不要拆成多个零件或图层。"
-    "同一设计的人物全身、头发、裙摆、鞋子、文字、装饰及内部底板必须整体保留；"
-    "去掉设计外的背景、邻近其他设计和覆盖在设计上的外加水印。"
-    "用真实PNG透明通道保留设计外的透明区域，不画白底或棋盘格。"
-    "输出高清、清楚的完整设计画布，四周自然留白，不裁切轮廓。"
-    "保持原有文字、配色、形状和平面印刷风格，不能编造缺失内容。"
+    "只提取指定的一个完整设计，作为一个前景图层返回，不拆零件。"
+    "去掉外部背景、邻近设计和外加水印，保留完整轮廓、文字、配色及内部底板。"
+    "用真实PNG透明通道，不画白底或棋盘格。"
+    "不新增白色贴纸边、黑色外描边、光晕或投影；保留原设计内部线条和白色内容。"
 )
 _FIDELITY_WARNING = "模型拆分可能改变细节，需核对完整设计、文字和配色。"
 
@@ -351,6 +349,26 @@ def _bounds(item, base_size, source_size):
             "height": min(source_height, math.ceil(bottom / height * source_height)) - y}
 
 
+def _prompt_bounds(bounds, size):
+    """Input interaction boxes use 0..999, unlike response boxes' 0..1000.
+
+    Official Seedream pro/flash interactive editing guide (2026-10-15):
+    https://console.volcengine.com/ark/region%3Acn-beijing/docs/seedream-5-0-pro-editing-guide
+    Keep a valid one-unit hint for tiny source regions without cropping pixels.
+    """
+    width, height = size
+    if (not isinstance(bounds, dict) or set(bounds) != {"x", "y", "width", "height"}
+            or not all(type(value) is int for value in bounds.values())
+            or bounds["x"] < 0 or bounds["y"] < 0 or bounds["width"] <= 0 or bounds["height"] <= 0
+            or bounds["x"] + bounds["width"] > width or bounds["y"] + bounds["height"] > height):
+        raise ArkProviderError("invalid_bounds", "目标设计位置超出参考图片，请重新框选后重试。")
+    left = min(998, math.floor(bounds["x"] * 1000 / width))
+    top = min(998, math.floor(bounds["y"] * 1000 / height))
+    right = min(999, max(left + 1, math.ceil((bounds["x"] + bounds["width"]) * 1000 / width)))
+    bottom = min(999, max(top + 1, math.ceil((bounds["y"] + bounds["height"]) * 1000 / height)))
+    return left, top, right, bottom
+
+
 class ArkMaterialProvider:
     """Exactly-one-submission Ark adapter; no credentials are read implicitly."""
 
@@ -446,17 +464,13 @@ class ArkMaterialProvider:
         width, height = max(15, math.ceil(image.width * factor)), max(15, math.ceil(image.height * factor))
         location = ""
         if bounds is not None:
-            if (not isinstance(bounds, dict) or set(bounds) != {"x", "y", "width", "height"}
-                    or not all(type(v) is int for v in bounds.values())
-                    or bounds["x"] < 0 or bounds["y"] < 0 or bounds["width"] <= 0 or bounds["height"] <= 0
-                    or bounds["x"] + bounds["width"] > image.width or bounds["y"] + bounds["height"] > image.height):
-                raise ArkProviderError("invalid_bounds", "标记的修改位置超出素材范围。")
-            location = (f"只修改像素范围<bbox>{bounds['x']} {bounds['y']} "
-                        f"{bounds['x'] + bounds['width']} {bounds['y'] + bounds['height']}</bbox>，其他区域保持原样。")
+            left, top, right, bottom = _prompt_bounds(bounds, source_size)
+            location = f"只修改归一化范围<bbox>{left} {top} {right} {bottom}</bbox>，其他区域保持原样。"
         prompt = ("清理整张图片的外加水印、污点及无关信息。彻底去除背景和人物脸部、皮肤、衣服、装饰上覆盖的"
                   "重复、斜向、半透明水印字样与印记，按周围纹理谨慎修复，不留残影；设计自身文字、签名不视为水印。"
-                  "保持原图比例、构图及完整设计的数量、位置、大小、间距；不移动、不拆分，不单独生成图层。"
-                  "保留人物、文字、装饰和内部底板，原配色不变，不改字、不增艳或添加图案。"
+                  "保持原图比例、构图和设计数量、位置、大小、间距；不移动、不拆分，不单独生成图层。"
+                  "保留人物、文字、装饰和内部底板，不改色、不改字、不增艳或添图。"
+                  "不新增贴纸白边、黑色外描边、光晕、投影；保留内部线条和原白色内容。"
                   "输出高清图像画质和清晰度，保持线条、轮廓、五官和纹理清楚，避免模糊、涂抹、锯齿；看不清的内容不要编造。"
                   "将设计外部背景设为真正透明（PNG Alpha 通道），保留设计内部底板；不要用白底或棋盘格图案假装透明。"
                   + location + ("补充要求：" + instructions.strip() if instructions.strip() else ""))
@@ -508,17 +522,8 @@ class ArkMaterialProvider:
         image, source_size, data_uri, notes = _input(image_bytes, decomposition=True)
         target = ""
         if bounds is not None:
-            width, height = source_size
-            if (not isinstance(bounds, dict) or set(bounds) != {"x", "y", "width", "height"}
-                    or not all(type(value) is int for value in bounds.values())
-                    or bounds["x"] < 0 or bounds["y"] < 0 or bounds["width"] <= 0 or bounds["height"] <= 0
-                    or bounds["x"] + bounds["width"] > width or bounds["y"] + bounds["height"] > height):
-                raise ArkProviderError("invalid_bounds", "目标设计位置超出参考图片，请重新框选后重试。")
-            left = math.floor(bounds["x"] * image.width / width)
-            top = math.floor(bounds["y"] * image.height / height)
-            right = math.ceil((bounds["x"] + bounds["width"]) * image.width / width)
-            bottom = math.ceil((bounds["y"] + bounds["height"]) * image.height / height)
-            target = (f"只提取像素范围<bbox>{left} {top} {right} {bottom}</bbox>附近的目标完整设计。"
+            left, top, right, bottom = _prompt_bounds(bounds, source_size)
+            target = (f"目标归一化范围<bbox>{left} {top} {right} {bottom}</bbox>。"
                       "位置框只用于辨认目标；身体、文字或饰物延伸到框外时仍整体保留，不按框切图，其他独立设计不要提取。")
         payload = {"model": self.model_id, "image": data_uri,
                    "prompt": (_SINGLE_DESIGN_PROMPT if single_design else _INVENTORY_PROMPT) +
@@ -569,6 +574,53 @@ class ArkMaterialProvider:
             # its images fail local safety/fidelity checks. Never pay to resubmit.
             raise ArkProviderError(error.code, error.message, usage=usage, request_id=request_id) from None
 
+    def refine_design(self, image_bytes: bytes, *, instructions="",
+                      check_cancel: Callable | None = None) -> ArkResult:
+        """One planned clarity pass on an already extracted transparent design.
+
+        This is not a failed-request retry or local upscaling. Reframe the full
+        subject on its own native 2K canvas; never crop/morph the input/output.
+        """
+        if _cancelled(check_cancel):
+            raise ArkCancelled()
+        if not isinstance(instructions, str) or len(instructions) > 1000:
+            raise ArkProviderError("invalid_instructions", "处理要求过长，请简要描述。")
+        image, source_size, data_uri, notes = _input(image_bytes, decomposition=False)
+        if image.getchannel("A").getextrema()[0] == 255:
+            raise ArkProviderError("missing_alpha", "精修需要已提取且带真实透明区域的完整设计。")
+        prompt = (
+            "将这一张透明素材中的完整设计高清精修，作为单独一张透明PNG返回。"
+            "整个人物、头发、手脚、裙摆、文字、装饰和内部底板一起保留，自然居中，占画面约80%，四周留透明空隙。"
+            "清楚呈现轮廓、五官和纹理，不模糊涂抹，不裁边，不新增内容。"
+            "忠于原文字、配色、形状和风格；去除外加水印。"
+            "不新增白色贴纸边、黑色外描边、光晕或投影，保留原设计内部线条及白色内容。"
+            + ("补充要求：" + instructions.strip() if instructions.strip() else ""))
+        return self._transparent_single(data_uri, source_size, prompt, notes,
+                                        "高清精修后的素材", check_cancel)
+
+    def _transparent_single(self, data_uri, source_size, prompt, notes, label, check_cancel):
+        parsed, usage, request_id = self._submit(
+            {"model": self.model_id, "image": data_uri, "prompt": prompt,
+             "size": "2K", "output_format": "png", "response_format": "b64_json",
+             "background": "transparent", "watermark": False}, check_cancel)
+        try:
+            data = parsed.get("data")
+            if not isinstance(data, list) or len(data) != 1 or not isinstance(data[0], dict) or "error" in data[0]:
+                raise ArkProviderError("invalid_response", "图片服务没有返回唯一完整的处理结果。")
+            output = _decode(_image_field(data[0]), output=True, require_alpha=True)
+            _size(data[0], output)
+            if not output.getchannel("A").getbbox():
+                raise ArkProviderError("empty_layer", "图片服务返回了空白素材。")
+            if output.getchannel("A").getextrema()[0] == 255:
+                notes.append("图片服务未返回透明区域，已保留完整画布，请确认背景。")
+            notes.append("精修内容由模型生成，文字、配色和完整性仍需对照确认。")
+            layer = ArkLayer(_encode(output), label, "", {"x": 0, "y": 0, "width": source_size[0], "height": source_size[1]},
+                             1, tuple(notes))
+            return ArkResult((layer,), usage, tuple(notes), b"", output.size, request_id,
+                             rectangular_crops=True, no_upscale=True)
+        except ArkProviderError as error:
+            raise ArkProviderError(error.code, error.message, usage=usage, request_id=request_id) from None
+
     def edit(self, image_bytes: bytes, *, instructions: str, bounds=None,
              check_cancel: Callable | None = None) -> ArkResult:
         if _cancelled(check_cancel):
@@ -580,33 +632,12 @@ class ArkMaterialProvider:
             raise ArkProviderError("missing_alpha", "局部修改需要先提取带透明背景的素材。")
         location = ""
         if bounds is not None:
-            if (not isinstance(bounds, dict) or set(bounds) != {"x", "y", "width", "height"}
-                    or not all(type(v) is int for v in bounds.values())
-                    or bounds["x"] < 0 or bounds["y"] < 0 or bounds["width"] <= 0 or bounds["height"] <= 0
-                    or bounds["x"] + bounds["width"] > image.width or bounds["y"] + bounds["height"] > image.height):
-                raise ArkProviderError("invalid_bounds", "标记的修改位置超出素材范围。")
-            location = (f"只修改像素范围<bbox>{bounds['x']} {bounds['y']} "
-                        f"{bounds['x'] + bounds['width']} {bounds['y'] + bounds['height']}</bbox>，"
-                        "范围之外的全部设计保持原样。")
+            left, top, right, bottom = _prompt_bounds(bounds, source_size)
+            location = f"只修改归一化范围<bbox>{left} {top} {right} {bottom}</bbox>，范围之外的全部设计保持原样。"
         prompt = ("在透明背景上修改这张完整设计，保留原图人物、文字、装饰和内部底板；"
-                  "不主动换色、改字、增艳或增加内容。" + location + "修改要求：" + instructions.strip())
-        parsed, usage, request_id = self._submit(
-            {"model": self.model_id, "image": data_uri, "prompt": prompt,
-             "size": "2K", "output_format": "png", "response_format": "b64_json",
-             "background": "transparent", "watermark": False}, check_cancel)
-        try:
-            data = parsed.get("data")
-            if not isinstance(data, list) or len(data) != 1 or not isinstance(data[0], dict) or "error" in data[0]:
-                raise ArkProviderError("invalid_response", "图片服务没有返回完整的修改结果。")
-            output = _decode(_image_field(data[0]), output=True, require_alpha=True)
-            _size(data[0], output)
-            if not output.getchannel("A").getbbox():
-                raise ArkProviderError("empty_layer", "图片服务返回了空白素材。")
-            notes.append("修补内容由模型生成，不确定位置及文字、配色仍需确认。")
-            if bounds:
-                notes.append("已按标记位置提出修改要求，模型仍可能改变其他区域，请对照确认。")
-            layer = ArkLayer(_encode(output), "修改后的素材", "", {"x": 0, "y": 0, "width": source_size[0], "height": source_size[1]},
-                             1, tuple(notes))
-            return ArkResult((layer,), usage, tuple(notes), b"", output.size, request_id)
-        except ArkProviderError as error:
-            raise ArkProviderError(error.code, error.message, usage=usage, request_id=request_id) from None
+                  "不主动换色、改字、增艳或增加内容，不新增贴纸白边、外描边、光晕或投影；保留内部线条和白色内容。"
+                  + location + "修改要求：" + instructions.strip())
+        if bounds:
+            notes.append("已按标记位置提出修改要求，模型仍可能改变其他区域，请对照确认。")
+        return self._transparent_single(data_uri, source_size, prompt, notes,
+                                        "修改后的素材", check_cancel)
