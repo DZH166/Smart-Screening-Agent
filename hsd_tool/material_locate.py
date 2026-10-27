@@ -134,27 +134,52 @@ def coordinate_canvas(image):
 def map_canvas_designs(designs, content_box, size):
     left, top, right, bottom = content_box
     mapped, seen, total_pixels = [], set(), 0
+    dropped = 0
     for design in designs:
         x1, y1, x2, y2 = design.box
         # Only remove the padding we added. Never arbitrary-trim source content.
         x1, y1, x2, y2 = max(left, x1), max(top, y1), min(right, x2), min(bottom, y2)
         if x1 >= x2 or y1 >= y2:
-            raise ValueError("design only covers synthetic padding")
+            dropped += 1
+            continue
         box = (math.floor((x1 - left) * size[0] / (right - left)),
                math.floor((y1 - top) * size[1] / (bottom - top)),
                math.ceil((x2 - left) * size[0] / (right - left)),
                math.ceil((y2 - top) * size[1] / (bottom - top)))
         if box in seen or box[2] - box[0] < 2 or box[3] - box[1] < 2:
-            raise ValueError("duplicate or empty mapped rectangle")
+            dropped += 1
+            continue
         seen.add(box)
         total_pixels += (box[2] - box[0]) * (box[3] - box[1])
         if total_pixels > 80_000_000:
-            raise ValueError("too many mapped crop pixels")
+            dropped += 1
+            continue
         mapped.append(LocatedDesign(design.label, box, design.uncertain, design.warnings))
+    if not mapped:
+        raise ValueError("no usable mapped design")
     # Removing our known padding changes the overlap ratio. Two apparently
     # separate canvas rectangles can become nested or overlapping real crops;
     # validate the actual exported rectangles as well as the model's canvas.
-    overlapping = set()
+    kept, overlapping = [], set()
+    for design in mapped:
+        box = design.box
+        area = (box[2] - box[0]) * (box[3] - box[1])
+        contained = False
+        for other in kept:
+            other_box = other.box
+            intersection = max(0, min(box[2], other_box[2]) - max(box[0], other_box[0])) * \
+                           max(0, min(box[3], other_box[3]) - max(box[1], other_box[1]))
+            if not intersection:
+                continue
+            if intersection / min(area, (other_box[2] - other_box[0]) * (other_box[3] - other_box[1])) > .85:
+                contained = True
+                break
+        if contained:
+            # The same design mapped twice: keep the first, drop the copy.
+            dropped += 1
+            continue
+        kept.append(design)
+    mapped = kept
     for i, first in enumerate(mapped):
         a = first.box
         for j in range(i):
@@ -163,41 +188,68 @@ def map_canvas_designs(designs, content_box, size):
             if not intersection:
                 continue
             aa, ba = (a[2] - a[0]) * (a[3] - a[1]), (b[2] - b[0]) * (b[3] - b[1])
-            if intersection / min(aa, ba) > .85:
-                raise ValueError("duplicate or contained mapped rectangle")
             if intersection / min(aa, ba) > .02:
                 overlapping.update((i, j))
     overlap_note = "与其他设计范围重叠，请核对是否切到相邻内容。"
-    return tuple(LocatedDesign(d.label, d.box, d.uncertain or i in overlapping,
-                  tuple(dict.fromkeys(d.warnings + ((overlap_note,) if i in overlapping else ()))))
-                 for i, d in enumerate(mapped))
+    designs = tuple(LocatedDesign(d.label, d.box, d.uncertain or i in overlapping,
+                      tuple(dict.fromkeys(d.warnings + ((overlap_note,) if i in overlapping else ()))))
+                    for i, d in enumerate(mapped))
+    notes = ()
+    if dropped:
+        notes = ("有 %d 个候选范围无法使用，已跳过；需要时可框选补提。" % dropped,)
+    return designs, notes
+
+
+def usable_canvas_box(box):
+    """Clamp one model rectangle to the 0..1000 canvas; None when unusable.
+
+    Models routinely answer 1001 or 123.4. Dropping the whole sheet for that
+    forced employees to crop by hand, so only the offending candidate is lost.
+    """
+    if not isinstance(box, list) or len(box) != 4:
+        return None
+    values = []
+    for value in box:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        if isinstance(value, float) and not math.isfinite(value):
+            return None
+        values.append(int(round(max(0, min(1000, value)))))
+    left, top, right, bottom = values
+    if right <= left or bottom <= top:
+        return None
+    return left, top, right, bottom
 
 
 def parse_designs(value, size, *, secret=""):
     if (not isinstance(value, dict) or set(value) != {"complete", "designs"}
             or type(value["complete"]) is not bool or not isinstance(value["designs"], list)
-            or not 1 <= len(value["designs"]) <= MAX_DESIGNS):
+            or not value["designs"]):
         raise ValueError("invalid design list")
     width, height = size
     designs, seen, total_pixels = [], set(), 0
-    for item in value["designs"]:
+    dropped = 0
+    for item in value["designs"][:MAX_DESIGNS]:
         if (not isinstance(item, dict) or set(item) != {"label", "box", "uncertain", "reason"}
                 or not isinstance(item["label"], str) or not 1 <= len(item["label"].strip()) <= 160
                 or not isinstance(item["reason"], str) or len(item["reason"]) > 500
                 or type(item["uncertain"]) is not bool):
-            raise ValueError("invalid design")
-        box = item["box"]
-        if (not isinstance(box, list) or len(box) != 4 or not all(type(n) is int for n in box)
-                or not 0 <= box[0] < box[2] <= 1000 or not 0 <= box[1] < box[3] <= 1000):
-            raise ValueError("invalid rectangle")
+            dropped += 1
+            continue
+        box = usable_canvas_box(item["box"])
+        if box is None:
+            dropped += 1
+            continue
         pixels = (math.floor(box[0] * width / 1000), math.floor(box[1] * height / 1000),
                   math.ceil(box[2] * width / 1000), math.ceil(box[3] * height / 1000))
         if pixels in seen or pixels[2] - pixels[0] < 2 or pixels[3] - pixels[1] < 2:
-            raise ValueError("duplicate or empty rectangle")
+            dropped += 1
+            continue
         seen.add(pixels)
         total_pixels += (pixels[2] - pixels[0]) * (pixels[3] - pixels[1])
         if total_pixels > 80_000_000:
-            raise ValueError("too many cropped pixels")
+            dropped += 1
+            continue
         notes = []
         if item["uncertain"]:
             notes.append("设计范围不确定，请核对是否完整。")
@@ -208,7 +260,31 @@ def parse_designs(value, size, *, secret=""):
         if secret:
             label = label.replace(secret, "[已隐藏]")
         designs.append(LocatedDesign(label or "素材", pixels, item["uncertain"], tuple(notes)))
-    overlapping = set()
+    if len(value["designs"]) > MAX_DESIGNS:
+        dropped += len(value["designs"]) - MAX_DESIGNS
+    if not designs:
+        raise ValueError("no usable design")
+    kept, overlapping = [], set()
+    for design in designs:
+        box = design.box
+        area = (box[2] - box[0]) * (box[3] - box[1])
+        contained = False
+        for other in kept:
+            other_box = other.box
+            intersection = max(0, min(box[2], other_box[2]) - max(box[0], other_box[0])) * \
+                           max(0, min(box[3], other_box[3]) - max(box[1], other_box[1]))
+            if not intersection:
+                continue
+            if intersection / min(area, (other_box[2] - other_box[0]) * (other_box[3] - other_box[1])) > .85:
+                contained = True
+                break
+        if contained:
+            # A nested or near-duplicate box is one design drawn twice: keep the
+            # first and drop the copy instead of failing the whole sheet.
+            dropped += 1
+            continue
+        kept.append(design)
+    designs = kept
     for i, first in enumerate(designs):
         a = first.box
         for j in range(i):
@@ -217,15 +293,14 @@ def parse_designs(value, size, *, secret=""):
             if not intersection:
                 continue
             aa, ba = (a[2] - a[0]) * (a[3] - a[1]), (b[2] - b[0]) * (b[3] - b[1])
-            if intersection / min(aa, ba) > .85:
-                # Nested/near-duplicate boxes are not separate designs by fiat.
-                raise ValueError("duplicate or contained design")
             if intersection / min(aa, ba) > .02:
                 overlapping.update((i, j))
     designs = tuple(LocatedDesign(d.label, d.box, d.uncertain or i in overlapping,
                     d.warnings + (("与其他设计范围重叠，请核对是否切到相邻内容。",) if i in overlapping else ()))
                     for i, d in enumerate(designs))
     notes = () if value["complete"] and len(designs) < MAX_DESIGNS else ("可能还有遗漏设计，可查看整图并框选补充。",)
+    if dropped:
+        notes = notes + ("有 %d 个候选范围无法使用，已跳过；需要时可框选补提。" % dropped,)
     return designs, notes
 
 
@@ -246,7 +321,7 @@ class DeepSeekMaterialLocator:
         except KeyPoolUnavailable:
             raise ArkProviderError("deepseek_unavailable", "请管理员开启 DeepSeek 并配置可用 Key 后再处理素材。") from None
 
-    def locate(self, png, *, check_cancel=None):
+    def locate(self, png, *, check_cancel=None, guide=True):
         if _cancelled(check_cancel):
             raise ArkCancelled()
         image = _decode(png, output=True)
@@ -263,10 +338,19 @@ class DeepSeekMaterialLocator:
         content = [{"type": "text", "text": json.dumps({"width": 1000, "height": 1000,
                    "content_box": list(content_box), "coordinates": "canvas_pixels_0_1000", "task": "locate_complete_designs"})},
                    {"type": "image_url", "image_url": {"url": "data:image/png;base64," +
-                    base64.b64encode(_encode(canvas)).decode("ascii"), "detail": "original"}},
-                   {"type": "image_url", "image_url": {"url": "data:image/png;base64," +
-                    base64.b64encode(_encode(coordinate_guide(canvas))).decode("ascii"), "detail": "original"}}]
-        body = json.dumps({"model": MODEL, "messages": [{"role": "system", "content": SYSTEM_PROMPT},
+                    base64.b64encode(_encode(canvas)).decode("ascii"), "detail": "original"}}]
+        prompt = SYSTEM_PROMPT
+        if guide:
+            # A second, ruled reference view is only an aid; a retry that failed
+            # with it drops it instead of sending the identical request again.
+            content.append({"type": "image_url", "image_url": {"url": "data:image/png;base64," +
+                            base64.b64encode(_encode(coordinate_guide(canvas))).decode("ascii"),
+                            "detail": "original"}})
+        else:
+            # Every sentence that talks about the second picture has to go with
+            # it, or the retry asks for a view that is not attached.
+            prompt = "\n".join(line for line in SYSTEM_PROMPT.splitlines() if "第二张" not in line)
+        body = json.dumps({"model": MODEL, "messages": [{"role": "system", "content": prompt},
                     {"role": "user", "content": client._content(content)}], "thinking": {"type": "disabled"},
                     "response_format": {"type": "json_object"}, "max_tokens": 16384, "stream": False},
                     ensure_ascii=False, allow_nan=False).encode("utf-8")
@@ -320,7 +404,8 @@ class DeepSeekMaterialLocator:
                 if not isinstance(answer, str):
                     raise ValueError()
                 designs, notes = parse_designs(_strict_json(answer), canvas.size, secret=key)
-                designs = map_canvas_designs(designs, content_box, image.size)
+                designs, mapped_notes = map_canvas_designs(designs, content_box, image.size)
+                notes = tuple(notes) + tuple(mapped_notes)
             except (KeyError, IndexError, ValueError, TypeError, RecursionError):
                 raise ArkProviderError("invalid_decision", "定位范围不完整、重复或越界，请框选后重试。") from None
             usage["successes"] = 1

@@ -251,11 +251,18 @@
     const ids=new Set(state.job.items.map(item=>item.id));for(const [id,record]of state.items){if(!ids.has(id)){record.node.remove();state.items.delete(id);}}
     $("material-empty").classList.toggle("hidden",visible.length>0);$("material-empty").textContent=activeStatuses.has(state.job.status)?"完成的素材会陆续显示在这里。":state.filter==="skipped"?"没有已舍弃的素材。":"这里暂无素材，请从原图框选补提，或查看已舍弃的素材。";
   }
+  function sourceActions(source) {
+    // A failed source gets a one-click retry: staff should not have to draw a
+    // rectangle just because the locator was unlucky once.
+    const retry=source.error&&!source.submission_unknown
+      ?`<button class="button button-primary" data-retry-source="${esc(source.id)}" type="button">自动重试</button>`:"";
+    return `<div class="material-source-actions">${retry}<button class="button button-secondary" data-source-id="${esc(source.id)}" type="button">${source.error?"框选补提":"框选补提"}</button></div>`;
+  }
   function renderSources() {
     const details=$("material-source-details");if(state.job.sources.some(source=>source.error))details.open=true;
     // A closed original-image drawer must not compete with result previews.
     if(!details.open)return;
-    const cards=state.job.sources.map(source=>`<article class="material-source-card"><img src="${esc(previewUrl(source))}" alt="${esc(source.name)}" width="640" height="640" loading="lazy" decoding="async" fetchpriority="low"><strong>${esc(source.name)}</strong>${source.error?`<p>${esc(source.error)}</p>`:""}<button class="button button-secondary" data-source-id="${esc(source.id)}" type="button">${source.error?"查看原图并重试":"框选补提"}</button></article>`).join("");
+    const cards=state.job.sources.map(source=>`<article class="material-source-card"><img src="${esc(previewUrl(source))}" alt="${esc(source.name)}" width="640" height="640" loading="lazy" decoding="async" fetchpriority="low"><strong>${esc(source.name)}</strong>${source.error?`<p>${esc(source.error)}</p>`:""}${sourceActions(source)}</article>`).join("");
     if(cards===state.sourcesSignature)return;state.sourcesSignature=cards;$("material-source-grid").innerHTML=cards;
   }
   async function mutate(action,body) {
@@ -263,6 +270,13 @@
     try{const result=await api(jobPath(`/${action}`),{expected_revision:state.job.revision,...body});if(epoch!==state.epoch)return false;if(result?.items)setJob(result);else await loadJob();return true;}
     catch(error){if(epoch!==state.epoch)return false;state.lastConflict=error.status===409;notify(error.status===409?"本批状态已更新，正在重新读取；请核对后再操作。":error.message,true);if(error.status===409)try{await loadJob();}catch(_){}return false;}
     finally{if(epoch===state.epoch){state.busy=false;controls();}}
+  }
+  async function retrySource(sourceId) {
+    const source=state.job?.sources.find(value=>value.id===sourceId);
+    if(!source||!source.error||busy()||state.authLost)return false;
+    const done=await mutate("redo",{source_id:sourceId});
+    if(done)notify("已重新自动识别这张原图，结果会显示在上方。");
+    return done;
   }
   async function refineItem(itemId,acknowledge) {
     // One paid call for one card. It must not take the page hostage: the batch
@@ -353,7 +367,7 @@
     $("material-source-details").addEventListener("toggle",()=>{if(state.job){renderSources();controls();}});
     $("material-generation-warning").addEventListener("click",showBatchRecords);
     $("material-grid").addEventListener("change",acknowledgeRefine);$("material-detail-actions").addEventListener("change",acknowledgeRefine);
-    $("material-stop").addEventListener("click",stop);$("material-upload-check").addEventListener("click",recoverUpload);$("material-new").addEventListener("click",reset);$("material-recheck").addEventListener("click",poll);$("material-download-all").addEventListener("click",()=>download(state.job?.download_url));$("material-grid").addEventListener("click",itemAction);$("material-detail-actions").addEventListener("click",itemAction);$("material-source-grid").addEventListener("click",event=>{const button=event.target.closest("[data-source-id]");if(button&&!busy())openDetail(button.dataset.sourceId,null,true);});
+    $("material-stop").addEventListener("click",stop);$("material-upload-check").addEventListener("click",recoverUpload);$("material-new").addEventListener("click",reset);$("material-recheck").addEventListener("click",poll);$("material-download-all").addEventListener("click",()=>download(state.job?.download_url));$("material-grid").addEventListener("click",itemAction);$("material-detail-actions").addEventListener("click",itemAction);$("material-source-grid").addEventListener("click",event=>{const retry=event.target.closest("[data-retry-source]");if(retry){if(!busy())retrySource(retry.dataset.retrySource);return;}const button=event.target.closest("[data-source-id]");if(button&&!busy())openDetail(button.dataset.sourceId,null,true);});
     $("material-filter").addEventListener("click",event=>{const button=event.target.closest("[data-material-filter]");if(button){state.filter=button.dataset.materialFilter;render();}});$("material-detail-close").addEventListener("click",()=>$("material-detail-dialog").close());$("material-detail-dialog").addEventListener("close",()=>{state.dialog=null;state.box=null;state.startPoint=null;});$("material-redo-submit").addEventListener("click",redo);$("material-unknown-ack").addEventListener("change",controls);
     const stage=$("material-selection-stage");stage.addEventListener("pointerdown",event=>{if(!state.dialog?.redo||busy())return;const point=imagePoint(event);if(!point)return;event.preventDefault();state.startPoint=point;stage.setPointerCapture(event.pointerId);selectionMove(event);});stage.addEventListener("pointermove",selectionMove);stage.addEventListener("pointerup",event=>{if(!state.startPoint)return;selectionMove(event);state.startPoint=null;if(state.box&&state.box.width>=8&&state.box.height>=8){$("material-box-note").textContent=`已框选 ${state.box.width} × ${state.box.height} 像素；可重新拖动修改范围。`;}else state.box=null;controls();});stage.addEventListener("pointercancel",()=>{state.startPoint=null;state.box=null;$("material-selection-box").classList.add("hidden");controls();});
     document.addEventListener("visibilitychange",()=>{if(document.hidden){clearTimeout(state.timer);closeStream();}else schedule();});window.addEventListener("pagehide",()=>{state.epoch++;closeStream();clearTimeout(state.timer);releaseUrls();});window.addEventListener("pageshow",event=>{if(event.persisted){state.epoch++;state.busy=false;state.polling=false;state.uploading=false;state.config=null;$("material-detail-dialog").close();state.dialog=null;if(state.files.length)renderSelected();if(state.workspace==="material")loadConfig();}});

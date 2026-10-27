@@ -755,6 +755,7 @@ class MaterialManager:
         return {"authentication": "素材服务的 Key 无效，请联系管理员。",
                 "deepseek_unavailable": "DeepSeek 暂不可用，请联系管理员检查 Key、开关或稍后重试。",
                 "invalid_decision": "未能可靠确定设计范围，请在原图框选后重试。",
+                "no_complete_design": "原图里没有完整的独立设计（都贴着画面边缘且只剩很窄的一条），请上传未裁剪的原图或框选完整个体。",
                 "empty_crop": "识别范围内没有有效图案，请重新框选完整设计。",
                 "provider_auth": "素材服务的 Key 或模型权限不正确，请联系管理员检查。",
                 "unsupported_model": "当前图片模型不支持整图清理，请联系管理员更换模型。",

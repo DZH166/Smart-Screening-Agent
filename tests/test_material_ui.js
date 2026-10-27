@@ -27,7 +27,7 @@ function harness(){
     fail(){this.naturalWidth=0;this.naturalHeight=0;this.onerror?.();}
   }
   sandbox.Image=sandbox.window.Image=ControlledImage;
-  vm.runInNewContext(source.replace("  boot();","  window.testMaterial={state,workspace,fileError,selectFiles,formatBytes,safeUrl,setJob,loadJob,render,renderCards,renderSources,mutate,start,recoverUpload,stop,reset,openDetail,imagePoint,selectionMove,redo,metrics,controls,itemAction,acknowledgeRefine,showBatchRecords,itemContent,itemWarnings,download,schedule,closeStream,updateClock};"),sandbox);
+  vm.runInNewContext(source.replace("  boot();","  window.testMaterial={state,workspace,fileError,selectFiles,formatBytes,safeUrl,setJob,loadJob,render,renderCards,renderSources,mutate,start,recoverUpload,stop,reset,openDetail,imagePoint,selectionMove,redo,metrics,controls,itemAction,acknowledgeRefine,showBatchRecords,itemContent,itemWarnings,download,schedule,closeStream,updateClock,retrySource,refiningId};"),sandbox);
   return{ui:sandbox.window.testMaterial,node,requests,xhrs,timers,storage,revoked,sandbox,images,async reply(index,data,status=200){requests[index].resolve({ok:status>=200&&status<300,status,json:async()=>data});await flush();}};
 }
 function job(overrides={}){return{id:"a".repeat(32),revision:3,status:"ready",progress:{phase:"完成",current:1,total:1},sources:[{id:"s1",name:"原图.png",width:1000,height:500,image_url:`/api/material/jobs/${"a".repeat(32)}/source/s1`}],items:[{id:"i1",source_id:"s1",name:"完整设计",status:"generated",downloadable:true,refined:false,warnings:["请核对文字与颜色"],image_url:`/api/material/jobs/${"a".repeat(32)}/item/i1`,download_url:`/api/material/jobs/${"a".repeat(32)}/download/i1`,width:4096,height:2048}],stats:{total:1,ready:0,downloadable:1,needs_review:0,skipped:0,failed:0},download_url:null,...overrides};}
@@ -83,6 +83,27 @@ test("new thumbnail content preserves the preview node and expanded details",()=
 test("unsafe or foreign-task thumbnail URLs cannot replace a valid original",()=>{const h=harness(),item=job().items[0];for(const url of ["https://example.org/private.png","/api/material/jobs/other/item/i1?variant=thumb"]){h.ui.setJob(job({items:[{...item,thumbnail_url:url}]}));assert.ok(h.ui.state.items.get(item.id).node.innerHTML.includes(`src="${item.image_url}"`));assert.ok(!h.ui.state.items.get(item.id).node.innerHTML.includes(url));}});
 test("original-image drawer builds thumbnails only when opened and ignores metadata-only snapshots",()=>{const h=harness(),base=job(),source={...base.sources[0],thumbnail_url:base.sources[0].image_url+"?variant=thumb&v=one"};h.ui.setJob(job({sources:[source]}));assert.equal(h.node("material-source-grid").innerHTML,"");h.node("material-source-details").open=true;h.ui.renderSources();const writes=h.node("material-source-grid").writes;assert.ok(h.node("material-source-grid").innerHTML.includes("variant=thumb"));h.ui.setJob(job({revision:4,sources:[{...source,status:"done",attempts:[{state:"returned"}]}]}));assert.equal(h.node("material-source-grid").writes,writes);});
 test("source failures remain visible and open the original-image drawer",()=>{const h=harness(),source={...job().sources[0],error:"图片服务未完成，请重试"};h.ui.setJob(job({sources:[source]}));assert.equal(h.node("material-source-details").open,true);assert.match(h.node("material-source-grid").innerHTML,/图片服务未完成/);});
+test("a failed original offers one-click automatic retry without cropping",async()=>{
+  const h=harness(),source={...job().sources[0],error:"未能可靠确定设计范围，请在原图框选后重试。"};
+  h.ui.setJob(job({sources:[source],items:[],stats:{total:0,ready:0,downloadable:0,needs_review:0,skipped:0,failed:1}}));
+  const markup=h.node("material-source-grid").innerHTML;
+  assert.match(markup,/data-retry-source="s1"/);
+  assert.match(markup,/框选补提/);
+  const pending=h.ui.retrySource("s1");
+  await flush();
+  assert.equal(h.requests.length,1);
+  assert.ok(h.requests[0].url.endsWith("/redo"));
+  const body=JSON.parse(h.requests[0].options.body);
+  assert.deepEqual(body,{expected_revision:3,source_id:"s1"});
+  await h.reply(0,{...job({sources:[{...source,status:"queued",error:""}]}),status:"queued",revision:4});
+  assert.equal(await pending,true);
+});
+test("an unknown prior submission hides the automatic retry",()=>{
+  const h=harness(),source={...job().sources[0],error:"上次请求结果尚未确认。",submission_unknown:true};
+  h.ui.setJob(job({sources:[source]}));
+  assert.ok(!/data-retry-source/.test(h.node("material-source-grid").innerHTML));
+  assert.match(h.node("material-source-grid").innerHTML,/框选补提/);
+});
 test("changing or resetting a batch clears old source thumbnails and the open drawer",()=>{const h=harness();h.ui.setJob(job());h.node("material-source-details").open=true;h.ui.renderSources();h.ui.setJob(job({id:"b".repeat(32),sources:[]}));assert.equal(h.node("material-source-grid").innerHTML,"");assert.equal(h.node("material-source-details").open,false);h.node("material-source-grid").innerHTML="old";h.ui.reset();assert.equal(h.node("material-source-grid").innerHTML,"");});
 function thumbnailJob(id="a".repeat(32)) {
   const base=job({id});

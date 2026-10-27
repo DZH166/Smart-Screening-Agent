@@ -137,9 +137,20 @@ def test_cleanup_prompt_targets_overlay_watermarks_and_preserves_design_content(
     assert len(prompt) <= 300
 
 
-@pytest.mark.parametrize("box", [[-1, 0, 400, 1000], [0, 0, 1001, 1000], [0, 0, 0, 1000],
-                                [0, 0, 1000, False], [0, 0, 1.5, 1000], [0, 0, 1000]])
-def test_location_rejects_invalid_coordinates(box):
+@pytest.mark.parametrize("box,expected", [
+    ([-1, 0, 400, 1000], (0, 0, 400, 500)),
+    ([0, 0, 1001, 1000], (0, 0, 1000, 500)),
+    ([0, 0, 1.5, 1000], (0, 0, 2, 500)),
+])
+def test_location_clamps_out_of_range_coordinates_instead_of_losing_the_sheet(box, expected):
+    """A 1001 or a float must not throw away every other design on the sheet."""
+    designs, _ = parse_designs(answer([design(box)]), (1000, 500))
+    assert designs[0].box == expected
+
+
+@pytest.mark.parametrize("box", [[0, 0, 0, 1000], [0, 0, 1000, False], [0, 0, 1000],
+                                 [0, 0, 400, 0]])
+def test_location_rejects_boxes_that_are_empty_after_clamping(box):
     with pytest.raises(ValueError):
         parse_designs(answer([design(box)]), (1000, 500))
 
@@ -147,15 +158,38 @@ def test_location_rejects_invalid_coordinates(box):
 @pytest.mark.parametrize("value", [
     {"complete": True, "designs": []},
     {"complete": "true", "designs": [design([0, 0, 1000, 1000])]},
-    {"complete": True, "designs": [design([0, 0, 1000, 1000])] * 129},
     {"complete": True, "designs": [dict(design([0, 0, 1000, 1000]), extra="bad")]},
-    answer([design([0, 0, 1000, 1000]), design([0, 0, 1000, 1000])]),
-    answer([design([0, 0, 1000, 1000]), design([100, 100, 800, 800])]),
-    answer([design([0, 0, 500, 1000]), design([1, 0, 501, 1000])]),
 ])
-def test_location_rejects_missing_duplicate_nested_or_near_duplicate_designs(value):
+def test_location_rejects_a_reply_with_nothing_usable(value):
     with pytest.raises(ValueError):
         parse_designs(value, (1000, 500))
+
+
+def test_location_drops_duplicate_candidates_but_keeps_the_sheet_usable():
+    """One duplicate box used to fail the whole sheet and forced a manual crop."""
+    designs, notes = parse_designs(answer([design([0, 0, 1000, 1000]),
+                                           design([0, 0, 1000, 1000])]), (1000, 500))
+    assert len(designs) == 1 and any("无法使用" in note for note in notes)
+
+
+def test_location_keeps_the_outer_box_of_a_nested_pair():
+    designs, notes = parse_designs(answer([design([0, 0, 1000, 1000]),
+                                           design([100, 100, 800, 800])]), (1000, 500))
+    assert [item.box for item in designs] == [(0, 0, 1000, 500)]
+    assert any("无法使用" in note for note in notes)
+
+
+def test_location_keeps_near_duplicates_as_flagged_neighbours():
+    designs, notes = parse_designs(answer([design([0, 0, 500, 1000]),
+                                           design([400, 0, 1000, 1000])]), (1000, 500))
+    assert len(designs) == 2 and all(item.uncertain for item in designs)
+    assert not any("无法使用" in note for note in notes)
+
+
+def test_location_truncates_past_the_documented_limit():
+    rows = [design([x * 70, y * 70, x * 70 + 60, y * 70 + 60]) for y in range(11) for x in range(12)]
+    designs, notes = parse_designs(answer(rows), (1000, 1000))
+    assert len(designs) == 128 and any("无法使用" in note for note in notes)
 
 
 def test_meaningful_overlap_flagged_and_partial_coverage_not_hidden():
@@ -186,12 +220,26 @@ def test_location_private_image_protocol_usage_and_redaction():
     assert pool.snapshot()["usage"]["requests"] == 1
 
 
+def test_the_retry_variant_sends_one_image_and_no_guide_prompt():
+    """The second attempt must be a different request, not the same replay."""
+    t = Transport(completion(answer([design([0, 0, 1000, 1000])])))
+    settings = Settings()
+    pool = ApiKeyPool(settings)
+    locator(t, settings, pool).locate(image(), guide=False)
+    body = json.loads(t.calls[0][0].data)
+    content = body["messages"][1]["content"]
+    images = [part for part in content if part.get("type") == "image_url"]
+    assert len(images) == 1
+    assert "第二张" not in body["messages"][0]["content"]
+    assert "坐标参考" not in body["messages"][0]["content"]
+
+
 @pytest.mark.parametrize("payload,status,code,settled", [
     (TimeoutError(KEY), 200, "network_error", False),
     (b"garbage", 200, "invalid_response", False),
     ({"error": {"code": "upstream"}}, 503, "provider_error", False),
     ({"error": {"code": "invalid_key"}}, 401, "authentication", True),
-    (completion(answer([design([0, 0, 1100, 1000])])), 200, "invalid_decision", True),
+    (completion(answer([design([0, 0, 0, 1000])])), 200, "invalid_decision", True),
 ])
 def test_location_failure_once_recorded_and_unknown_not_zero(payload, status, code, settled):
     t = Transport(payload, status)
@@ -426,13 +474,17 @@ def test_square_canvas_mapping_preserves_aspect_and_removes_only_known_padding()
     canvas, content = coordinate_canvas(original)
     assert canvas.size == (1000, 1000) and content == (0, 250, 1000, 750)
     assert canvas.crop(content).tobytes() == original.tobytes()
-    mapped = map_canvas_designs((LocatedDesign('whole', (0, 0, 1000, 1000), False),), content, original.size)
-    assert mapped[0].box == (0, 0, 1000, 500)
-    with pytest.raises(ValueError, match='padding'):
+    mapped, notes = map_canvas_designs((LocatedDesign('whole', (0, 0, 1000, 1000), False),),
+                                       content, original.size)
+    assert mapped[0].box == (0, 0, 1000, 500) and not notes
+    # A rectangle that only covered our padding is dropped, and when nothing is
+    # left the call still fails instead of inventing a crop.
+    with pytest.raises(ValueError, match='no usable'):
         map_canvas_designs((LocatedDesign('pad', (0, 0, 100, 200), False),), content, original.size)
-    with pytest.raises(ValueError, match='duplicate'):
-        map_canvas_designs((LocatedDesign('same1', (0, 0, 1000, 1000), False),
-                            LocatedDesign('same2', (0, 250, 1000, 750), False)), content, original.size)
+    kept, notes = map_canvas_designs((LocatedDesign('same1', (0, 0, 1000, 1000), False),
+                                      LocatedDesign('same2', (0, 250, 1000, 750), False)),
+                                     content, original.size)
+    assert len(kept) == 1 and any("无法使用" in note for note in notes)
 
 
 def test_padding_removal_rechecks_nested_real_crop_rectangles():
@@ -441,8 +493,9 @@ def test_padding_removal_rechecks_nested_real_crop_rectangles():
     # the known synthetic padding is removed A is entirely inside B.
     proposed = answer([design([100, 0, 400, 300], 'A'), design([100, 250, 400, 400], 'B')])
     designs, _ = parse_designs(proposed, (1000, 1000))
-    with pytest.raises(ValueError, match='contained mapped'):
-        map_canvas_designs(designs, (0, 250, 1000, 750), (1000, 500))
+    kept, notes = map_canvas_designs(designs, (0, 250, 1000, 750), (1000, 500))
+    assert [item.label for item in kept] == ['A']
+    assert any("无法使用" in note for note in notes)
 
 
 def test_padding_removal_preserves_and_adds_actual_crop_overlap_warnings():
@@ -451,7 +504,7 @@ def test_padding_removal_preserves_and_adds_actual_crop_overlap_warnings():
                        design([100, 259, 400, 500], 'B')])
     designs, _ = parse_designs(proposed, (1000, 1000))
     assert all(not item.uncertain for item in designs)
-    actual = map_canvas_designs(designs, (0, 250, 1000, 750), (1000, 500))
+    actual, _ = map_canvas_designs(designs, (0, 250, 1000, 750), (1000, 500))
     assert actual[0].box == (100, 0, 400, 10)
     assert actual[1].box == (100, 9, 400, 250)
     assert all(item.uncertain and any('范围重叠' in note for note in item.warnings) for item in actual)

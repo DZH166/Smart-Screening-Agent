@@ -49,8 +49,10 @@ class FakeLocator:
     def available(self):
         return None
 
-    def locate(self, png, *, check_cancel=None):
+    def locate(self, png, *, check_cancel=None, guide=True):
         self.calls.append(png)
+        self.guides = getattr(self, "guides", [])
+        self.guides.append(guide)
         usage = empty_usage()
         usage.update(requests=1, successes=1, prompt_tokens=100, completion_tokens=50)
         return type("Located", (), {
@@ -850,7 +852,7 @@ def test_manual_refine_unexpected_transport_failure_is_unknown_without_retry_or_
 def test_border_cut_fragments_are_reported_instead_of_generated():
     """A sliver at the sheet edge cannot be redrawn: the model invents it."""
     ark = FakeArk([card((400, 400))])
-    designs = [design((0, 10, 120, 90), label="左侧碎片"),
+    designs = [design((0, 10, 120, 50), label="左侧碎片"),
                design((5, 5, 28, 28), label="小块"),
                design((150, 150, 250, 250), label="完整设计")]
     result = provider(ark, designs, workers=1).extract(source_image((400, 400)))
@@ -862,11 +864,20 @@ def test_border_cut_fragments_are_reported_instead_of_generated():
     assert "框选" in note
 
 
+def test_a_large_design_that_reaches_the_edge_is_still_generated():
+    """Only thin or tiny border pieces are dropped; a real motif stays."""
+    ark = FakeArk([card((400, 400))])
+    result = provider(ark, [design((0, 100, 240, 340), label="贴边大图")],
+                      workers=1).extract(source_image((400, 400)))
+    assert [layer.label for layer in result.layers] == ["贴边大图"]
+    assert len(ark.calls) == 2
+
+
 def test_all_fragments_fail_with_a_reason_instead_of_inventing_designs():
     ark = FakeArk([card((400, 400))])
     with pytest.raises(ArkProviderError) as raised:
-        provider(ark, [design((0, 0, 200, 120))], workers=1).extract(source_image((400, 400)))
-    assert raised.value.code == "invalid_decision" and len(ark.calls) == 1
+        provider(ark, [design((0, 0, 200, 40))], workers=1).extract(source_image((400, 400)))
+    assert raised.value.code == "no_complete_design" and len(ark.calls) == 1
     assert "框选" in str(raised.value)
 
 
@@ -886,3 +897,51 @@ def test_a_single_design_filling_the_sheet_is_not_treated_as_a_cut_fragment():
     assert [layer.label for layer in result.layers] == ["整张设计"]
     assert len(ark.calls) == 2
     assert not any("没有生成" in note for note in result.warnings)
+
+
+def test_a_settled_locate_failure_is_retried_once_without_the_guide():
+    """One cheap retry beats asking an employee to draw rectangles by hand."""
+    class FlakyLocator(FakeLocator):
+        def __init__(self, designs):
+            super().__init__(designs)
+            self.guides = []
+            self.attempts = 0
+
+        def locate(self, png, *, check_cancel=None, guide=True):
+            self.attempts += 1
+            self.guides.append(guide)
+            if self.attempts == 1:
+                raise ArkProviderError("invalid_decision", "\u5b9a\u4f4d\u8303\u56f4\u91cd\u590d\u3002")
+            self.calls.append(png)
+            usage = empty_usage()
+            usage.update(requests=1, successes=1, prompt_tokens=100, completion_tokens=50)
+            return type("Located", (), {
+                "designs": self.designs, "warnings": self.warnings,
+                "usage": usage, "request_id": "locate-2"})()
+
+    ark = FakeArk([card((400, 400))])
+    locator = FlakyLocator([design((150, 150, 250, 250), label="\u5b8c\u6574\u8bbe\u8ba1")])
+    result = MaterialDesignProvider(CONFIG, None, ark=ark, locator=locator, workers=1).extract(
+        source_image((400, 400)))
+    assert [layer.label for layer in result.layers] == ["\u5b8c\u6574\u8bbe\u8ba1"]
+    assert locator.guides == [True, False]
+    assert len(ark.calls) == 2
+
+
+def test_an_unknown_locate_submission_is_never_retried():
+    class UnsureLocator(FakeLocator):
+        def __init__(self):
+            super().__init__([])
+            self.attempts = 0
+
+        def locate(self, png, *, check_cancel=None, guide=True):
+            self.attempts += 1
+            raise ArkProviderError("submission_unknown", "\u7ed3\u679c\u672a\u786e\u8ba4\u3002", settled=False)
+
+    ark = FakeArk([card((400, 400))])
+    locator = UnsureLocator()
+    with pytest.raises(ArkProviderError) as raised:
+        MaterialDesignProvider(CONFIG, None, ark=ark, locator=locator, workers=1).extract(
+            source_image((400, 400)))
+    assert raised.value.code == "submission_unknown" and locator.attempts == 1
+    assert len(ark.calls) == 1

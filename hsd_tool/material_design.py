@@ -35,6 +35,10 @@ EDGE_PIXELS = 2
 # smaller than this cannot be redrawn without the model inventing content.
 EDGE_TOLERANCE_PIXELS = 3
 MIN_DESIGN_SIDE = 24
+# A border-touching design is treated as a cut fragment only when it is also a
+# thin strip or a small patch of the sheet; a large motif at the edge is kept.
+EDGE_THIN_SHARE = .15
+EDGE_SMALL_SHARE = .03
 # A design covering nearly the whole sheet is the uploaded artwork itself, not a
 # piece cut out of a larger collage.
 WHOLE_SHEET_SHARE = .85
@@ -122,9 +126,16 @@ def design_is_complete(box, size):
         return False
     if box_width * box_height >= WHOLE_SHEET_SHARE * width * height:
         return True
-    return not (left <= EDGE_TOLERANCE_PIXELS or top <= EDGE_TOLERANCE_PIXELS
-                or right >= width - EDGE_TOLERANCE_PIXELS
-                or bottom >= height - EDGE_TOLERANCE_PIXELS)
+    touches = (left <= EDGE_TOLERANCE_PIXELS or top <= EDGE_TOLERANCE_PIXELS
+               or right >= width - EDGE_TOLERANCE_PIXELS or bottom >= height - EDGE_TOLERANCE_PIXELS)
+    if not touches:
+        return True
+    # A design at the border is only unsafe when too little of it is visible: a
+    # thin strip or a tiny patch has lost pixels and would be invented, while a
+    # large motif that happens to reach the edge can still be redrawn honestly.
+    thin = min(box_width, box_height) < EDGE_THIN_SHARE * min(width, height)
+    small = box_width * box_height < EDGE_SMALL_SHARE * width * height
+    return not (thin or small)
 
 
 def design_share(box, size):
@@ -333,8 +344,20 @@ class MaterialDesignProvider:
             cancel()
             base = _decode(cleaned.base_png, output=True)
             progress("locate")
-            located = call("deepseek", "locate", lambda: self.locator.locate(cleaned.base_png,
-                                                                             check_cancel=check_cancel))
+            # One extra locate with a different view is far cheaper than asking
+            # the employee to draw rectangles by hand. Only a settled decision
+            # failure is retried; a billing-unknown response never is.
+            located = None
+            for number in (1, 2):
+                try:
+                    located = call("deepseek", "locate",
+                                   lambda first=number == 1: self.locator.locate(
+                                       cleaned.base_png, check_cancel=check_cancel, guide=first))
+                    break
+                except ArkProviderError as error:
+                    if number == 1 and error.code == "invalid_decision" and error.settled:
+                        continue
+                    raise
             cancel()
             designs = list(located.designs)
             if not designs:
@@ -348,8 +371,9 @@ class MaterialDesignProvider:
                 (usable if design_is_complete(native, source.size) else skipped).append((design, native))
             if not usable:
                 raise ArkProviderError(
-                    "invalid_decision",
-                    "原图里没有找到完整的设计：%d 个都贴着画面边缘或被裁切。请上传未裁剪的原图，或在原图上框选完整个体。" % len(skipped))
+                    "no_complete_design",
+                    "原图里没有找到完整的独立设计：%d 个候选都贴着画面边缘且只剩很窄的一条。"
+                    "请上传未裁剪的原图，或在原图上框选完整个体。" % len(skipped))
             progress("designs", "", current=0, total=len(usable))
             layers, failures = self._generate(source, base, usable, instructions, check_cancel, progress, call)
             cancel()
