@@ -62,7 +62,11 @@ def test_material_batch_requires_owner_token_revision_and_can_undo(application):
     assert response.status_code == 200 and response.json["stats"]["ready"] == 2
     assert call(client, path + "/resolve-batch", method="POST", payload=payload).status_code == 409
     undo = call(client, path + "/undo-batch", method="POST", payload={"expected_revision": response.json["revision"]})
-    assert undo.status_code == 200 and undo.json["stats"]["needs_review"] == 2
+    # v1.19.0 material items start as downloadable-but-unverified "generated",
+    # so undoing a batch returns them there instead of to "needs_review".
+    assert undo.status_code == 200 and undo.json["stats"]["ready"] == 0
+    assert undo.json["stats"]["downloadable"] == 2
+    assert {row["status"] for row in undo.json["items"]} == {"generated"}
 
 
 def test_numbering_batch_revision_owner_csrf_and_group_undo(application, tmp_path):
