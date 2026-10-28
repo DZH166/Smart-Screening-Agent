@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from hsd_tool.cloud_retention import CloudRetention
+from hsd_tool.cloud_retention import RETENTION_SECONDS, CloudRetention
 from hsd_tool.service import JobManager
 from hsd_tool.uploads import EmployeeUploads
 
@@ -64,7 +64,7 @@ def setup(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("status", ["ready", "done", "error"])
-def test_three_day_default_and_settled_expiry_removes_only_its_four_namespaces(setup, status):
+def test_default_window_and_settled_expiry_removes_only_its_four_namespaces(setup, status):
     manager, job, _, retention = setup
     job["status"] = status
     retention.sweep(now=1000)
@@ -83,7 +83,33 @@ def test_three_day_default_and_settled_expiry_removes_only_its_four_namespaces(s
     assert stranger.is_dir()
     assert all((manager.data_dir / name).read_text() == "preserve"
                for name in ("settings.json", "ai-credentials.enc", "ai-usage.json"))
-    assert CloudRetention(manager, {}).retention_seconds == 3 * 24 * 60 * 60
+    # The product window is 50 hours, not three days.
+    assert CloudRetention(manager, {}).retention_seconds == RETENTION_SECONDS == 50 * 60 * 60
+
+
+def test_a_manifest_from_the_three_day_window_is_shortened_on_startup(tmp_path, monkeypatch):
+    """Changing the policy must not strand old manifests on disk.
+
+    A 72-hour manifest would fail validation under a 50-hour policy, be ignored,
+    and its files would never be swept. Loading it must re-stamp the expiry.
+    """
+    monkeypatch.setattr("hsd_tool.cloud_retention.time.time", lambda: 1000.)
+    manager = manager_at(tmp_path / "service")
+    job = add_upload(manager)
+    job["status"] = "done"
+    older = CloudRetention(manager, {}, retention_seconds=3 * 24 * 60 * 60, interval_seconds=1)
+    older.register(JOB)
+    older.sweep(now=1000)
+    assert older._records[JOB]["expires_at"] == 1000 + 3 * 24 * 60 * 60
+    manager.jobs.pop(JOB, None)
+
+    current = CloudRetention(manager, {}, interval_seconds=1)
+    record = current._records[JOB]
+    assert record["retention_seconds"] == RETENTION_SECONDS
+    assert record["expires_at"] == 1000 + RETENTION_SECONDS
+    # Nothing is deleted before the shorter window, and it is enforced exactly.
+    assert current.sweep(now=1000 + RETENTION_SECONDS - 1) == []
+    assert current.sweep(now=1000 + RETENTION_SECONDS) == [JOB]
 
 
 @pytest.mark.parametrize("status", ["queued", "importing", "matching", "ai_review", "exporting"])

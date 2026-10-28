@@ -207,6 +207,23 @@ def test_cloud_abandoned_upload_cleanup_requires_signature_and_no_live_lease(ser
     assert unproven.exists()
 
 
+def test_a_manifest_from_the_three_day_window_expires_under_the_shorter_one(service):
+    """The window is policy: old records must not outlive the new promise."""
+    from hsd_tool.retention_window import RETENTION_SECONDS
+    manager, _ = service
+    result = complete(manager, upload(manager)); identifier = result["id"]
+    job = manager.jobs[identifier]
+    settled = job.get("settled_at")
+    assert isinstance(settled, float) and settled > 0
+    job["expires_at"] = settled + 3 * 86400          # what v1.19.3 would have written
+    manager._save(job)
+    manager.clock = lambda: settled + RETENTION_SECONDS - 60
+    assert manager.retention_sweep() == []
+    manager.clock = lambda: settled + RETENTION_SECONDS + 1
+    assert manager.retention_sweep() == [identifier]
+    assert not manager._directory(identifier).exists()
+
+
 def test_tampered_manifest_is_never_deleted_or_resigned(service):
     manager, _ = service
     result = complete(manager, upload(manager)); identifier = result["id"]

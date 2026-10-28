@@ -161,7 +161,7 @@ def test_loopback_forwarded_client_still_needs_employee_login(employee_app):
     client = employee_app.test_client()
     result = cloud_request(client, "/", forwarded="127.0.0.1")
     assert result.status_code == 200 and "访问码" in result.get_data(as_text=True)
-    assert "服务器暂存 3 天" in result.get_data(as_text=True) and "请连接公司局域网" not in result.get_data(as_text=True)
+    assert "服务器暂存 50 小时" in result.get_data(as_text=True) and "请连接公司局域网" not in result.get_data(as_text=True)
     assert TOKEN not in result.get_data(as_text=True)
     assert cloud_request(client, "/api/config", forwarded="127.0.0.1").status_code == 401
     logged_in = login(client)

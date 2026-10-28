@@ -205,7 +205,7 @@
     $("material-generation-warning").classList.toggle("hidden",job.has_generation_failures!==true);
     renderCards();renderSources();
     const warnings=[...new Set([...(job.warnings||[]),...(job.sources||[]).flatMap(source=>[source.error,...(source.warnings||[])].filter(Boolean).map(warning=>`${source.name}：${warning}`))])];
-    $("material-batch-info").innerHTML=`<p>可下载 ${ready} 个${skipped?`；已舍弃 ${skipped} 个`:""}。舍弃及失败项不加入下载包。</p><p>图片可下载不表示画质已经过核验，请自行检查文字、配色和完整性。</p>${warnings.map(warning=>`<p>${esc(warning)}</p>`).join("")}<p>云端副本保留三天，请将结果下载到自己的电脑。</p>`;
+    $("material-batch-info").innerHTML=`<p>可下载 ${ready} 个${skipped?`；已舍弃 ${skipped} 个`:""}。舍弃及失败项不加入下载包。</p><p>图片可下载不表示画质已经过核验，请自行检查文字、配色和完整性。</p>${warnings.map(warning=>`<p>${esc(warning)}</p>`).join("")}<p>云端副本保留 50 小时（约两天），请将结果下载到自己的电脑。</p>`;
     controls();
   }
   function visibleItem(item) {return state.filter==="all"||(state.filter==="skipped"?item.status==="skipped":item.status!=="skipped");}

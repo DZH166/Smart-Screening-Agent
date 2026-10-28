@@ -20,11 +20,13 @@ import threading
 import time
 from pathlib import Path
 
+from .retention_window import RETENTION_SECONDS
 from .service import BUSY
 
 _UUID = re.compile(r"[0-9a-f]{32}")
 _FINISHED = {"ready", "done", "error", "cancelled"}
 _STATES = BUSY | _FINISHED | {"orphaned"}
+RETENTION_SECONDS = RETENTION_SECONDS
 _FIELDS = {"schema", "job_id", "batch_id", "registered_at", "observed_at",
            "settled_at", "expires_at", "retention_seconds", "status", "revision",
            "operation_token"}
@@ -50,14 +52,14 @@ def _pairs(pairs):
 
 
 class CloudRetention:
-    """Expire settled cloud uploads after three days, never during a lease.
+    """Expire settled cloud uploads after the retention window, never during a lease.
 
     All observations and leases are serialized by manager.lock. The conservative
     global operation/future check also protects a phase which has just published
     ready/error while its accepted background work has not finished unwinding.
     """
 
-    def __init__(self, manager, job_leases: dict, retention_seconds=259200,
+    def __init__(self, manager, job_leases: dict, retention_seconds=RETENTION_SECONDS,
                  interval_seconds=60, *, companion=None):
         if (isinstance(retention_seconds, bool) or not isinstance(retention_seconds, (int, float))
                 or not math.isfinite(retention_seconds) or retention_seconds <= 0
@@ -137,7 +139,9 @@ class CloudRetention:
                 or payload["status"] not in _STATES
                 or type(payload["revision"]) is not int or payload["revision"] < 0
                 or not isinstance(payload["operation_token"], str) or len(payload["operation_token"]) > 128
-                or payload["retention_seconds"] != self.retention_seconds):
+                or type(payload["retention_seconds"]) not in (int, float)
+                or not math.isfinite(payload["retention_seconds"])
+                or payload["retention_seconds"] <= 0):
             raise ValueError("Invalid cloud retention manifest")
         for field in ("registered_at", "observed_at"):
             value = payload[field]
@@ -152,9 +156,28 @@ class CloudRetention:
         elif (type(settled) not in (int, float) or type(expires) not in (int, float)
               or not math.isfinite(settled) or not math.isfinite(expires)
               or settled < payload["registered_at"] or settled > payload["observed_at"]
-              or expires != settled + self.retention_seconds):
+              or expires != settled + payload["retention_seconds"]):
             raise ValueError("Invalid cloud retention expiry")
         return payload
+
+    def _adopt(self, payload):
+        """Apply the current retention window to a manifest written under another.
+
+        The window is deployment policy, not task data. Without this, changing
+        it would make every existing manifest fail validation, and their files
+        would then never be swept. The window only ever moves a settled task's
+        expiry; busy tasks keep no expiry until they settle.
+        """
+        if payload["retention_seconds"] == self.retention_seconds:
+            return payload
+        settled = payload["settled_at"]
+        updated = dict(payload, retention_seconds=self.retention_seconds,
+                       expires_at=None if settled is None else settled + self.retention_seconds)
+        # Seed the in-memory record so _save can verify the file still matches
+        # what was just read, then let _save publish the new manifest.
+        self._records[payload["job_id"]] = payload
+        self._save(updated)
+        return updated
 
     def _load(self):
         for target in self.manifests.iterdir():
@@ -162,7 +185,7 @@ class CloudRetention:
                 continue
             try:
                 identifier = target.stem
-                self._records[identifier] = self._read(identifier)
+                self._records[identifier] = self._adopt(self._read(identifier))
             except (OSError, ValueError, TypeError, OverflowError):
                 _LOG.warning("An unsafe cloud retention manifest was ignored; task files were preserved")
 

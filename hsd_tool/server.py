@@ -240,7 +240,7 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
                     html = (html.replace("员工入口 · 输入主机提供的访问码。", "员工入口 · 输入管理员提供的访问码。")
                             .replace("DeepSeek 沿用主机配置", "DeepSeek 沿用服务器配置")
                             .replace("请连接公司局域网。没有访问码或无法连接时，请联系主机管理员。",
-                                     "请使用管理员提供的 HTTPS 网址。文件处理结束后在服务器暂存 3 天，请及时下载；没有访问码或无法连接时请联系管理员。")
+                                     "请使用管理员提供的 HTTPS 网址。文件处理结束后在服务器暂存 50 小时，请及时下载；没有访问码或无法连接时请联系管理员。")
                             .replace("无法连接主机，请确认主机工具仍在运行后重试。", "无法连接服务器，请检查网络后重试。"))
                 if request.endpoint in {"material_demo_redirect", "material_demo_page"}:
                     html = (html.replace("HSD 图号助手", "素材提取（demo内测）")

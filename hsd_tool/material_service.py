@@ -31,6 +31,7 @@ from werkzeug.exceptions import Conflict
 from . import __version__
 from .cancellation import TaskCancelled
 from .material_ark import normalise_rgba
+from .retention_window import RETENTION_SECONDS
 from .uploads import DiskBudget, UploadFile, checked_path
 
 _ID = re.compile(r"[a-f0-9]{32}")
@@ -38,7 +39,7 @@ _BUSY = {"queued", "processing", "cancelling"}
 _TERMINAL = {"ready", "cancelled", "error"}
 _MAX_PIXELS = 36_000_000
 _MAX_FILES = 100
-_RETENTION = 3 * 86400
+_RETENTION = RETENTION_SECONDS
 _THUMBNAIL_EDGE = 640
 _DOWNLOADABLE = {"generated", "needs_review", "ready", "confirmed"}
 
@@ -1296,6 +1297,12 @@ class MaterialManager:
                         continue
                     job = self._read(directory)
                     expiry = job.get("expires_at")
+                    settled = job.get("settled_at")
+                    if (type(expiry) in {int, float} and type(settled) in {int, float}
+                            and expiry > settled):
+                        # Apply the current window to records written under an
+                        # older one, without rewriting the signed manifest.
+                        expiry = settled + _RETENTION
                     if (job["status"] not in _TERMINAL or type(expiry) not in {int, float}
                             or expiry > self.clock() or self.leases.get(job["id"])
                             or (job["id"] in self.futures and not self.futures[job["id"]].done())):
