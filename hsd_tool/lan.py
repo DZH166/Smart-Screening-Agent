@@ -60,12 +60,24 @@ class LanAccess:
         """None means throttled. Neither the code nor submitted text is logged."""
         now = time.monotonic()
         with self._lock:
-            attempts = self._attempts[address]
+            attempts = self._attempts.get(address)
+            if attempts is None:
+                attempts = deque()
             while attempts and now - attempts[0] >= 60:
                 attempts.popleft()
             if len(attempts) >= 10:
                 return None
             attempts.append(now)
+            self._attempts[address] = attempts
+            if len(self._attempts) > 1024:
+                for key in [key for key, value in self._attempts.items()
+                            if not value or now - value[-1] >= 60]:
+                    self._attempts.pop(key, None)
+                if len(self._attempts) > 1024:
+                    # Hard bound; an evicted address gets a fresh budget.
+                    for key, _ in sorted(self._attempts.items(), key=lambda item: item[1][-1])[
+                            :len(self._attempts) - 1024]:
+                        self._attempts.pop(key, None)
             valid_shape = (isinstance(supplied, str) and 1 <= len(supplied) <= 64
                            and all(33 <= ord(character) <= 126 for character in supplied))
             if self.access_codes is not None:
@@ -75,7 +87,9 @@ class LanAccess:
             else:
                 valid = valid_shape and secrets.compare_digest(supplied.encode("ascii"), self.code.encode("ascii"))
             if valid:
-                attempts.clear()
+                # A successful login clears the budget for this address; keep no
+                # dead key behind for it.
+                self._attempts.pop(address, None)
             return valid
 
     def validate_paths(self, payload: dict) -> dict:

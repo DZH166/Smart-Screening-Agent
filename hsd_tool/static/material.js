@@ -13,7 +13,7 @@
     "清理可能改变文字、配色或细节，请对照原图确认。",
     "已按标记位置提出修改要求，模型仍可能改变其他区域，请对照确认。"
   ]);
-  const state = {workspace:"numbering",config:null,job:null,files:[],objectUrls:[],busy:false,uploading:false,uncertain:false,retryUpload:false,stopRequested:false,uploadId:null,xhr:null,timer:null,polling:false,authLost:false,filter:"available",newBatch:false,dialog:null,box:null,startPoint:null,sourcesSignature:"",items:new Map(),scroll:{numbering:0,material:0},epoch:0,refineAcks:new Set(),stream:null,streamJob:null,streamErrors:0,streamDisabled:false,clockTimer:null,clockAnchor:null,progressCounts:null,renewTimer:null};
+  const state = {workspace:"numbering",config:null,job:null,pendingJobId:null,files:[],objectUrls:[],busy:false,uploading:false,uncertain:false,retryUpload:false,stopRequested:false,uploadId:null,xhr:null,timer:null,polling:false,authLost:false,filter:"available",newBatch:false,dialog:null,box:null,startPoint:null,sourcesSignature:"",items:new Map(),scroll:{numbering:0,material:0},epoch:0,refineAcks:new Set(),stream:null,streamJob:null,streamErrors:0,streamDisabled:false,clockTimer:null,clockAnchor:null,progressCounts:null,renewTimer:null};
   const metrics = {cards_created:0,cards_updated:0,previews_loaded:0,polls:0};
   function count(name) {metrics[name]++;document.documentElement.dataset.materialUiMetrics=JSON.stringify(metrics);}
   function stored(key) {try{return sessionStorage.getItem(key);}catch(_){return null;}}
@@ -107,7 +107,13 @@
     if(!window.crypto?.randomUUID){notify("请使用新版 Chrome 或 Edge 打开安全网址后重试。",true);return;}
     const epoch=state.epoch;
     if(!retry)state.uploadId=window.crypto.randomUUID();remember("hsd-material-upload",state.uploadId);state.retryUpload=false;state.uncertain=false;state.uploading=true;notify("");showUpload();controls();
-    try{const data=await upload(state.files);if(epoch!==state.epoch)return;clearUpload();state.newBatch=false;remember("hsd-material-new",null);await loadJob(data.id);}
+    try{const data=await upload(state.files);if(epoch!==state.epoch)return;
+      // The batch exists on the server now. Remember its id before anything
+      // else can fail, so a failed snapshot read is retryable instead of
+      // leaving a cleared upload id and a dead "重新查询" button.
+      state.pendingJobId=data.id;remember("hsd-material-job",data.id);clearUpload();state.newBatch=false;remember("hsd-material-new",null);
+      try{await loadJob(data.id);}catch(error){if(epoch!==state.epoch)return;notify("任务已创建，但这次没取到进度；点“重新查询”即可继续。",true);}
+    }
     catch(error){if(epoch!==state.epoch)return;state.uploading=false;if([400,413,415,422].includes(error.status)){clearUpload();$("material-progress").classList.add("hidden");notify(error.message,true);}else if(error.status===401){state.uncertain=true;lockAuth();}else{state.uncertain=true;showUpload();await recoverUpload();}}
     finally{if(epoch===state.epoch)controls();}
   }
@@ -116,7 +122,7 @@
     try{const data=await api(`/api/material/upload-status/${encodeURIComponent(state.uploadId)}`);if(epoch!==state.epoch)return;const id=data.job_id||data.id;if(id&&data.state==="completed"){const stop=state.stopRequested||data.cancellation_requested;clearUpload();await loadJob(id);if(epoch!==state.epoch)return;if(stop&&activeStatuses.has(state.job?.status)){const job=await api(jobPath("/cancel"),{expected_revision:state.job.revision});if(epoch===state.epoch)setJob(job);}}else if(data.state==="cancelled"){clearUpload();$("material-progress").classList.add("hidden");notify("上传已停止，可以重新选择图片。");}else if(data.state==="missing"){state.uncertain=true;state.retryUpload=!!state.files.length&&!state.stopRequested;showUpload();notify(state.retryUpload?"当前未找到已受理任务。可重试本次上传（沿用同一个请求），或先停止再更换图片。":"当前未找到已受理任务，请先停止本次上传，再重新选择图片。",true);}else{state.uncertain=true;state.retryUpload=false;showUpload();notify(data.cancellation_requested?"正在停止上传，请稍后查询最终结果。":"还在核对上传结果，请稍后点击“查询上传结果”。不要重复提交。",true);}}
     catch(error){if(epoch===state.epoch&&!state.authLost)notify(error.message||"无法查询上传结果，请稍后重试。",true);}finally{if(epoch===state.epoch){state.busy=false;controls();}}
   }
-  async function loadJob(id=state.job?.id) {if(!id||state.authLost)return;const epoch=state.epoch,job=await api(`/api/material/jobs/${encodeURIComponent(id)}`);if(epoch===state.epoch&&!state.authLost)setJob(job);}
+  async function loadJob(id=state.job?.id||state.pendingJobId) {if(!id||state.authLost)return;const epoch=state.epoch,job=await api(`/api/material/jobs/${encodeURIComponent(id)}`);if(epoch===state.epoch&&!state.authLost){setJob(job);state.pendingJobId=null;}}
   function closeStream() {clearTimeout(state.clockTimer);clearTimeout(state.renewTimer);state.renewTimer=null;if(state.stream)state.stream.close();state.stream=null;state.streamJob=null;}
   function schedule() {
     clearTimeout(state.timer);
@@ -153,7 +159,7 @@
     stream.onerror=()=>{if(!current())return;state.streamErrors++;$("material-stream-state").textContent="正在重新连接进度…";if(stream.readyState===2||state.streamErrors>=2)fallback();};
     updateClock();
   }
-  async function poll() {if(state.polling||state.authLost||!state.job)return;const epoch=state.epoch;state.polling=true;count("polls");try{await loadJob();}catch(error){if(epoch===state.epoch&&!state.authLost)notify("暂时无法获取进度，请检查网络；系统不会重复提交图片。",true);}finally{if(epoch===state.epoch){state.polling=false;controls();schedule();}}}
+  async function poll() {if(state.polling||state.authLost||!(state.job||state.pendingJobId))return;const epoch=state.epoch;state.polling=true;count("polls");try{await loadJob();}catch(error){if(epoch===state.epoch&&!state.authLost)notify("暂时无法获取进度，请检查网络；系统不会重复提交图片。",true);}finally{if(epoch===state.epoch){state.polling=false;controls();schedule();}}}
   function setJob(job) {
     if(!job||typeof job.id!=="string"||!Array.isArray(job.items)||!Array.isArray(job.sources))throw new Error("素材结果格式异常，请刷新页面后重试。");
     if(state.job?.id===job.id&&(Number(job.revision)<Number(state.job.revision)||(job.revision===state.job.revision&&Number(job.update_seq)<Number(state.job.update_seq))))return;
@@ -359,7 +365,7 @@
     const dialog={...state.dialog};const source=state.job.sources.find(value=>value.id===dialog.sourceId);const unknown=source?.submission_unknown===true;if(unknown&&!$("material-unknown-ack").checked){$("material-dialog-message").textContent="请先确认重新提交可能重复计费，再继续。";$("material-dialog-message").classList.remove("hidden");return;}
     const box={...state.box};const instruction=[$("material-correction-kind").value,$("material-correction-note").value.trim()].filter(Boolean).join("；");const success=await mutate("redo",{source_id:dialog.sourceId,...(dialog.itemId?{item_id:dialog.itemId}:{}),box,instruction,...(unknown?{acknowledge_unknown:true}:{})});if(success)$("material-detail-dialog").close();else{$("material-dialog-message").textContent=$("material-notice").textContent;$("material-dialog-message").classList.remove("hidden");}
   }
-  function reset() {if(busy()||state.authLost)return;state.epoch++;closeStream();clearTimeout(state.timer);state.refineAcks.clear();state.polling=false;state.job=null;state.clockAnchor=null;state.progressCounts=null;state.items.clear();state.sourcesSignature="";state.newBatch=true;state.files=[];releaseUrls();remember("hsd-material-job",null);remember("hsd-material-new","1");$("material-files").value="";$("material-selected-files").replaceChildren();$("material-grid").replaceChildren();$("material-source-grid").replaceChildren();$("material-source-details").open=false;$("material-upload-form").classList.remove("hidden");$("material-results").classList.add("hidden");$("material-progress").classList.add("hidden");$("material-new").classList.add("hidden");notify("");controls();$("material-files").focus();}
+  function reset() {if(busy()||state.authLost)return;state.epoch++;closeStream();clearTimeout(state.timer);state.refineAcks.clear();state.polling=false;state.job=null;state.pendingJobId=null;state.clockAnchor=null;state.progressCounts=null;state.items.clear();state.sourcesSignature="";state.newBatch=true;state.files=[];releaseUrls();remember("hsd-material-job",null);remember("hsd-material-new","1");$("material-files").value="";$("material-selected-files").replaceChildren();$("material-grid").replaceChildren();$("material-source-grid").replaceChildren();$("material-source-details").open=false;$("material-upload-form").classList.remove("hidden");$("material-results").classList.add("hidden");$("material-progress").classList.add("hidden");$("material-new").classList.add("hidden");notify("");controls();$("material-files").focus();}
   function boot() {
     document.querySelectorAll("[data-workspace]").forEach(link=>link.addEventListener("click",event=>{event.preventDefault();workspace(link.dataset.workspace,true);}));window.addEventListener("hashchange",()=>workspace(location.hash.slice(1)));
     $("material-files").addEventListener("change",event=>selectFiles(event.target.files));$("material-upload-form").addEventListener("submit",start);$("material-selected-files").addEventListener("click",event=>{const button=event.target.closest("[data-remove-file]");if(!button||busy())return;state.files.splice(Number(button.dataset.removeFile),1);renderSelected();controls();});

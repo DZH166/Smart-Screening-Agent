@@ -83,7 +83,7 @@ def server_options(environ=None):
             "worker_class": "hsd_tool.cloud_gunicorn.CloudWorker", "threads": 4,
             "worker_connections": 64, "timeout": 0, "graceful_timeout": 30,
             "preload_app": False, "max_requests": 0, "reload": False,
-            "accesslog": None, "errorlog": "-", "capture_output": False,
+            "accesslog": "-", "errorlog": "-", "capture_output": False,
             "control_socket_disable": True,
             "forwarded_allow_ips": "", "secure_scheme_headers": {},
             "umask": 0o077}

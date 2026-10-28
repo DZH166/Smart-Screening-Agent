@@ -460,6 +460,21 @@ def test_cloud_service_options_are_fixed_single_worker_streaming():
     assert options["bind"] == "127.0.0.1:8835" and options["workers"] == 1
     assert not options["preload_app"] and not options["reload"] and options["max_requests"] == 0
     assert options["timeout"] == 0 and options["forwarded_allow_ips"] == "" and options["secure_scheme_headers"] == {}
-    assert options["accesslog"] is None
+    # One request line per call, to journald: status, size and duration without
+    # cookies or bodies. Needed to audit downloads and 401/403 attempts.
+    assert options["accesslog"] == "-" and options["errorlog"] == "-"
     with pytest.raises(ValueError):
         namespace["server_options"]({"HSD_BIND_PORT": "80"})
+
+
+def test_cloud_liveness_probe_is_public_but_says_nothing(employee_app):
+    client = employee_app.test_client()
+    response = cloud_request(client, "/healthz")
+    body = response.get_data(as_text=True)
+    assert response.status_code == 200 and body.strip() == "ok"
+    assert response.headers["Cache-Control"] == "no-store"
+    for token in ("1.19", "instance", "storage", "settings", CODE, TOKEN):
+        assert token not in body
+    # Everything else still requires the employee access code.
+    assert cloud_request(client, "/api/health").status_code == 401
+    assert cloud_request(client, "/api/config").status_code == 401

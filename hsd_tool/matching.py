@@ -163,6 +163,9 @@ def _collect(source: Path, directory: Path, warnings: list[str]) -> list[dict]:
     if source.suffix.lower() != '.zip':
         raise ValueError('请选择 AI 文件夹或 ZIP 压缩包。')
     try:
+        from .archive_io import check_directory_size
+        check_directory_size(source, max_entries=MAX_ENTRIES,
+                             too_many='压缩包条目过多，请仅打包本批次 AI 文件。')
         with zipfile.ZipFile(source) as archive:
             infos = archive.infolist()
             if len(infos) > MAX_ENTRIES:

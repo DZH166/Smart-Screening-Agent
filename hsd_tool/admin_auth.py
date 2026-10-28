@@ -76,12 +76,35 @@ class LoginLimiter:
         self._attempts = defaultdict(deque)
         self._lock = threading.Lock()
 
+    SWEEP_ABOVE = 1024
+
     def _recent(self, address):
-        attempts = self._attempts[address]
+        """Pruned timestamps for one address; the key is dropped when empty.
+
+        Read-only probes (``blocked``) run for every login attempt, so keeping
+        an empty deque per source address would let unauthenticated traffic grow
+        the table without bound.
+        """
+        attempts = self._attempts.get(address)
+        if attempts is None:
+            return deque()
         now = self._clock()
         while attempts and now - attempts[0] >= self.window:
             attempts.popleft()
+        if not attempts:
+            self._attempts.pop(address, None)
         return attempts
+
+    def _sweep(self, now):
+        for key in [key for key, value in self._attempts.items()
+                    if not value or now - value[-1] >= self.window]:
+            self._attempts.pop(key, None)
+        if len(self._attempts) > self.SWEEP_ABOVE:
+            # Hard bound: keep the most recent sources, oldest first out. An
+            # evicted address simply gets a fresh budget; memory stays bounded.
+            for key, _ in sorted(self._attempts.items(), key=lambda item: item[1][-1])[
+                    :len(self._attempts) - self.SWEEP_ABOVE]:
+                self._attempts.pop(key, None)
 
     def blocked(self, address) -> bool:
         with self._lock:
@@ -90,8 +113,13 @@ class LoginLimiter:
     def fail(self, address) -> bool:
         """Record a failure; return True when this address is now blocked."""
         with self._lock:
+            now = self._clock()
             attempts = self._recent(address)
-            attempts.append(self._clock())
+            if not attempts:
+                attempts = self._attempts[address] = deque()
+            attempts.append(now)
+            if len(self._attempts) > self.SWEEP_ABOVE:
+                self._sweep(now)
             return len(attempts) >= self.limit
 
     def reset(self, address) -> None:

@@ -27,7 +27,7 @@ function harness(){
     fail(){this.naturalWidth=0;this.naturalHeight=0;this.onerror?.();}
   }
   sandbox.Image=sandbox.window.Image=ControlledImage;
-  vm.runInNewContext(source.replace("  boot();","  window.testMaterial={state,workspace,fileError,selectFiles,formatBytes,safeUrl,setJob,loadJob,render,renderCards,renderSources,mutate,start,recoverUpload,stop,reset,openDetail,imagePoint,selectionMove,redo,metrics,controls,itemAction,acknowledgeRefine,showBatchRecords,itemContent,itemWarnings,download,schedule,closeStream,updateClock,retrySource,refiningId};"),sandbox);
+  vm.runInNewContext(source.replace("  boot();","  window.testMaterial={state,workspace,fileError,selectFiles,formatBytes,safeUrl,setJob,loadJob,render,renderCards,renderSources,mutate,start,recoverUpload,stop,reset,openDetail,imagePoint,selectionMove,redo,metrics,controls,itemAction,acknowledgeRefine,showBatchRecords,itemContent,itemWarnings,download,schedule,closeStream,updateClock,retrySource,refiningId,poll};"),sandbox);
   return{ui:sandbox.window.testMaterial,node,requests,xhrs,timers,storage,revoked,sandbox,images,async reply(index,data,status=200){requests[index].resolve({ok:status>=200&&status<300,status,json:async()=>data});await flush();}};
 }
 function job(overrides={}){return{id:"a".repeat(32),revision:3,status:"ready",progress:{phase:"完成",current:1,total:1},sources:[{id:"s1",name:"原图.png",width:1000,height:500,image_url:`/api/material/jobs/${"a".repeat(32)}/source/s1`}],items:[{id:"i1",source_id:"s1",name:"完整设计",status:"generated",downloadable:true,refined:false,warnings:["请核对文字与颜色"],image_url:`/api/material/jobs/${"a".repeat(32)}/item/i1`,download_url:`/api/material/jobs/${"a".repeat(32)}/download/i1`,width:4096,height:2048}],stats:{total:1,ready:0,downloadable:1,needs_review:0,skipped:0,failed:0},download_url:null,...overrides};}
@@ -43,6 +43,23 @@ test("discard waits for server acceptance and prevents duplicate submissions",as
 test("a rejected discard refreshes the revision and keeps the original item",async()=>{const h=harness();h.ui.setJob(job());const pending=h.ui.itemAction(actionEvent("skip"));await h.reply(0,{error:"conflict"},409);assert.equal(h.requests.length,2);assert.equal(h.ui.state.job.items[0].status,"generated");await h.reply(1,job({revision:8}));await pending;assert.equal(h.ui.state.job.revision,8);assert.equal(h.ui.state.job.items[0].status,"generated");assert.match(h.node("material-notice").textContent,/状态已更新/);});
 test("auth rejection locks employee controls and cannot expose administration",async()=>{const h=harness();h.ui.setJob(job());const pending=h.ui.mutate("resolve",{item_id:"i1",action:"confirm"});await h.reply(0,{error:"登录失效"},401);assert.equal(await pending,false);assert.equal(h.ui.state.authLost,true);assert.equal(h.node("material-start").disabled,true);assert.equal(h.requests.length,1);});
 test("upload is multipart, no browser timeout, one logical request and no duplicate submit",async()=>{const h=harness();h.ui.state.config={available:true};h.ui.state.files=[{name:"a.png",size:2}];const pending=h.ui.start();await h.ui.start();assert.equal(h.xhrs.length,1);const xhr=h.xhrs[0];assert.equal(xhr.url,"/api/material/jobs");assert.equal(xhr.timeout,0);assert.equal(xhr.headers["X-HSD-Upload-ID"],"12345678-1234-4123-8123-123456789abc");assert.equal(xhr.headers["X-HSD-Token"],"synthetic-token");assert.equal(xhr.data.parts[0][0],"files");xhr.reply(200,{id:"a".repeat(32)});await flush();assert.equal(h.requests.length,1);await h.reply(0,job());await pending;assert.equal(h.ui.state.job.id,"a".repeat(32));assert.equal(h.ui.state.uncertain,false);});
+test("a failed first read keeps the created batch recoverable without a reload",async()=>{
+  const h=harness();h.ui.state.config={available:true};h.ui.state.files=[{name:"a.png",size:2}];
+  const pending=h.ui.start();await flush();
+  h.xhrs[0].reply(200,{id:"b".repeat(32)});await flush();
+  assert.equal(h.requests.length,1);
+  await h.reply(0,{error:"synthetic failure"},500);
+  await pending;
+  assert.match(h.node("material-notice").textContent,/没取到进度/);
+  assert.equal(h.ui.state.pendingJobId,"b".repeat(32));
+  assert.equal(h.ui.state.uploadId,null);
+  assert.equal(h.storage.get("hsd-material-job"),"b".repeat(32));
+  const recheck=h.ui.poll();await flush();
+  assert.equal(h.requests.length,2);assert.ok(h.requests[1].url.endsWith("/api/material/jobs/"+ "b".repeat(32)));
+  await h.reply(1,job({id:"b".repeat(32)}));
+  await recheck;
+  assert.equal(h.ui.state.job.id,"b".repeat(32));assert.equal(h.ui.state.pendingJobId,null);
+});
 test("missing upload keeps the same ID for a safe retry instead of creating a second batch",async()=>{const h=harness();h.ui.state.config={available:true};h.ui.state.files=[{name:"a.png",size:2}];h.ui.state.uploadId="old-request";h.ui.state.uncertain=true;const check=h.ui.recoverUpload();await h.reply(0,{state:"missing"});await check;assert.equal(h.ui.state.uploadId,"old-request");assert.equal(h.ui.state.retryUpload,true);const retry=h.ui.start();assert.equal(h.xhrs[0].headers["X-HSD-Upload-ID"],"old-request");h.xhrs[0].reply(400,{error:"synthetic failure"});await retry;assert.equal(h.ui.state.uncertain,false);});
 test("a cancelled upload only becomes stopped after server confirmation",async()=>{const h=harness();h.ui.state.uploadId="request";h.ui.state.uncertain=true;const pending=h.ui.stop();assert.equal(h.ui.state.stopRequested,true);assert.equal(h.ui.state.uncertain,true);await h.reply(0,{state:"pending",cancellation_requested:true});assert.equal(h.requests.length,2);await h.reply(1,{state:"cancelled"});await pending;assert.equal(h.ui.state.uncertain,false);assert.match(h.node("material-notice").textContent,/已停止/);});
 test("terminal jobs stop polling and skipped items leave the default queue",()=>{const h=harness();h.ui.state.workspace="material";h.ui.setJob(job({status:"processing"}));assert.equal(h.timers.size,2);h.ui.setJob(job({items:[{...job().items[0],status:"skipped"}]}));assert.equal(h.timers.size,0);h.ui.state.filter="available";h.ui.render();const node=h.ui.state.items.get("i1").node;assert.ok(node.classList.contains("hidden"));assert.match(h.node("material-summary").textContent,/1 个已舍弃/);});

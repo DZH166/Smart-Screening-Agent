@@ -110,9 +110,11 @@ def test_refine_busy_duplicate_revision_and_cancel_preserve_old_result(refinemen
         with pytest.raises(Conflict):
             refine(manager, state)
         busy = manager.snapshot(state["id"], "employee-a")
-        assert busy["items"][0]["downloadable"] is False and busy["download_url"] is None
-        with pytest.raises(Conflict):
-            manager.download(state["id"], "employee-a")
+        # The pre-refinement image is still on disk and untouched, so the design
+        # stays downloadable while its new version is being produced.
+        assert busy["items"][0]["downloadable"] is True and busy["download_url"]
+        archive, _ = manager.download(state["id"], "employee-a")
+        assert archive.is_file()
         manager.cancel(state["id"], "employee-a", busy["revision"])
         assert not manager.futures[state["id"]].done()
     finally:
@@ -310,3 +312,32 @@ def test_a_rectangle_redo_never_claims_to_be_a_refinement(refinement):
         "source_id": source["id"], "box": {"x": 0, "y": 0, "width": 12, "height": 12}})
     assert manager.jobs[state["id"]]["progress"]["item_id"] == ""
     complete(manager, state["id"])
+
+
+def test_refining_one_design_keeps_the_other_results_downloadable(tmp_path):
+    from test_material_service import upload_two
+    provider = Provider()
+    manager = MaterialManager(tmp_path, Settings(), cloud=True, provider_factory=lambda config: provider)
+    try:
+        state = upload_two(manager)
+        assert len(state["items"]) == 2
+        provider.entered.clear()
+        provider.block = True
+        manager.refine(state["id"], "employee-a", {"expected_revision": state["revision"],
+                                                   "item_id": state["items"][0]["id"]})
+        assert provider.entered.wait(10)
+        # The batch is busy, but the second, finished design is still usable.
+        live = manager.snapshot(state["id"], "employee-a")
+        assert live["status"] in {"queued", "processing"}
+        rows = {row["id"]: row for row in live["items"]}
+        other = state["items"][1]["id"]
+        assert rows[other]["downloadable"] and rows[other]["download_url"]
+        assert live["stats"]["downloadable"] >= 1
+        path, digest = manager.asset(state["id"], "employee-a", "item", other, download=True)
+        assert path.is_file() and len(digest) == 64
+        archive, _ = manager.download(state["id"], "employee-a")
+        assert archive.is_file()
+    finally:
+        provider.block = False
+        provider.release.set()
+        manager.close()

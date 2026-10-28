@@ -217,6 +217,10 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
                 return jsonify(error="请求必须使用 JSON 对象。"), 400
         if lan and request.endpoint == "lan_login":
             return None
+        if request.endpoint == "healthz" and request.method == "GET":
+            # Liveness for the service manager and monitoring. Deliberately
+            # says nothing: no version, instance, options, or usage data.
+            return None
         admin_area = request.path in {"/admin", "/admin/material", "/admin/access-codes"} or request.path.startswith("/api/admin/")
         material_admin_static = (request.endpoint == "static" and
             Path(str((request.view_args or {}).get("filename", "")).replace("\\", "/")).name.split(":", 1)[0].rstrip(" .").casefold()
@@ -674,6 +678,13 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
             raise KeyError("未启用局域网测试。")
         session.clear()
         return jsonify(ok=True)
+
+    @app.get("/healthz")
+    def healthz():
+        """Unauthenticated liveness probe; returns no deployment details."""
+        response = Response("ok", mimetype="text/plain")
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     @app.get("/api/health")
     def health():

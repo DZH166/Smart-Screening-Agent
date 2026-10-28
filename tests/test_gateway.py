@@ -152,3 +152,35 @@ def test_health_reports_configuration_without_secrets(tmp_path):
     payload = client.get("/health").get_json()
     assert payload["configured"] is True and payload["ok"] is True
     assert KEY not in json.dumps(payload)
+
+
+def test_a_rebound_name_cannot_read_the_status_page_or_config(tmp_path):
+    """A DNS-rebound page reaches the LAN listener from a local address.
+
+    The address check alone would admit it, and the old same-origin test
+    compared against the request's own Host, so the attacker's name vouched for
+    itself. The fixed host list must refuse both the page and the write.
+    """
+    client, _, settings = make_client(tmp_path)
+    rebound = {"Host": "attacker.example:8800", "Origin": "http://attacker.example:8800"}
+    page = client.get("/", headers={"Host": "attacker.example:8800"})
+    assert page.status_code == 403
+    assert token(tmp_path) not in page.get_data(as_text=True)
+    saved = client.post("/configure", json={"api_key": "sk-synthetic-attacker", "enabled": True},
+                        headers=rebound)
+    assert saved.status_code == 403
+    assert settings.runtime()["api_key"] == KEY
+
+
+def test_a_foreign_origin_cannot_rewrite_the_key(tmp_path):
+    client, _, settings = make_client(tmp_path)
+    response = client.post("/configure", json={"api_key": "sk-synthetic-attacker", "enabled": True},
+                           headers={"Origin": "http://attacker.example"})
+    assert response.status_code == 403
+    assert settings.runtime()["api_key"] == KEY
+
+
+def test_the_local_host_name_still_works(tmp_path):
+    client, opener, _ = make_client(tmp_path)
+    assert client.get("/", headers={"Host": f"{BIND}:8800"}).status_code == 200
+    assert client.get("/health", headers={"Host": "localhost:8800"}).status_code == 200

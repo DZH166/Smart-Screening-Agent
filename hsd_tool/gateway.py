@@ -15,10 +15,12 @@ import ipaddress
 import json
 import logging
 import secrets
+import socket
 import threading
 import urllib.error
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from flask import Flask, Response, jsonify, request
 
@@ -84,13 +86,38 @@ def load_token(data_dir) -> str:
     return token
 
 
-def _same_origin() -> bool:
-    """Browsers send Origin for cross-site posts; refuse anything not ours."""
+def _host_name(value: str) -> str:
+    """Lower-case host without the port, keeping IPv6 brackets."""
+    value = (value or "").strip().lower()
+    if value.startswith("["):
+        return value.split("]", 1)[0] + "]"
+    return value.split(":", 1)[0]
+
+
+def _local_hosts(bind: str) -> set[str]:
+    names = {"127.0.0.1", "localhost", "[::1]", bind.lower()}
+    try:
+        names.add(socket.gethostname().split(".", 1)[0].lower())
+    except OSError:
+        pass
+    return names
+
+
+def _same_origin(hosts) -> bool:
+    """Browsers send Origin for cross-site posts; refuse anything not ours.
+
+    The expected origin comes from the fixed local host list, never from the
+    request's own Host header: a rebound name would otherwise vouch for itself.
+    A missing Origin is a non-browser client, which the host guard still covers.
+    """
     origin = request.headers.get("Origin")
     if not origin:
         return True
-    return origin.rstrip("/") in {
-        f"http://{request.host}", f"http://{request.host}/"}
+    try:
+        parsed = urlsplit(origin)
+    except ValueError:
+        return False
+    return parsed.scheme == "http" and _host_name(parsed.netloc) in hosts
 
 
 def create_app(data_dir, *, bind: str, port: int = 0, settings=None, opener=None, upstream=None):
@@ -104,6 +131,17 @@ def create_app(data_dir, *, bind: str, port: int = 0, settings=None, opener=None
     stats = {"requests": 0, "ok": 0, "errors": 0, "last_error": ""}
     lock = threading.Lock()
     opener = opener or urllib.request.build_opener(_NoRedirect())
+
+    hosts = _local_hosts(bind)
+
+    @app.before_request
+    def require_local_host():
+        # DNS rebinding reaches the loopback/LAN listener with an attacker Host
+        # header but a local source address, so the address alone cannot prove
+        # "this is the host". Refuse unknown names before any route runs.
+        if _host_name(request.host) not in hosts:
+            return Response("请通过网关的本机地址访问。", status=403, mimetype="text/plain")
+        return None
 
     def is_host() -> bool:
         return request.remote_addr in LOCAL_ADDRESSES | {bind}
@@ -177,7 +215,7 @@ def create_app(data_dir, *, bind: str, port: int = 0, settings=None, opener=None
         """Host-only: the one place the real key is entered, saved with DPAPI."""
         if not is_host():
             return jsonify({"error": {"message": "只允许主机操作"}}), 403
-        if not _same_origin():
+        if not _same_origin(hosts):
             return jsonify({"error": {"message": "请求来源不正确"}}), 403
         payload = request.get_json(silent=True)
         if not isinstance(payload, dict):

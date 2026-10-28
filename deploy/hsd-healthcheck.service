@@ -1,0 +1,16 @@
+[Unit]
+Description=HSD Agent read-only health probe
+After=hsd-agent.service
+# A missing probe binary must not take the site down; it only skips.
+ConditionPathExists=/usr/local/lib/hsd-agent/hsd-healthcheck.sh
+
+[Service]
+Type=oneshot
+User=hsd-agent
+Group=hsd-agent
+Environment=HSD_PUBLIC_HOST=39.106.45.116:8443
+ExecStart=/usr/local/lib/hsd-agent/hsd-healthcheck.sh
+StandardOutput=journal
+StandardError=journal
+# Alert only: this probe never restarts or writes the app's data.
+Nice=10

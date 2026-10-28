@@ -433,3 +433,21 @@ def test_host_job_creation_also_preserves_shared_directory_boundary(app, lan, mo
     denied = remote_request(app.test_client(), "/api/jobs", method="POST", address=HOST,
                             payload=payload, token=TOKEN)
     assert denied.status_code == 400 and not calls
+
+
+def test_liveness_probe_needs_no_login_and_reveals_nothing(app):
+    client = app.test_client()
+    response = remote_request(client, "/healthz")
+    assert response.status_code == 200
+    assert response.get_data(as_text=True).strip() == "ok"
+    assert response.headers["Cache-Control"] == "no-store"
+    assert TOKEN not in response.get_data(as_text=True)
+    assert ACCESS_CODE not in response.get_data(as_text=True)
+    # The detailed health route keeps its login requirement.
+    assert remote_request(app.test_client(), "/api/health").status_code == 401
+
+
+def test_liveness_probe_still_rejects_a_foreign_host(app):
+    client = app.test_client()
+    response = client.get("/healthz", headers={"Host": "attacker.example:8805"})
+    assert response.status_code == 403

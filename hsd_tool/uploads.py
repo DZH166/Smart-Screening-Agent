@@ -194,7 +194,18 @@ class EmployeeUploads:
     @staticmethod
     def _validate_archives(directory):
         try:
+            from .archive_io import check_directory_size
+            from .matching import _safe_zip_name, _zip_name, MAX_ENTRIES, MAX_FILES
             from .workbook import _validate_archive
+            # Refuse an over-full directory before zipfile materialises one
+            # ZipInfo per entry in the single worker. A structurally broken
+            # archive keeps its existing 422 path.
+            for name, cap, message in (("workbook.xlsx", 20_000, "表格内部文件过多，无法安全读取。"),
+                                       ("source.zip", MAX_ENTRIES, "压缩包文件过多，请分批上传。")):
+                try:
+                    check_directory_size(directory / name, max_entries=cap, too_many=message)
+                except zipfile.BadZipFile as exc:
+                    raise ValueError(str(exc)) from exc
             with zipfile.ZipFile(directory / "workbook.xlsx") as workbook:
                 _validate_archive(workbook)
                 if not {"[Content_Types].xml", "xl/workbook.xml"}.issubset(workbook.namelist()):

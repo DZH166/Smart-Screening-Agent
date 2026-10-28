@@ -15,6 +15,63 @@ from .cancellation import check
 
 CHUNK_BYTES = 1024 * 1024
 
+_EOCD = b"PK\x05\x06"
+_ZIP64_EOCD = b"PK\x06\x06"
+_ZIP64_LOCATOR = b"PK\x06\x07"
+_EOCD_BYTES = 22
+_TAIL_BYTES = 66_000
+
+
+def check_directory_size(path, *, max_entries, too_many="压缩包内文件过多，请分批上传。",
+                         invalid="压缩包结构无效，无法读取。"):
+    """Reject an over-full ZIP before zipfile builds its entry list.
+
+    ``zipfile.ZipFile(path)`` reads the whole central directory and keeps one
+    ZipInfo per entry. With a single worker capped at 2 GiB, a small upload
+    whose directory declares millions of entries could exhaust memory before
+    the caller's ``len(infolist())`` check runs. Reading only the end records
+    is constant work and catches that case first.
+    """
+    with open(path, "rb") as stream:
+        stream.seek(0, 2)
+        size = stream.tell()
+        if size < _EOCD_BYTES:
+            raise zipfile.BadZipFile(invalid)
+        tail_start = max(0, size - _TAIL_BYTES)
+        stream.seek(tail_start)
+        tail = stream.read(size - tail_start)
+        entries, directory_bytes = _directory_facts(stream, tail, tail_start, invalid)
+    if entries > max_entries:
+        raise ValueError(too_many)
+    if directory_bytes > max_entries * 2048:
+        raise zipfile.BadZipFile(invalid)
+    return entries, directory_bytes
+
+
+def _directory_facts(stream, tail, tail_start, invalid):
+    index = tail.rfind(_EOCD)
+    if index < 0 or index + _EOCD_BYTES > len(tail):
+        raise zipfile.BadZipFile(invalid)
+    (disk, directory_disk, entries_disk, entries,
+     directory_bytes, directory_offset, comment) = struct.unpack("<HHHHIIH", tail[index + 4:index + 22])
+    if index + _EOCD_BYTES + comment > len(tail):
+        raise zipfile.BadZipFile(invalid)
+    if disk or directory_disk or entries != entries_disk:
+        raise ValueError("暂不支持分卷压缩包，请重新打包后上传。")
+    if 0xFFFF not in (entries, entries_disk) and directory_bytes != 0xFFFFFFFF:
+        return entries, directory_bytes
+    locator = tail.rfind(_ZIP64_LOCATOR, 0, index)
+    if locator < 0 or locator + 20 > len(tail):
+        raise zipfile.BadZipFile(invalid)
+    (offset,) = struct.unpack("<Q", tail[locator + 8:locator + 16])
+    stream.seek(offset)
+    record = stream.read(56)
+    if len(record) != 56 or record[:4] != _ZIP64_EOCD:
+        raise zipfile.BadZipFile(invalid)
+    entries, directory_bytes = struct.unpack("<QQ", record[32:48])
+    return entries, directory_bytes
+
+
 
 class _MeasuredInflater:
     def __init__(self, inflater):

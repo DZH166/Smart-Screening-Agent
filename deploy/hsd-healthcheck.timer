@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the HSD Agent health probe every five minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+AccuracySec=30s
+Unit=hsd-healthcheck.service
+
+[Install]
+WantedBy=timers.target

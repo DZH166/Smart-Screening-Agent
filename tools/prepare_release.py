@@ -14,11 +14,16 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = sys.argv[1] if len(sys.argv) > 1 else "1.1"
+sys.path.insert(0, str(ROOT))
+from hsd_tool import __version__ as CODE_VERSION  # noqa: E402
+
+VERSION = sys.argv[1] if len(sys.argv) > 1 else CODE_VERSION
+if VERSION != CODE_VERSION:
+    raise SystemExit(f"版本号 {VERSION} 与源码版本 {CODE_VERSION} 不一致，请改用 build.ps1 的版本。")
 PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
-bundle = ROOT / "dist" / "HSD图号助手"
+bundle = ROOT / "dist" / f"v{VERSION}" / "HSD图号助手"
 if not (bundle / "HSD图号助手.exe").is_file():
-    raise SystemExit("请先运行 build.ps1 生成 dist/HSD图号助手/。")
+    raise SystemExit(f"请先运行 build.ps1 生成 dist/v{VERSION}/HSD图号助手/。")
 
 shutil.copy2(ROOT / "使用说明.txt", bundle / "使用说明.txt")
 source = bundle / "源代码"
@@ -31,7 +36,20 @@ if (package / "static").exists():
 shutil.copytree(ROOT / "hsd_tool" / "static", package / "static")
 if (source / "tests").exists():
     shutil.rmtree(source / "tests")
-shutil.copytree(ROOT / "tests", source / "tests")
+tests_source, tests_target = ROOT / "tests", source / "tests"
+tests_target.mkdir(parents=True, exist_ok=True)
+# Whitelist test sources only: a plain copytree also ships git-ignored local
+# credentials such as tests/.admin-password, which must never leave this host.
+for item in sorted(tests_source.iterdir()):
+    if not item.is_file() or item.name.startswith(".") or "password" in item.name.casefold():
+        continue
+    if item.suffix.lower() not in {".py", ".js", ".json", ".png", ".webp", ".jpg"}:
+        continue
+    if item.name == "conftest.py" or item.name.startswith("test_"):
+        shutil.copy2(item, tests_target / item.name)
+if any("password" in path.name.casefold() or path.name.startswith(".")
+       for path in tests_target.iterdir()):
+    raise SystemExit("测试目录包含本地凭据文件，已停止打包。")
 tools_destination = source / "tools"
 tools_destination.mkdir(parents=True, exist_ok=True)
 for name in ("collect_licenses.py", "verify_packaged.py", "verify_packaged_demo.py",
@@ -59,24 +77,13 @@ notes = f"""HSD 图号助手 {VERSION} · 交付说明
 操作方法见 使用说明.txt。
 
 本机验证范围
-- 自动测试：69 项通过、1 项跳过（跳过项需要业务样本）。
-- 合成场景：11 项正例全部自动通过；3 项易混淆反例全部保留人工审核。
-- 端到端（合成样本）：导入 -> 自动匹配 -> 结果摘要 -> 导出 全流程通过。
+- 本版的自动化测试与验收回执见仓库 CHANGELOG.md 与 docs/ 下对应版本的验证记录；
+  本说明不再复制历史批次的统计数字，避免把旧结论写进新版本。
 {chr(10).join(verified_lines)}
 
-真实业务样本实测（60 张，同一份输入、同一台机器）
-- 自动通过：v1.0.0 为 33 张，本版为 44 张。
-- 人工审核：v1.0.0 为 27 张，本版为 16 张。
-- 自动通过的错误数：两版均为 0（用仓库已有的样本核验映射逐行比对）。
-- 60 行的第一候选全部命中该核验映射；没有一行出现“原先自动通过、现在反而要人工”。
-- 该核验映射仅用于验收核对，不参与产品匹配。
-
 仍然存在的限制
-- 本机只有这一批已确认样本，没有独立的第二批做交叉验证；
-  以上数字是这一批的实测结果，不代表对任意新批次的通用准确率。
-- 剩余 16 张仍需人工，原因是真实的：颜色分布不一致、局部内容不同、
-  重复度过高、独特特征不足。不强行放行。
-- 匹配结果仍是保守判定：无法可靠确认的行继续进入人工审核。
+- 每一批实际通过/需人工的数量取决于该批图片本身，不能由单元测试推断。
+- 匹配结果仍是保守判定：无法可靠确认的行继续进入人工审核，不强行放行。
 
 编号与文件约定
 - 已有编号原样保留（含前导零）；只为成功匹配的缺号行生成 HSD + 四位流水号。

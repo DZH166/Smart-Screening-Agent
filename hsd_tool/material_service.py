@@ -41,6 +41,15 @@ _MAX_FILES = 100
 _RETENTION = 3 * 86400
 _THUMBNAIL_EDGE = 640
 _DOWNLOADABLE = {"generated", "needs_review", "ready", "confirmed"}
+
+
+def _setup_error(message):
+    """A server-worded configuration problem, safe to show verbatim."""
+    error = ValueError(message)
+    error.code = "setup_required"
+    error.settled = True
+    return error
+
 _STAGES = {
     "queued": ("排队", "等待开始处理"),
     "preparing": ("准备图片", "正在检查图片"),
@@ -424,11 +433,11 @@ class MaterialManager:
     def _runtime(self, *, require_locator=True):
         config = self.settings.runtime()
         if not config.get("ark_key") or not config.get("model_id"):
-            raise ValueError("素材服务尚未配置，请联系管理员。")
+            raise _setup_error("素材服务尚未配置，请联系管理员。")
         if not config.get("enabled"):
-            raise ValueError("素材处理尚未开启，请联系管理员开启后再试。")
+            raise _setup_error("素材处理尚未开启，请联系管理员开启后再试。")
         if require_locator and not self._deepseek_available():
-            raise ValueError("素材范围识别需要可用的 DeepSeek 服务，请联系管理员配置并开启。")
+            raise _setup_error("素材范围识别需要可用的 DeepSeek 服务，请联系管理员配置并开启。")
         return config
 
     def _deepseek_available(self):
@@ -583,13 +592,19 @@ class MaterialManager:
             self._progress(job, "preparing", item_id=redo["item_id"] if refining and redo else "")
             try:
                 self._save(job)
-            except Exception as exc:
-                if not refining:
-                    raise
-                # No provider has been called. A failed local transition must
-                # not leave the previous downloadable image stuck in "busy".
-                job.update(status="error", error="精修未能开始，原素材已保留，请稍后重试。", run_finished_at=self.clock())
-                self._refine_failure(job, redo, job["error"], self._refine_submission_unknown(job, redo["item_id"]))
+            except Exception:
+                # No provider has been called yet, so nothing was billed; the
+                # batch must still reach a terminal state instead of sitting in
+                # "processing" until the process restarts.
+                message = ("精修未能开始，原素材已保留，请稍后重试。" if refining
+                           else "本批未能开始，任务状态写入失败，请稍后重试。")
+                job.update(status="error", error=message, run_finished_at=self.clock())
+                for source in job["sources"]:
+                    if source["status"] in {"queued", "processing"}:
+                        source["status"] = "error"
+                        source["error"] = message
+                if refining:
+                    self._refine_failure(job, redo, message, self._refine_submission_unknown(job, redo["item_id"]))
                 self._progress(job, "error")
                 job["revision"] += 1
                 try:
@@ -734,10 +749,22 @@ class MaterialManager:
                 job["revision"] += 1; self._save(job, touch=True)
         except Exception as exc:
             with self.lock:
+                message = self._public_error(exc)
                 if refining:
-                    self._refine_failure(job, redo, self._public_error(exc),
+                    self._refine_failure(job, redo, message,
                         self._refine_submission_unknown(job, redo["item_id"]))
-                job["status"] = "error"; job["error"] = self._public_error(exc)
+                # A failed batch must not leave originals stuck in "queued":
+                # that hides their reason and blocks the one-click retry, which
+                # only accepts an errored source.
+                for source in job["sources"]:
+                    if source["status"] in {"queued", "processing"}:
+                        if source["status"] == "processing" and self._source_submission_unknown(job, source["id"]):
+                            source["submission_unknown"] = True
+                            source["error"] = "上次已发送请求的结果和扣费尚未确定；重新提交前请先核对。"
+                        else:
+                            source["error"] = message
+                        source["status"] = "error"
+                job["status"] = "error"; job["error"] = message
                 job["run_finished_at"] = self.clock()
                 self._progress(job, "error")
                 job["revision"] += 1; self._save(job, touch=True)
@@ -752,6 +779,10 @@ class MaterialManager:
     def _public_error(exc):
         if getattr(exc, "settled", True) is False:
             return "接口返回中断，是否扣费尚未确定；未自动重发。请联系管理员核对后再重做。"
+        if getattr(exc, "code", "") == "setup_required":
+            # Server-worded configuration messages stay actionable instead of
+            # being flattened into "这张图片未能处理".
+            return str(exc)
         return {"authentication": "素材服务的 Key 无效，请联系管理员。",
                 "deepseek_unavailable": "DeepSeek 暂不可用，请联系管理员检查 Key、开关或稍后重试。",
                 "invalid_decision": "未能可靠确定设计范围，请在原图框选后重试。",
@@ -911,7 +942,11 @@ class MaterialManager:
                 row = {key: deepcopy(value) for key, value in item.items() if key not in {"sha256", "thumbnail_sha256", "evidence", "previous_item_id"}}
                 row["image_url"] = f"/api/material/jobs/{identifier}/item/{row['id']}"
                 row["thumbnail_url"] = row["image_url"] + "?variant=thumb&v=" + item["thumbnail_sha256"][:16]
-                row["downloadable"] = item["status"] in _DOWNLOADABLE and job["status"] not in _BUSY
+                # Availability is per item, not per batch: refining one design
+                # must not take the other finished results offline, and a batch
+                # that is still generating should let staff download what is
+                # already done.
+                row["downloadable"] = item["status"] in _DOWNLOADABLE
                 row["download_url"] = (f"/api/material/jobs/{identifier}/download/{row['id']}" if row["downloadable"] else None)
                 previous = next((value for value in job["items"] if value["id"] == item.get("previous_item_id")
                                  and value["source_id"] == item["source_id"] and value["status"] == "superseded"), None)
@@ -1119,11 +1154,20 @@ class MaterialManager:
                 if source["status"] != "error":
                     raise ValueError("请先框出要补提取的范围。")
             self._runtime()
-            job.pop("batch_undo", None)
-            job.update(status="queued", cancel_requested=False, error="", settled_at=None, expires_at=None,
-                       run_id=secrets.token_hex(16), run_started_at=self.clock(), run_finished_at=None)
-            self._progress(job, "queued", current=0, total=1, source_id=source["id"], item_id="")
-            job["revision"] += 1; self._save(job)
+            # Prepare the queued state on a copy: if the write fails, the batch
+            # must stay exactly as the last saved state instead of becoming a
+            # "queued" job that no worker will ever pick up.
+            candidate = deepcopy(job)
+            candidate.pop("batch_undo", None)
+            candidate.update(status="queued", cancel_requested=False, error="", settled_at=None, expires_at=None,
+                             run_id=secrets.token_hex(16), run_started_at=self.clock(), run_finished_at=None)
+            self._progress(candidate, "queued", current=0, total=1, source_id=source["id"], item_id="")
+            candidate["revision"] += 1
+            try:
+                self._save(candidate)
+            except Exception:
+                raise Conflict("任务状态写入失败，请稍后重试。") from None
+            job.clear(); job.update(candidate)
             self.futures[identifier] = self.executor.submit(self._run, identifier, deepcopy(payload))
             return self.snapshot(identifier, owner)
 
@@ -1153,7 +1197,7 @@ class MaterialManager:
             item = next((row for row in rows if row["id"] == item_id and row.get("status") != "superseded"), None)
             if item is None:
                 raise KeyError("找不到此图片。")
-            if download and (job["status"] in _BUSY or item["status"] not in _DOWNLOADABLE):
+            if download and item["status"] not in _DOWNLOADABLE:
                 raise Conflict("这张素材正在处理或已舍弃，暂不能下载。")
             if kind == "source":
                 original = self._source_path(job, item)
@@ -1182,8 +1226,6 @@ class MaterialManager:
     def download(self, identifier, owner):
         with self.lease(identifier, owner), self.lock:
             job = self._get(identifier, owner)
-            if job["status"] in _BUSY:
-                raise Conflict("素材仍在处理中，请稍候再下载。")
             items = [row for row in job["items"] if row["status"] in _DOWNLOADABLE]
             if not items:
                 raise ValueError("还没有可下载的素材，请等待生成完成或恢复已舍弃的素材。")
