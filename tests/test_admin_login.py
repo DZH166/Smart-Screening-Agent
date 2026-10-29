@@ -56,7 +56,8 @@ def test_correct_credentials_open_the_console(app, stub_credentials):
     assert post_login(client).status_code == 200
     response = client.get("/admin")
     page = response.get_data(as_text=True)
-    assert "API Key" in page and "退出登录" in page and "Key 账本" in page
+    assert "DeepSeek Key" in page and "退出登录" in page and "Key 账本" in page
+    assert "/admin/deepseek" in page and "/admin/material" in page and "/admin/ribbon" in page
     assert client.get("/api/admin/overview").status_code == 200
     # The page must say which build it came from and load versioned assets, so an
     # old tab can be spotted instead of silently looking broken.

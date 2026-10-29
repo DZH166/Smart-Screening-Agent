@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="../../hsd_tool/static/admin-console.css">
 </head>
 <body>
-<div style="position:fixed;left:50%;top:12px;transform:translateX(-50%);z-index:99;padding:8px 16px;border-radius:999px;background:#17233a;color:#fff;font:13px/1.4 system-ui,sans-serif;letter-spacing:.02em">静态预览 · 仅用于确认排版，按钮不会真的保存</div>
+<div style="position:fixed;left:50%;top:12px;transform:translateX(-50%);z-index:99;padding:8px 16px;border-radius:999px;background:#17233a;color:#fff;font:13px/1.4 system-ui,sans-serif;letter-spacing:.02em">静态预览 · 按钮不会真的保存</div>
 
   <div class="admin-shell">
     <header class="admin-header">
@@ -56,7 +56,7 @@
                 <div class="strip-main">
                   <p class="eyebrow">SERVICE · SHARED</p>
                   <h3 id="settings-heading">DeepSeek · 图号匹配与素材裁剪</h3>
-                  <p id="settings-state" class="state-line">已启用：员工导入后自动运行；Key 池中 2 把可用。</p>
+                  <p id="settings-state" class="state-line">正在读取设置…</p>
                 </div>
                 <form id="enable-form" class="enable-form">
                   <label class="enable-control"><input id="ai-enabled" type="checkbox" disabled><span>启用</span></label>
@@ -73,7 +73,7 @@
                 </div>
                 <p class="card-desc">导入表格与 AI 文件，自动匹配、核验并导出编号结果。</p>
                 <ul class="chips">
-                  <li><span>Key</span>DeepSeek 池 · <b data-key-enabled>2</b> 把启用</li>
+                  <li><span>Key</span>DeepSeek 池 · <b data-key-enabled>—</b> 把启用</li>
                   <li><span>模型</span>deepseek-flash</li>
                 </ul>
               </section>
@@ -122,59 +122,31 @@
                 <span>员工共用，无需各自配置</span>
               </div>
 
-              <section class="panel keys-panel">
-                <div class="card-head">
-                  <div class="card-title">
-                    <p class="eyebrow">DEEPSEEK</p>
-                    <h2 id="keys-heading">API Key <span id="key-count" class="count">共 3 个</span></h2>
-                    <p class="card-desc">「待验证」表示还没有成功调用记录，不是错误。</p>
-                  </div>
+              <section class="panel entry-card">
+                <div class="entry-main">
+                  <p class="eyebrow">DEEPSEEK</p>
+                  <h3>DeepSeek Key</h3>
+                  <p class="card-desc">图号匹配、素材识别与丝带文字精修共用这组 Key，含启用开关与敏感内容查看。</p>
                 </div>
-                <div id="key-list" class="key-list" aria-live="polite">
-<article class="key-card"><div class="key-heading"><div class="key-name"><span>密钥 2</span><span class="badge " data-key-status>待验证</span></div><div class="key-actions"><button type="button" class="button quiet" data-action="rename">改标签</button><button type="button" class="button secondary" data-action="toggle">停用</button><button type="button" class="button quiet" data-action="remove">删除</button></div></div></article>
-<article class="key-card"><div class="key-heading"><div class="key-name"><span>密钥 3</span><span class="badge ok">可用</span></div><div class="key-actions"><button type="button" class="button quiet" data-action="rename">改标签</button><button type="button" class="button secondary" data-action="toggle">停用</button><button type="button" class="button quiet" data-action="remove">删除</button></div></div><p class="key-note">冷却剩余约 12 秒</p></article>
-<article class="key-card"><div class="key-heading"><div class="key-name"><span>环境变量 Key</span><span class="badge ok">可用</span><span class="badge">环境变量</span></div><div class="key-actions"><button type="button" class="button secondary" data-action="toggle">停用</button></div></div><p class="muted">来自服务器环境变量，不能在页面修改或删除。</p></article>
-</div>
-                <form id="key-add-form" class="add-form" autocomplete="off">
-                  <label for="key-batch">批量添加</label>
-                  <div class="add-input">
-                    <textarea id="key-batch" rows="3" autocomplete="off" spellcheck="false" autocapitalize="off" aria-describedby="batch-help" placeholder="每行粘贴一个 API Key" disabled></textarea>
-                  </div>
-                  <div class="add-footer">
-                    <p id="batch-help" class="muted">每行一个，最多 100 个；提交即清空，默认遮罩。</p>
-                    <div class="add-actions">
-                      <button id="key-reveal" class="button quiet" type="button" aria-pressed="false">显示</button>
-                      <button id="key-add" class="button primary" type="submit" disabled>添加 Key</button>
-                    </div>
-                  </div>
-                </form>
+                <a class="button secondary" href="/admin/deepseek">管理 →</a>
               </section>
 
               <section class="panel entry-card">
                 <div class="entry-main">
                   <p class="eyebrow">SEEDREAM</p>
                   <h3>火山方舟 Key</h3>
-                  <p class="card-desc">素材提取与丝带设计共用，模型 ID 在同一页维护。</p>
+                  <p class="card-desc">素材提取与丝带设计使用；丝带可在自己的页面单独保存一份配置。</p>
                 </div>
                 <a class="button secondary" href="/admin/material">管理 →</a>
-                <p class="entry-foot">⚠ 这是另一组 Key，与上面的 DeepSeek 池分开保存。</p>
               </section>
 
-              <section class="panel ledger-panel" id="shared-ledger">
-                <details id="ledger-details">
-                  <summary>
-                    <span class="ledger-title" id="ledger-heading">查看或复制 Key</span>
-                    <span class="ledger-hint">敏感内容 · 默认遮罩</span>
-                  </summary>
-                  <div class="ledger-body">
-                    <div class="ledger-tools">
-                      <p class="ledger-warning">仅在展开时读取。默认遮罩，显示后请避免截图或录屏。</p>
-                      <button id="ledger-refresh" class="button quiet" type="button">重新读取</button>
-                    </div>
-                    <p id="ledger-state" class="muted" role="status" aria-live="polite"></p>
-                    <div id="ledger-list" class="ledger-list"></div>
-                  </div>
-                </details>
+              <section class="panel entry-card">
+                <div class="entry-main">
+                  <p class="eyebrow">RIBBON</p>
+                  <h3>丝带模型服务</h3>
+                  <p class="card-desc">沿用素材提取的 DeepSeek 与 Seedream，或保存丝带专用配置。</p>
+                </div>
+                <a class="button secondary" href="/admin/ribbon">管理 →</a>
               </section>
             </div>
           </div>

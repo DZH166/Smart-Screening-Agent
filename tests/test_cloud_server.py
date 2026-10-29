@@ -214,7 +214,10 @@ def test_cloud_admin_login_does_not_log_in_employee_or_grant_host_operations(emp
     assert page.status_code == 200 and "/admin/ribbon" in page.get_data(as_text=True)
     ribbon_page = cloud_request(client, "/admin/ribbon")
     assert ribbon_page.status_code == 200 and "丝带设计" in ribbon_page.get_data(as_text=True)
-    assert "ribbon-settings-panel" in ribbon_page.get_data(as_text=True)
+    assert "ribbon-form" in ribbon_page.get_data(as_text=True)
+    deepseek_page = cloud_request(client, "/admin/deepseek")
+    assert deepseek_page.status_code == 200 and "DeepSeek" in deepseek_page.get_data(as_text=True)
+    assert 'id="key-list"' in deepseek_page.get_data(as_text=True)
     assert cloud_request(client, "/static/admin-workspace.js?v=1.20.0").status_code == 200
     assert cloud_request(client, "/api/admin/keys").status_code == 200
     assert cloud_request(client, "/api/admin/ledger").status_code == 200

@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="/static/admin-console.css">
   <script>window.HSD_TOKEN = __HSD_TOKEN__; window.HSD_BUILD = "__HSD_BUILD__";</script>
   <script src="/static/build-check.js" defer></script>
-  <script src="/static/admin.js" defer></script>
+  <script src="/static/admin-home.js" defer></script>
   <script src="/static/admin-workspace.js" defer></script>
   <script src="/static/ribbon-settings.js" defer></script>
 </head>
@@ -125,55 +125,31 @@
                 <span>员工共用，无需各自配置</span>
               </div>
 
-              <section class="panel keys-panel">
-                <div class="card-head">
-                  <div class="card-title">
-                    <p class="eyebrow">DEEPSEEK</p>
-                    <h2 id="keys-heading">API Key <span id="key-count" class="count"></span></h2>
-                    <p class="card-desc">「待验证」表示还没有成功调用记录，不是错误。</p>
-                  </div>
+              <section class="panel entry-card">
+                <div class="entry-main">
+                  <p class="eyebrow">DEEPSEEK</p>
+                  <h3>DeepSeek Key</h3>
+                  <p class="card-desc">图号匹配、素材识别与丝带文字精修共用这组 Key，含启用开关与敏感内容查看。</p>
                 </div>
-                <div id="key-list" class="key-list" aria-live="polite"><p class="empty">正在读取 Key…</p></div>
-                <form id="key-add-form" class="add-form" autocomplete="off">
-                  <label for="key-batch">批量添加</label>
-                  <div class="add-input">
-                    <textarea id="key-batch" rows="3" autocomplete="off" spellcheck="false" autocapitalize="off" aria-describedby="batch-help" placeholder="每行粘贴一个 API Key" disabled></textarea>
-                  </div>
-                  <div class="add-footer">
-                    <p id="batch-help" class="muted">每行一个，最多 100 个；提交即清空，默认遮罩。</p>
-                    <div class="add-actions">
-                      <button id="key-reveal" class="button quiet" type="button" aria-pressed="false">显示</button>
-                      <button id="key-add" class="button primary" type="submit" disabled>添加 Key</button>
-                    </div>
-                  </div>
-                </form>
+                <a class="button secondary" href="/admin/deepseek">管理 →</a>
               </section>
 
               <section class="panel entry-card">
                 <div class="entry-main">
                   <p class="eyebrow">SEEDREAM</p>
                   <h3>火山方舟 Key</h3>
-                  <p class="card-desc">素材提取与丝带设计共用，模型 ID 在同一页维护。</p>
+                  <p class="card-desc">素材提取与丝带设计使用；丝带可在自己的页面单独保存一份配置。</p>
                 </div>
                 <a class="button secondary" href="/admin/material">管理 →</a>
-                <p class="entry-foot">⚠ 这是另一组 Key，与上面的 DeepSeek 池分开保存。</p>
               </section>
 
-              <section class="panel ledger-panel" id="shared-ledger">
-                <details id="ledger-details">
-                  <summary>
-                    <span class="ledger-title" id="ledger-heading">查看或复制 Key</span>
-                    <span class="ledger-hint">敏感内容 · 默认遮罩</span>
-                  </summary>
-                  <div class="ledger-body">
-                    <div class="ledger-tools">
-                      <p class="ledger-warning">仅在展开时读取。默认遮罩，显示后请避免截图或录屏。</p>
-                      <button id="ledger-refresh" class="button quiet" type="button">重新读取</button>
-                    </div>
-                    <p id="ledger-state" class="muted" role="status" aria-live="polite"></p>
-                    <div id="ledger-list" class="ledger-list"></div>
-                  </div>
-                </details>
+              <section class="panel entry-card">
+                <div class="entry-main">
+                  <p class="eyebrow">RIBBON</p>
+                  <h3>丝带模型服务</h3>
+                  <p class="card-desc">沿用素材提取的 DeepSeek 与 Seedream，或保存丝带专用配置。</p>
+                </div>
+                <a class="button secondary" href="/admin/ribbon">管理 →</a>
               </section>
             </div>
           </div>

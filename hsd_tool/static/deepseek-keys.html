@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light">
+  <title>DeepSeek Key · 图号助手</title>
+  <link rel="stylesheet" href="/static/admin.css">
+  <script>window.HSD_TOKEN = __HSD_TOKEN__; window.HSD_BUILD = "__HSD_BUILD__";</script>
+  <script src="/static/build-check.js" defer></script>
+  <script src="/static/admin.js" defer></script>
+</head>
+<body>
+  <div class="admin-shell">
+    <header class="admin-header">
+      <div class="header-title">
+        <a class="back-link" href="/admin">← 返回 Key 账本</a>
+        <h1>DeepSeek · Key 与模型</h1>
+        <p class="build-line" id="admin-build">构建 __HSD_BUILD__</p>
+      </div>
+      <div class="header-actions">
+        <button id="admin-refresh" class="button secondary" type="button">刷新设置</button>
+        <button id="admin-logout" class="button quiet" type="button">退出登录</button>
+      </div>
+    </header>
+    <div id="admin-message" class="notice hidden" role="status" aria-live="polite"></div>
+    <a id="admin-login" class="button primary login-link hidden" href="/admin/login">重新登录</a>
+    <main>
+      <section class="panel">
+        <div class="section-heading">
+          <div>
+            <h2 id="settings-heading">DeepSeek · 图号匹配与素材裁剪</h2>
+            <p class="muted">图号匹配、素材范围识别与丝带文字精修共用这组 Key，员工无需各自填写。</p>
+          </div>
+          <form id="enable-form">
+            <label class="enable-control"><input id="ai-enabled" type="checkbox" disabled><span>启用 DeepSeek</span></label>
+            <button id="enable-save" class="button secondary" type="submit" disabled>保存</button>
+          </form>
+        </div>
+        <p id="settings-state" class="state-line">正在读取设置…</p>
+        <div id="storage-warning" class="notice warning hidden" role="alert"></div>
+      </section>
+
+      <section class="panel">
+        <div class="section-heading">
+          <div>
+            <h2 id="keys-heading">API Key <span id="key-count" class="count"></span></h2>
+            <p class="muted">「待验证」表示还没有成功调用记录，不是错误。</p>
+          </div>
+        </div>
+        <div id="key-list" class="key-list" aria-live="polite"><p class="empty">正在读取 Key…</p></div>
+        <form id="key-add-form" class="add-form" autocomplete="off">
+          <label for="key-batch">批量添加</label>
+          <div class="add-input">
+            <textarea id="key-batch" rows="3" autocomplete="off" spellcheck="false" autocapitalize="off" aria-describedby="batch-help" placeholder="每行粘贴一个 API Key" disabled></textarea>
+          </div>
+          <div class="add-footer">
+            <p id="batch-help" class="muted">每行一个，最多 100 个；提交即清空，默认遮罩。</p>
+            <div class="add-actions">
+              <button id="key-reveal" class="button quiet" type="button" aria-pressed="false">显示</button>
+              <button id="key-add" class="button primary" type="submit" disabled>添加 Key</button>
+            </div>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel" id="shared-ledger">
+        <details id="ledger-details">
+          <summary><span id="ledger-heading">查看或复制 Key</span><span class="muted">敏感内容 · 默认遮罩</span></summary>
+          <div class="ledger-body">
+            <div class="ledger-tools"><p class="ledger-warning">仅在展开时读取。默认遮罩，显示后请避免截图或录屏。</p><button id="ledger-refresh" class="button quiet" type="button">重新读取</button></div>
+            <p id="ledger-state" class="muted" role="status" aria-live="polite"></p>
+            <div id="ledger-list" class="ledger-list"></div>
+          </div>
+        </details>
+      </section>
+
+      <section class="panel help-panel">
+        <details id="admin-help">
+          <summary>怎么填写与常见问题</summary>
+          <ol>
+            <li>在 DeepSeek 控制台创建 API Key，每行粘贴一个后点“添加 Key”，再勾选“启用 DeepSeek”并保存。</li>
+            <li>员工共用这些 Key，不在各自电脑配置；增加 Key 不会增加官方账户额度。</li>
+            <li>显示“待验证”表示还没有成功调用记录；冷却中的 Key 会显示剩余时间，到期自动恢复。</li>
+            <li>更换 Key 时先停用旧 Key，再添加新的，确认可用后再删除旧 Key。</li>
+            <li>保存成功只代表配置已写入，不代表接口可用；真实效果仍需实际调用确认。</li>
+          </ol>
+          <p id="qualification-state"></p>
+          <p id="persistence-state"></p>
+        </details>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
