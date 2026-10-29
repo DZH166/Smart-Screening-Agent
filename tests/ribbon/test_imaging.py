@@ -113,11 +113,13 @@ def test_seed_reproduces_layout_and_params_change_real_pixels(scene, tmp_path):
 
 def test_preview_derives_from_master_and_profile_validation(scene, tmp_path):
     snapshot, refs = scene
-    snapshot["output_profile"].update(width=3600, height=800, dpi=300)
+    # Wider than the preview bound, so the preview is always a real downscale
+    # and validating it against the master profile must fail.
+    snapshot["output_profile"].update(width=4200, height=800, dpi=300)
     render(snapshot, refs.__getitem__, tmp_path/"master.png", tmp_path/"preview.png")
     with Image.open(tmp_path/"master.png") as master, Image.open(tmp_path/"preview.png") as preview:
         expected = master.copy()
-        expected.thumbnail((1800, 600), Image.Resampling.LANCZOS)
+        expected.thumbnail((3600, 1200), Image.Resampling.LANCZOS)
         assert preview.size == expected.size
         assert preview.tobytes() == expected.tobytes()
     with pytest.raises(ValueError, match="母版文件"):

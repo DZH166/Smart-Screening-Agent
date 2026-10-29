@@ -350,7 +350,10 @@ def render(snapshot: dict, resolve_asset: Callable[[str], Path], master_path: Pa
                                               'size': size, 'rotation': angle, 'layer': layer})
     _save_png(canvas, Path(master_path), dpi)
     preview = canvas.copy()
-    preview.thumbnail((1800, 600), Image.Resampling.LANCZOS)
+    # A ribbon is a very wide strip. A 1800 px wide preview would be only
+    # ~80 px tall, which cannot show a motif at all; keep enough height for
+    # the detail view while still bounding the file.
+    preview.thumbnail((3600, 1200), Image.Resampling.LANCZOS)
     _save_png(preview, Path(preview_path), dpi)
     preview.close()
     canvas.close()

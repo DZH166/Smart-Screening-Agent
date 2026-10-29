@@ -276,6 +276,9 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
   const [design, setDesign] = useState<Design | null>(null),
     [selection, setSelection] = useState<Selection>(emptySelection),
     [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
+  // A ribbon is a very wide strip: "detail" shows it at a readable height and
+  // scrolls sideways, "fit" shows the whole length at once.
+  const [previewZoom, setPreviewZoom] = useState<"detail" | "fit">("detail");
   const [prompt, setPrompt] = useState(""),
     [job, setJob] = useState<Job | null>(null),
     [backgroundJob, setBackgroundJob] = useState<Job | null>(null),
@@ -308,6 +311,13 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
     backgroundProcessing = running(backgroundJob),
     locked = busy || processing || !!pending || uploading;
   const isHistory = !!selected && selected.id !== design?.current_version_id;
+  const shownProfile = selected?.snapshot?.output_profile;
+  const sizeLabel =
+    shownProfile?.width && shownProfile?.height && shownProfile?.dpi
+      ? `${shownProfile.width}×${shownProfile.height}px · ${shownProfile.dpi} DPI · ` +
+        `${((shownProfile.width / shownProfile.dpi) * 2.54).toFixed(1)}×` +
+        `${((shownProfile.height / shownProfile.dpi) * 2.54).toFixed(1)} cm`
+      : "";
   const ready =
     selection.asset_ids.length > 0 &&
     !!selection.background_id &&
@@ -1096,7 +1106,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                     {status}
                   </span>
                 </div>
-                <div className={`preview-stage ${!selected ? "is-empty" : ""}`}>
+                <div className={`preview-stage ${!selected ? "is-empty" : "is-filled"}`}>
                   <div className="stage-topline">
                     <span>
                       {selected
@@ -1112,12 +1122,38 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                     )}
                   </div>
                   {selected ? (
-                    <div className="ribbon-display">
-                      <img
-                        src={selected.preview_url}
-                        alt={`${versionName(selected)}设计预览`}
-                      />
-                    </div>
+                    <>
+                      <div className={`ribbon-display ${previewZoom}`}>
+                        <img
+                          src={selected.preview_url}
+                          alt={`${versionName(selected)}的设计预览`}
+                        />
+                      </div>
+                      <div className="ribbon-tools">
+                        <div className="ribbon-zoom" role="group" aria-label="预览缩放">
+                          <button
+                            type="button"
+                            className={previewZoom === "detail" ? "is-active" : ""}
+                            aria-pressed={previewZoom === "detail"}
+                            onClick={() => setPreviewZoom("detail")}
+                          >
+                            细节
+                          </button>
+                          <button
+                            type="button"
+                            className={previewZoom === "fit" ? "is-active" : ""}
+                            aria-pressed={previewZoom === "fit"}
+                            onClick={() => setPreviewZoom("fit")}
+                          >
+                            整条
+                          </button>
+                        </div>
+                        <span className="ribbon-metrics">{sizeLabel}</span>
+                        <span className="ribbon-hint">
+                          {previewZoom === "detail" ? "左右拖动查看整条" : ""}
+                        </span>
+                      </div>
+                    </>
                   ) : (
                     <div className="empty-canvas">
                       <div className="empty-symbol">
