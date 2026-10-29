@@ -205,6 +205,14 @@ def test_cloud_admin_login_does_not_log_in_employee_or_grant_host_operations(emp
     for path in ("/api/admin/keys", "/api/admin/ledger", "/static/admin.js", "/static/admin.html"):
         assert cloud_request(client, path).status_code == 401
     assert cloud_request(client, "/admin/login", method="POST", payload={"username": "synthetic-admin", "password": "synthetic-password"}).status_code == 200
+    # Every console script must load with the admin session alone: the previous
+    # whitelist covered only admin.html/admin.js/admin.css, so the navigation and
+    # the ribbon settings panel were rejected with 401 and the page looked dead.
+    for asset in ("/static/admin-workspace.js", "/static/ribbon-settings.js", "/static/build-check.js"):
+        assert cloud_request(client, asset).status_code == 200, asset
+    page = cloud_request(client, "/static/admin.html")
+    assert page.status_code == 200 and "ribbon-settings-panel" in page.get_data(as_text=True)
+    assert cloud_request(client, "/static/admin-workspace.js?v=1.20.0").status_code == 200
     assert cloud_request(client, "/api/admin/keys").status_code == 200
     assert cloud_request(client, "/api/admin/ledger").status_code == 200
     assert cloud_request(client, "/api/config").status_code == 401

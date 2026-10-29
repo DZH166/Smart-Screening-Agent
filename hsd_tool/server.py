@@ -263,7 +263,14 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
         # The admin area authenticates itself: an operator may open it from
         # another computer on the LAN with the account/password, without the
         # employee access code. Employee-only paths still require that code.
-        admin_entry = (admin_area or protected_static or material_admin_static
+        # Static assets are code and images, never user data. An administrator who
+        # logged in with the operator account but has no employee access code must
+        # still load every console script; a hand-maintained filename whitelist
+        # silently blocked the navigation and settings scripts. Other visitors keep
+        # the previous behaviour (assets require a session).
+        static_asset = (request.endpoint == "static"
+                        and admin_auth.authenticated(session))
+        admin_entry = (admin_area or protected_static or material_admin_static or static_asset
                        or request.endpoint in {"admin_login_page", "admin_login", "admin_logout"})
         if remote and not session.get("lan_authenticated") and not admin_entry:
             if request.endpoint in {"index", "material_demo_redirect", "material_demo_page"} and request.method == "GET":

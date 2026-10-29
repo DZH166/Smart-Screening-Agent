@@ -148,9 +148,13 @@ def test_employee_navigation_enters_real_material_workspace_on_the_same_page(dem
     assert {"numbering-workspace", "material-workspace", "import-form",
             "material-upload-form", "material-files", "material-stop",
             "material-results", "ribbon-workspace", "ribbon-mount"} <= markup.ids
-    assert markup.scripts.count("/static/app.js") == 1
-    assert markup.scripts.count("/static/material.js") == 1
-    assert markup.scripts.count("/static/ribbon-loader.js") == 1
+    # Asset references carry a build query (?v=...) so a deploy cannot mix old
+    # scripts with a new page; compare paths without the query.
+    paths = [src.split("?", 1)[0] for src in markup.scripts]
+    assert paths.count("/static/app.js") == 1
+    assert paths.count("/static/material.js") == 1
+    assert paths.count("/static/ribbon-loader.js") == 1
+    assert all(src == path or "?v=" in src for src, path in zip(markup.scripts, paths))
     assert "/static/ribbon/ribbon.js" not in markup.scripts, "ribbon bundle loads only when its workspace opens"
     # Keep the old synthetic demo available only through its separate,
     # authenticated read-only route; it is no longer the normal feature link.
