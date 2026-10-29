@@ -209,11 +209,15 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
                 return jsonify(error="不支持此访问地址。"), 403
         remote = bool(lan and not lan.is_host(request.remote_addr))
         is_upload = request.endpoint in {"upload_job", "material_upload_job"}
-        if request.method == "POST":
+        is_ribbon = request.endpoint == "ribbon_api"
+        ribbon_upload = is_ribbon and request.method == "POST" and request.path == "/api/ribbon/assets"
+        mutating = request.method == "POST" or (is_ribbon and request.method in {"PUT", "PATCH", "DELETE"})
+        if mutating:
             origin = request.headers.get("Origin")
             if (origin and origin != request.host_url.rstrip("/")) or (remote and not origin):
                 return jsonify(error="请求来源不匹配。"), 403
-            if not is_upload and (not request.is_json or not isinstance(request.get_json(silent=True), dict)):
+            empty_delete = is_ribbon and request.method == "DELETE" and not request.content_length
+            if not is_upload and not ribbon_upload and not empty_delete and (not request.is_json or not isinstance(request.get_json(silent=True), dict)):
                 return jsonify(error="请求必须使用 JSON 对象。"), 400
         if lan and request.endpoint == "lan_login":
             return None
@@ -221,7 +225,8 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
             # Liveness for the service manager and monitoring. Deliberately
             # says nothing: no version, instance, options, or usage data.
             return None
-        admin_area = request.path in {"/admin", "/admin/material", "/admin/access-codes"} or request.path.startswith("/api/admin/")
+        admin_area = (request.path in {"/admin", "/admin/material", "/admin/access-codes"}
+                      or request.path.startswith(("/api/admin/", "/api/ribbon/admin/")))
         material_admin_static = (request.endpoint == "static" and
             Path(str((request.view_args or {}).get("filename", "")).replace("\\", "/")).name.split(":", 1)[0].rstrip(" .").casefold()
             in {"material-settings.html", "material-settings.js", "access-codes.html", "access-codes.js", "access-codes.css"})
@@ -257,7 +262,7 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
             return jsonify(error="此操作只能在主机上完成。"), 403
         if admin_area or material_admin_static or (cloud and protected_static):
             if not admin_auth.authenticated(session):
-                if request.path.startswith("/api/admin/") or protected_static or material_admin_static:
+                if request.path.startswith(("/api/admin/", "/api/ribbon/admin/")) or protected_static or material_admin_static:
                     return jsonify(error="请先登录管理员分区。"), 401
                 return (static / "admin-login.html").read_text("utf-8")
         if lan:
@@ -286,13 +291,19 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
                 else:
                     lan.validate_paths({"workbook_path": job["_workbook_path"], "source_path": job["_source_path"],
                                         "output_root": job["_output_root"]})
-        if request.method == "POST" and request.endpoint != "admin_login":
+        if mutating and request.endpoint != "admin_login":
             provided = request.headers.get("X-HSD-Token", "")
             if not secrets.compare_digest(provided.encode(), token.encode()):
                 return jsonify(error="会话已失效，请重新打开工具页面。"), 403
             with manager.lock:
                 if app.config["HSD_STOPPING"] and request.endpoint != "shutdown":
                     raise Conflict("主机正在退出，请稍后重新打开员工入口。")
+        if ribbon_upload:
+            # Ribbon receives individual images, separate from the unlimited
+            # numbering ZIP uploader. FastAPI bounds decoding to 40 MP/20 MiB.
+            request.max_content_length = 21 * 1024 * 1024
+            if request.content_length is None or request.content_length > request.max_content_length:
+                return jsonify(error="丝带单张素材需小于20 MB，请缩小图片后重试。"), 413
         if is_upload:
             active_claims = material_claims if request.endpoint == "material_upload_job" else claims
             identifier = upload_id(request.headers.get("X-HSD-Upload-ID") or secrets.token_hex(16))
@@ -1128,4 +1139,6 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
             threading.Timer(0.3, callback).start()
         return jsonify(ok=True)
 
+    from .ribbon_gateway import register_ribbon
+    register_ribbon(app, manager, material_settings, employee_id)
     return app

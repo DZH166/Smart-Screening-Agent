@@ -9,6 +9,7 @@
   <script>window.HSD_TOKEN = __HSD_TOKEN__;</script>
   <script src="/static/admin.js" defer></script>
   <script src="/static/admin-workspace.js" defer></script>
+  <script src="/static/ribbon-settings.js" defer></script>
 </head>
 <body>
   <div class="admin-shell">
@@ -61,6 +62,7 @@
       <section class="panel" aria-labelledby="material-config-heading">
         <div class="section-heading"><div><h2 id="material-config-heading">火山方舟 · 素材清理</h2><p class="muted">Seedream 清理整图；DeepSeek 使用上方的 Key 识别裁剪范围。</p></div><a class="button secondary" href="/admin/material">管理 Key 与模型 →</a></div>
       </section>
+      <section class="panel" id="ribbon-settings-panel" aria-label="丝带设计模型设置"></section>
       <section class="panel" aria-labelledby="access-config-heading">
         <div class="section-heading"><div><h2 id="access-config-heading">员工访问码 · 登录管理</h2><p class="muted">统一管理员工进入网站使用的访问码。</p></div><a class="button secondary" href="/admin/access-codes">管理访问码 →</a></div>
       </section>
@@ -78,7 +80,13 @@
             <span>清理整图、识别设计范围，裁剪为单张 PNG</span>
             <em>打开功能 →</em>
           </a>
+          <a class="function-card" href="/#ribbon">
+            <strong>丝带设计</strong>
+            <span>组合图案、排版与底图，生成、精修并下载设计</span>
+            <em>打开功能 →</em>
+          </a>
         </div>
+        <p><a href="/#ribbon-admin">维护丝带排版与输出规格 →</a></p>
       </section>
       <section class="panel help-panel hidden" id="help" data-admin-section="help" aria-labelledby="help-heading">
         <details id="admin-help">

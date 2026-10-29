@@ -3,3 +3,7 @@ PyMuPDF==1.28.2
 opencv-python-headless==5.0.0.93
 numpy==2.3.5
 Pillow==12.3.0
+FastAPI==0.162.0
+httpx==0.28.1
+python-multipart==0.0.32
+a2wsgi==1.10.10

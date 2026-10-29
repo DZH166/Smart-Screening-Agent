@@ -140,15 +140,18 @@ def test_employee_navigation_enters_real_material_workspace_on_the_same_page(dem
 
     markup = EmployeeMarkup()
     markup.feed(response.get_data(as_text=True))
-    assert set(markup.links) == {"numbering", "material"}
+    assert set(markup.links) == {"numbering", "material", "ribbon"}
     assert markup.links["numbering"]["href"] == "#numbering"
     assert markup.links["material"]["href"] == "#material"
+    assert markup.links["ribbon"]["href"] == "#ribbon"
     assert all(link.get("target") != "_blank" for link in markup.links.values())
     assert {"numbering-workspace", "material-workspace", "import-form",
             "material-upload-form", "material-files", "material-stop",
-            "material-results"} <= markup.ids
+            "material-results", "ribbon-workspace", "ribbon-mount"} <= markup.ids
     assert markup.scripts.count("/static/app.js") == 1
     assert markup.scripts.count("/static/material.js") == 1
+    assert markup.scripts.count("/static/ribbon-loader.js") == 1
+    assert "/static/ribbon/ribbon.js" not in markup.scripts, "ribbon bundle loads only when its workspace opens"
     # Keep the old synthetic demo available only through its separate,
     # authenticated read-only route; it is no longer the normal feature link.
     legacy = demo.call("/material-demo/")

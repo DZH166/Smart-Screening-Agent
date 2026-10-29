@@ -51,7 +51,7 @@ def tracked_files():
 
 
 def check_python(failures):
-    code, output = run([sys.executable, "-m", "compileall", "-q", "hsd_tool", "tools"])
+    code, output = run([sys.executable, "-m", "compileall", "-q", "hsd_tool", "ribbon_backend", "tools"])
     if code:
         failures.append(("python-compile", output[-800:]))
     modules = sorted(path.stem for path in (ROOT / "hsd_tool").glob("*.py") if path.stem != "__main__")

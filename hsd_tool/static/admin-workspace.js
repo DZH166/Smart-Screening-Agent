@@ -14,6 +14,7 @@
     // Leaving the ledger also clears revealed credentials through its existing handler.
     const ledger = document.getElementById("ledger-details");
     if (name !== "keys" && ledger?.open) ledger.open = false;
+    if (typeof CustomEvent === "function") window.dispatchEvent?.(new CustomEvent("hsd-admin-section-change", { detail: { section: name } }));
   }
   links.forEach(link => link.addEventListener("click", event => {
     event.preventDefault();

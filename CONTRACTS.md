@@ -1,5 +1,17 @@
 # Internal implementation contract
 
+## Ribbon workspace (v1.20.0)
+
+The React/TypeScript ribbon island mounts at `#ribbon` in the existing page with ShadowRoot style isolation. FastAPI runs through the authenticated Flask/a2wsgi gateway at `/api/ribbon/*`, sharing one process and the existing provider pool. The host is the sole identity authority; browser-provided owner/role headers are ignored. All mutations require the host origin and page token; `/api/ribbon/admin/*` and `/api/admin/ribbon-settings` require server-side administrator authentication.
+
+SQLite WAL, a persistent single worker, transactions and immutable image hashes protect quota, idempotency, parent versions and exact-version downloads. Only two successful refinements are allowed; failures do not debit and parent rollback does not refund. Same-browser reauthentication restores ownership. File responses hold leases through close; normal shutdown drains requests and already accepted provider work. Interrupted paid requests with unknown results are never automatically retried.
+
+Provider selection and model revision bind each submitted job. OpenAI uses a separate encrypted Key and model IDs; DeepSeek/Seedream reuse current host settings and the same live Key pool. Saving configuration does not call or qualify a model. No employee endpoint reveals credentials and no production failure falls back to a test provider. New ribbon AI starts disabled; deterministic composition remains usable.
+
+Personal ribbon works, versions and private assets use the shared `RETENTION_SECONDS` (50 hours). A successful generation, refinement or rollback renews retention. Busy tasks, streaming responses and live references block cleanup; shared library/templates/output profiles persist separately. Tombstones retain only owner, idempotency key and request hash to reject expired paid-request replay. This does not alter numbering or material qualification/export rules.
+
+See [ribbon integration](docs/ribbon-integration.md) for endpoint paths, upload decoding limits, provider constraints and the explicitly marked demonstration output profile. Real paid-provider image quality and production output specifications remain separate acceptance work.
+
 Python package `hsd_tool`, Chinese end-user interface, v1.19.2. Flask/browser workflow with Windows desktop/LAN and a separately enabled Linux HTTPS cloud entry point. Default desktop binding remains loopback; LAN and cloud provide browser-owned employee upload, processing and result download on one host. Client originals remain unchanged. Original XLSX and ZIP files are uploaded to the configured service host, not OSS; numbering sends only its previously authorized safe previews to DeepSeek. The separately authorized v1.17.0 material workflow sends cleaned material pixels to DeepSeek for design localization, as specified below. With AI enabled and a usable Key, whole-library candidate retrieval and complete independent local verification run concurrently. Disabled/unconfigured AI retains the complete local path. Original XLSX, ZIP and AI files and local paths are never sent to DeepSeek. The browser never calls the provider directly. No AI production qualification is shipped or activated by deployment.
 
 ## Resilient material localization (v1.19.2; current localization policy)

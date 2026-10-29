@@ -141,6 +141,9 @@ class JobManager:
     def close(self, *, on_drained=None):
         if on_drained is not None and not callable(on_drained):
             raise ValueError("任务收敛回调无效。")
+        ribbon = getattr(self, "ribbon_gateway", None)
+        if ribbon is not None:
+            ribbon.close()
         with self._operation_condition:
             self._closing = True
             # An accepted API operation may still be planning before its pool

@@ -29,12 +29,15 @@
   function jobPath(suffix="") {return `/api/material/jobs/${encodeURIComponent(state.job.id)}${suffix}`;}
   function safeUrl(url) {const prefix=state.job?`/api/material/jobs/${encodeURIComponent(state.job.id)}/`:"";return typeof url==="string"&&prefix&&url.startsWith(prefix)&&!/[\\\r\n]/.test(url)?url:"";}
   function workspace(name,writeHash=false) {
-    name=name==="material"?"material":"numbering";
+    name=["material","ribbon","ribbon-admin"].includes(name)?name:"numbering";
+    const ribbon=name==="ribbon"||name==="ribbon-admin";
     state.scroll[state.workspace]=window.scrollY||0;state.workspace=name;
-    $("numbering-workspace").classList.toggle("hidden",name!=="numbering");$("material-workspace").classList.toggle("hidden",name!=="material");document.body.classList.toggle("material-active",name==="material");
-    document.querySelectorAll("[data-workspace]").forEach(link=>{const active=link.dataset.workspace===name;link.classList.toggle("active",active);if(active)link.setAttribute("aria-current","page");else link.removeAttribute("aria-current");});
+    $("numbering-workspace").classList.toggle("hidden",name!=="numbering");$("material-workspace").classList.toggle("hidden",name!=="material");document.body.classList.toggle("material-active",name==="material"||ribbon);
+    $("ribbon-workspace")?.classList.toggle("hidden",!ribbon);
+    document.querySelectorAll("[data-workspace]").forEach(link=>{const active=link.dataset.workspace===(ribbon?"ribbon":name);link.classList.toggle("active",active);if(active)link.setAttribute("aria-current","page");else link.removeAttribute("aria-current");});
     if(writeHash)history.replaceState(null,"",`#${name}`);
-    window.scrollTo({top:state.scroll[name],behavior:"instant"});
+    window.scrollTo({top:state.scroll[name]||0,behavior:"instant"});
+    if(typeof CustomEvent==="function")window.dispatchEvent?.(new CustomEvent("hsd-workspace-change",{detail:{workspace:name}}));
     if(name==="material"&&!state.config)loadConfig();else schedule();
   }
   function busy() {return state.busy||state.uploading||state.uncertain||activeStatuses.has(state.job?.status);}

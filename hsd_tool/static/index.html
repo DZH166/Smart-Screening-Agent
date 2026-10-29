@@ -12,6 +12,7 @@
   <script src="/static/ai-settings.js" defer></script>
   <script src="/static/app.js" defer></script>
   <script src="/static/material.js" defer></script>
+  <script src="/static/ribbon-loader.js" defer></script>
 </head>
 <body>
   <div class="app-shell">
@@ -37,6 +38,7 @@
         <p class="app-nav-title">功能</p>
         <a class="app-nav-item active" href="#numbering" data-workspace="numbering" aria-current="page"><span class="app-nav-name">图号助手</span><span class="app-nav-hint">图片编号</span></a>
         <a class="app-nav-item" href="#material" data-workspace="material"><span class="app-nav-name">素材提取</span><span class="app-nav-hint">提取 · PNG</span></a>
+        <a class="app-nav-item" href="#ribbon" data-workspace="ribbon"><span class="app-nav-name">丝带设计</span><span class="app-nav-hint">排版 · 精修</span></a>
       </aside>
     <main id="main-content">
       <div id="numbering-workspace">
@@ -111,6 +113,9 @@
           <details id="material-source-details" class="card material-source-details"><summary>查看原图 · 漏提取时重新框选</summary><div id="material-source-grid" class="material-source-grid"></div></details>
           <details id="material-batch-details" class="material-batch-details"><summary>本批记录与问题</summary><div id="material-batch-info"></div></details>
         </section>
+      </section>
+      <section id="ribbon-workspace" class="hidden" aria-label="丝带设计">
+        <div id="ribbon-mount"><p role="status">正在打开丝带设计…</p></div>
       </section>
     </main>
     </div>
