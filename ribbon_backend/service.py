@@ -363,7 +363,7 @@ class Service:
 
     def version_public(self, row):
         prefix = getattr(self.settings, 'api_prefix', '/api')
-        return {**{k: row[k] for k in ('id', 'design_id', 'parent_version_id', 'sequence', 'prompt', 'render_kind', 'provider', 'created_at')}, 'snapshot': json.loads(row['snapshot_json']), 'preview_url': f"{prefix}/versions/{row['id']}/preview", 'download_url': f"{prefix}/versions/{row['id']}/download"}
+        return {**{k: row[k] for k in ('id', 'design_id', 'parent_version_id', 'sequence', 'prompt', 'render_kind', 'provider', 'created_at')}, 'snapshot': json.loads(row['snapshot_json']), 'preview_url': f"{prefix}/versions/{row['id']}/preview", 'view_url': f"{prefix}/versions/{row['id']}/view", 'download_url': f"{prefix}/versions/{row['id']}/download"}
 
     @staticmethod
     def job_public(row):

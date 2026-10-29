@@ -59,6 +59,7 @@ export type Version = {
   render_kind: string;
   snapshot: Snapshot;
   preview_url: string;
+  view_url?: string;
   download_url: string;
   created_at: string;
   provider: string;

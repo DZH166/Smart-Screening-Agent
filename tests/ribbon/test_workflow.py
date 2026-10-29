@@ -141,6 +141,14 @@ def test_a01_a02_a03_multiple_assets_templates_and_decodable_first_draft(env):
     preview = env.client.get(version["preview_url"])
     assert preview.status_code == 200
     Image.open(io.BytesIO(preview.content)).verify()
+    # The detail view needs the full-resolution master inline: a preview shrunk
+    # to fit a 3600 px box would be upscaled by the browser and look soft.
+    view = env.client.get(version["view_url"])
+    assert view.status_code == 200 and view.headers["content-type"] == "image/png"
+    assert "attachment" not in view.headers.get("content-disposition", "")
+    assert "max-age" in view.headers.get("cache-control", "")
+    with Image.open(io.BytesIO(view.content)) as shown:
+        assert shown.size == (profile["width"], profile["height"])
     assert ok(env.client.get("/api/config"))["provider"] == "test"
 
 

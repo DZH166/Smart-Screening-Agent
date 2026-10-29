@@ -1125,7 +1125,11 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                     <>
                       <div className={`ribbon-display ${previewZoom}`}>
                         <img
-                          src={selected.preview_url}
+                          src={
+                            previewZoom === "detail"
+                              ? selected.view_url || selected.preview_url
+                              : selected.preview_url
+                          }
                           alt={`${versionName(selected)}的设计预览`}
                         />
                       </div>

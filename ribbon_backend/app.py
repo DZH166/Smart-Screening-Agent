@@ -105,7 +105,9 @@ def create_app(settings: Settings | None = None, *, service: Service | None = No
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['Referrer-Policy'] = 'same-origin'
         response.headers['X-Frame-Options'] = 'DENY'
-        if request.url.path.startswith('/api/'):
+        if request.url.path.startswith('/api/') and 'cache-control' not in response.headers:
+            # Image routes may opt into a short private cache; everything else
+            # stays uncached so a stale token cannot be replayed from disk.
             response.headers['Cache-Control'] = 'private, no-store'
         return response
 
@@ -223,6 +225,15 @@ def create_app(settings: Settings | None = None, *, service: Service | None = No
     @app.get('/api/versions/{version_id}/preview')
     def preview(version_id: str, current=Depends(user)):
         return FileResponse(service.version_file(current['id'], version_id, True), media_type='image/png')
+
+    @app.get('/api/versions/{version_id}/view')
+    def view(version_id: str, current=Depends(user)):
+        # Full-resolution master, inline, for the detail preview: a 11811x520 strip
+        # shrunk into a 159 px preview is unreadable, and raising the print DPI
+        # does not change what the screen shows.
+        response = FileResponse(service.version_file(current['id'], version_id), media_type='image/png')
+        response.headers['Cache-Control'] = 'private, max-age=300'
+        return response
 
     @app.get('/api/versions/{version_id}/download')
     def download(version_id: str, current=Depends(user)):
