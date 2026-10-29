@@ -4,9 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="light">
-  <title>丝带设计 · 模型服务</title>
+  <title>丝带设计 · 模型配置</title>
   <link rel="stylesheet" href="../../hsd_tool/static/admin.css">
-  <link rel="stylesheet" href="../../hsd_tool/static/admin-console.css">
+  <link rel="stylesheet" href="../../hsd_tool/static/admin-page.css">
 </head>
 <body>
 <div style="position:fixed;left:50%;top:12px;transform:translateX(-50%);z-index:99;padding:8px 16px;border-radius:999px;background:#17233a;color:#fff;font:13px/1.4 system-ui,sans-serif;letter-spacing:.02em">静态预览 · 按钮不会真的保存</div>
@@ -14,8 +14,8 @@
   <div class="admin-shell">
     <header class="admin-header">
       <div class="header-title">
-        <a class="back-link" href="/admin#keys">← 返回 Key 账本</a>
-        <h1>丝带设计 · 模型服务</h1>
+        <a class="back-link" href="/admin">← 返回 Key 账本</a>
+        <h1>丝带设计 · 模型配置</h1>
         <p class="build-line" id="admin-build">构建 1.20.0+preview</p>
       </div>
       <div class="header-actions">
@@ -24,25 +24,51 @@
     </header>
     <div id="ribbon-message" class="notice hidden" role="status" aria-live="polite"></div>
     <a id="ribbon-login" class="button primary hidden" href="/admin/login">重新登录</a>
-    <main class="console">
+    <main>
       <section class="panel">
-        <div class="card-head">
-          <div class="card-title">
-            <p class="eyebrow">SERVICE · RIBBON</p>
-            <h2>沿用 Key 账本中的模型</h2>
-            <p class="card-desc">丝带设计与素材提取使用同一组 DeepSeek 与火山方舟配置，这里不重复保存 Key。</p>
+        <div class="section-heading"><h2>火山方舟 · 丝带图片模型</h2></div>
+        <p>用于丝带的底图与精修。文字理解沿用 <a href="/admin/deepseek">DeepSeek 配置</a>，员工无需各自填写。</p>
+        <p id="ribbon-model-state" class="state-line">沿用素材提取的配置 · 图片模型 doubao-seedream-5-0-flash-260915 · 已启用</p>
+        <form id="ribbon-form" autocomplete="off">
+          <label for="ribbon-key">API Key</label>
+          <input id="ribbon-key" type="password" autocomplete="new-password" spellcheck="false" aria-describedby="ribbon-key-help" placeholder="粘贴火山方舟 API Key" disabled>
+          <p id="ribbon-key-help" class="muted">加密保存，输入框不会回填。留空表示沿用素材提取的 Key。</p>
+          <label for="ribbon-model">图片模型 ID</label>
+          <div class="model-input-row">
+            <input id="ribbon-model" type="text" value="doubao-seedream-5-0-flash-260915" data-preview="" autocomplete="new-password" spellcheck="false" maxlength="128" aria-describedby="ribbon-model-help" placeholder="留空表示沿用素材提取的图片模型" disabled>
+            <button id="ribbon-model-reveal" class="button secondary" type="button" aria-pressed="false" disabled>显示</button>
+            <button id="ribbon-model-copy" class="button secondary" type="button" disabled>复制</button>
           </div>
-        </div>
-        <div id="ribbon-settings-panel" class="ribbon-form-host">
-    <p id="ribbon-inherited-status" class="ribbon-inherit" role="status" aria-live="polite">已就绪：deepseek-flash ＋ doubao-seedream-5-0-flash-260915</p>
-    <label class="ribbon-switch"><input type="checkbox" checked><span>启用丝带 AI 底图与精修</span></label>
-    <p class="muted ribbon-note">启用后按实际调用计费；关闭后首稿排版照常可用。</p>
-    <p class="ribbon-state">已启用。</p>
-    <div class="ribbon-actions">
-      <button type="button" class="button primary">保存</button>
-      <button type="button" class="button secondary">重新读取</button>
-    </div>
-</div>
+          <p id="ribbon-model-help" class="muted">当前沿用的模型会显示在下方状态里；填写后丝带单独使用这个模型。</p>
+          <div class="material-actions">
+            <button id="ribbon-save" class="button primary" type="submit" disabled>保存配置</button>
+            <button id="ribbon-remove" class="button quiet" type="button" disabled>删除配置</button>
+          </div>
+        </form>
+        <details id="ribbon-key-details" class="material-key-details">
+          <summary>已保存的 Key</summary>
+          <div class="material-key-view"><code id="ribbon-key-value">未保存丝带专用 Key（沿用素材提取）</code></div>
+          <p class="muted">Key 只加密保存在主机，页面不回显。需要更换时直接粘贴新的 Key 再保存；删除配置会回到沿用素材提取的状态。</p>
+        </details>
+        <form id="ribbon-enable-form">
+          <div class="section-heading">
+            <label class="enable-control"><input id="ribbon-enabled" type="checkbox" disabled><span>启用丝带 AI 底图与精修</span></label>
+            <button id="ribbon-enable-save" class="button secondary" type="submit" disabled>保存开关</button>
+          </div>
+        </form>
+      </section>
+      <section class="panel help-panel">
+        <details>
+          <summary>怎么填写与常见问题</summary>
+          <ol>
+            <li>丝带默认沿用素材提取里的火山方舟 Key 与图片模型，不填也能用；这里填写是为了让丝带单独使用另一套配置。</li>
+            <li>填写 API Key 与图片模型 ID 后保存，两者都填才会切换到丝带专用配置；只填一项不会生效。</li>
+            <li>点“删除配置”会清空丝带专用配置，自动回到沿用素材提取的状态，不影响素材提取本身。</li>
+            <li>保存设置不会调用模型；启用后员工点“生成底图”或“精修”才会产生调用与费用。</li>
+            <li>切换配置后，正在处理的任务会明确失败并保留原版本，不会用新配置偷偷续跑。</li>
+          </ol>
+          <p class="muted">图片服务使用火山方舟北京接口；DeepSeek 的文字理解配置独立保存在 <a href="/admin/deepseek">DeepSeek 页面</a>。</p>
+        </details>
       </section>
     </main>
   </div>

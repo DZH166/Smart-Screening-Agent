@@ -1,0 +1,339 @@
+/* ---------------------------------------------------------------------------
+   Sub-page design system (2026-10-29)
+   Shared by /admin/deepseek, /admin/ribbon, /admin/material and
+   /admin/access-codes. Additive over admin.css: same hooks, calmer surfaces,
+   one type scale, pill actions and soft status blocks.
+--------------------------------------------------------------------------- */
+:root {
+  --page-ink: #17233a;
+  --page-muted: #64718a;
+  --page-faint: #8b98ad;
+  --page-line: #e4e9f1;
+  --page-line-strong: #d6dee9;
+  --page-accent: #315ccc;
+}
+
+body {
+  background:
+    radial-gradient(900px 420px at 10% -14%, #eaf1fd 0%, rgba(234, 241, 253, 0) 60%),
+    #f5f6f8;
+}
+.admin-shell {
+  max-width: 920px;
+  padding: 30px 28px 60px;
+}
+.admin-header {
+  align-items: center;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--page-line);
+  margin-bottom: 22px;
+}
+.back-link {
+  font-size: 13px;
+  color: #7a8aa3;
+}
+.back-link:hover {
+  color: var(--page-accent);
+}
+.admin-header h1 {
+  font-size: 24px;
+  letter-spacing: -0.01em;
+  margin: 6px 0 0;
+}
+.header-actions {
+  gap: 10px;
+}
+.panel {
+  border: 1px solid var(--page-line);
+  border-radius: 16px;
+  background: #fff;
+  padding: 22px 24px;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.03);
+}
+main > .panel + .panel {
+  margin-top: 16px;
+}
+.section-heading {
+  gap: 18px;
+  align-items: flex-start;
+}
+.section-heading h2 {
+  font-size: 17px;
+  letter-spacing: -0.005em;
+  margin: 0;
+}
+.section-heading .muted {
+  font-size: 13px;
+}
+.panel > p {
+  font-size: 13.5px;
+  color: var(--page-muted);
+  line-height: 1.7;
+}
+.state-line {
+  margin: 14px 0 0;
+  padding: 10px 13px;
+  border: 1px solid #eef1f6;
+  border-radius: 10px;
+  background: #f7f9fc;
+  font-size: 13px;
+  color: #5b6a83;
+}
+.panel > label,
+#material-form > label,
+#ribbon-form > label {
+  display: block;
+  margin: 16px 0 7px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #3d4d68;
+}
+input[type="password"],
+input[type="text"],
+textarea {
+  width: 100%;
+  border: 1px solid #dfe6ef;
+  border-radius: 10px;
+  background: #fff;
+  padding: 11px 13px;
+  font-size: 14px;
+  color: var(--page-ink);
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+input[type="password"]:focus,
+input[type="text"]:focus,
+textarea:focus {
+  outline: none;
+  border-color: #8aa6e0;
+  box-shadow: 0 0 0 3px rgba(49, 92, 204, 0.12);
+}
+.button {
+  min-height: 38px;
+  padding: 8px 18px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.button.primary {
+  background: linear-gradient(180deg, #3c67d4 0%, #2f55b8 100%);
+  border-color: #2f55b8;
+  box-shadow: 0 8px 18px -12px rgba(47, 85, 184, 0.8);
+}
+.button.primary:hover:enabled {
+  background: linear-gradient(180deg, #355fca 0%, #2a4ea8 100%);
+}
+.button.secondary {
+  background: #fff;
+  border-color: var(--page-line-strong);
+  color: #263c62;
+}
+.button.quiet {
+  color: #5b6a83;
+}
+.material-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 18px;
+}
+details {
+  border-top: 1px solid #eef1f6;
+  margin-top: 18px;
+  padding-top: 14px;
+}
+summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  color: #3d4d68;
+}
+summary::-webkit-details-marker,
+summary::marker {
+  display: none;
+  content: "";
+}
+summary::before {
+  content: "";
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid var(--page-faint);
+  border-bottom: 1.5px solid var(--page-faint);
+  transform: rotate(-45deg);
+  transition: transform 0.15s;
+}
+details[open] > summary::before {
+  transform: rotate(45deg);
+}
+.notice {
+  border-radius: 10px;
+  font-size: 13px;
+}
+
+/* Key rows ---------------------------------------------------------------- */
+.key-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+.key-card {
+  min-width: 0;
+  padding: 13px 14px;
+  border: 1px solid var(--page-line);
+  border-radius: 12px;
+  background: #fff;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.key-card + .key-card {
+  border-top: 1px solid var(--page-line);
+}
+.key-card:hover {
+  border-color: #c9d5e8;
+  box-shadow: 0 8px 20px -16px rgba(24, 46, 94, 0.45);
+}
+.key-heading {
+  gap: 10px;
+  align-items: center;
+}
+.key-name {
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--page-ink);
+}
+.badge {
+  font-size: 12px;
+  line-height: 1.7;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+.key-actions .button {
+  min-height: 30px;
+  padding: 4px 10px;
+  font-size: 13px;
+  border-radius: 8px;
+}
+.key-actions .button.quiet {
+  color: #5b6a83;
+}
+.key-actions [data-action="remove"] {
+  color: #a3424f;
+}
+.key-note {
+  margin: 8px 0 0;
+  padding: 6px 10px;
+  border: 1px solid #f3e4bd;
+  border-radius: 8px;
+  background: #fff9ec;
+  color: #8a5d12;
+  font-size: 12.5px;
+}
+.add-form {
+  margin: 16px 0 0;
+  padding: 14px;
+  border: 1px dashed var(--page-line-strong);
+  border-radius: 12px;
+  background: #fbfcfe;
+}
+.add-form label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #3d4d68;
+}
+.add-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+.add-footer .muted {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--page-faint);
+}
+.add-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+.enable-control {
+  gap: 10px;
+  font-size: 14px;
+  color: #26364f;
+}
+.help-panel ol,
+.help-panel ul {
+  margin: 10px 0 0;
+  padding-left: 20px;
+  color: var(--page-muted);
+  font-size: 13.5px;
+  line-height: 1.8;
+}
+.help-panel li {
+  margin-bottom: 8px;
+}
+.help-panel .muted {
+  font-size: 12.5px;
+}
+
+/* Summary rows on details panels: title left, hint right */
+#ledger-details summary {
+  justify-content: space-between;
+  width: 100%;
+}
+#ribbon-key-details summary,
+#admin-help summary {
+  width: 100%;
+}
+#ledger-details summary .muted,
+#ribbon-key-details summary .muted {
+  margin-left: auto;
+  font-size: 12.5px;
+  font-weight: 400;
+  color: var(--page-faint);
+}
+.state-line {
+  border-color: #e6ebf4;
+}
+.key-note {
+  border-color: #efddb0;
+}
+
+/* Access-code page rows ---------------------------------------------------- */
+.access-field {
+  margin-bottom: 14px;
+}
+.access-field > label {
+  display: block;
+  margin: 0 0 7px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #3d4d68;
+}
+.access-field > label .muted {
+  font-weight: 400;
+  font-size: 12.5px;
+}
+.access-input {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.access-input input {
+  flex: 1;
+  min-width: 0;
+}
+.access-input .button {
+  flex: none;
+}
+#access-add {
+  margin-top: 6px;
+}

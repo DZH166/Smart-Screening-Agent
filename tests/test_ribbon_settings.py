@@ -115,6 +115,49 @@ def test_corrupt_ciphertext_never_enables_demo_or_leaks(tmp_path):
     assert not restored.snapshot()['enabled'] and restored.snapshot()['provider'] != 'test'
 
 
+def test_ribbon_can_override_the_ark_key_and_model(tmp_path):
+    """The ribbon page keeps its own copy of the Seedream configuration.
+
+    Empty fields fall back to the material settings, so existing deployments keep
+    working; once a value is saved it wins until it is cleared again.
+    """
+    ai = {'enabled': True, 'api_key': 'synthetic-deepseek-key', 'key_revision': 1}
+    ark = {'enabled': True, 'ark_key': 'material-ark-key', 'model_id': 'doubao-material', 'revision': 1}
+    settings = store(tmp_path, ai_settings=SimpleNamespace(runtime=lambda: dict(ai)),
+                     material_settings=SimpleNamespace(runtime=lambda: dict(ark)), key_pool=object())
+    saved = settings.save(dict(expected_revision=0, provider='deepseek_seedream', enabled=True,
+                               ark_api_key='ribbon-ark-key', ark_model='doubao-ribbon'))
+    assert saved['ark_configured'] and saved['ark_model'] == 'doubao-ribbon'
+    assert 'ribbon-ark-key' not in json.dumps(saved) and 'ribbon-ark-key' not in settings.path.read_text()
+
+    runtime = settings.runtime_settings(Settings(auth_mode='hsd'))
+    assert runtime.ark_key == 'ribbon-ark-key' and runtime.image_model == 'doubao-ribbon'
+    assert runtime.ai_ready
+
+    # Clearing returns to the shared material configuration.
+    cleared = settings.save(dict(expected_revision=1, clear_ark_key=True))
+    assert not cleared['ark_configured'] and cleared['ark_model'] == ''
+    restored = settings.runtime_settings(Settings(auth_mode='hsd'))
+    assert restored.ark_key == 'material-ark-key' and restored.image_model == 'doubao-material'
+
+    # The override changes the binding, so an in-flight job must not continue.
+    bound = {name: getattr(restored, name) for name in ('language_model', 'image_model', 'image_quality', 'config_revision')}
+    settings.save(dict(expected_revision=2, ark_model='doubao-third'))
+    with pytest.raises(ProviderError, match='设置已变化'):
+        settings.provider_for_job('deepseek_seedream', bound)
+
+
+def test_ribbon_override_requires_a_key_and_model(tmp_path):
+    ai = {'enabled': True, 'api_key': 'synthetic-deepseek-key', 'key_revision': 1}
+    ark = {'enabled': False, 'ark_key': '', 'model_id': '', 'revision': 1}
+    settings = store(tmp_path, ai_settings=SimpleNamespace(runtime=lambda: dict(ai)),
+                     material_settings=SimpleNamespace(runtime=lambda: dict(ark)), key_pool=object())
+    saved = settings.save(dict(expected_revision=0, provider='deepseek_seedream', enabled=True))
+    assert not saved['configured']
+    runtime = settings.runtime_settings(Settings(auth_mode='hsd'))
+    assert runtime.ai_ready is False
+
+
 def test_no_protector_has_no_plaintext_fallback(tmp_path):
     settings = RibbonSettings(tmp_path,protector=None,environ={})
     with pytest.raises(ValueError):

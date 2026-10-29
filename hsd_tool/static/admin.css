@@ -149,3 +149,13 @@
 #material-form>label:not(:first-child){margin-top:16px}.material-actions{display:flex;gap:12px;align-items:center;margin-top:16px;flex-wrap:wrap}#material-form>.muted{margin-top:6px}
 .material-key-details{margin:0 0 20px;padding-top:2px}.material-key-details>summary{cursor:pointer;color:#355791;font-weight:600}.material-key-view{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px}.material-key-view>code{flex:1;min-width:160px;overflow-wrap:anywhere;user-select:all;background:#f5f7fb;border:1px solid #e0e6ef;border-radius:6px;padding:10px 12px}.material-key-details>.muted{margin-top:8px}
 .admin-section{display:grid;gap:16px}.model-input-row{display:flex;align-items:center;gap:8px}.model-input-row input{flex:1;min-width:0}.model-input-row .button{flex:none}.function-grid{grid-template-columns:1fr}.function-card{padding:15px 16px}.function-card em{margin-top:4px}#material-enable-form{padding-top:16px;border-top:1px solid #e4e9f0}#material-form input[type=password],#material-form input[type=text]{width:100%;border:1px solid #bdc9d8;border-radius:7px;background:#fff;color:#18243a;padding:9px 11px}#material-form input:focus{outline:2px solid #d8e4ff;border-color:#5277cc}@media(max-width:600px){.model-input-row{flex-wrap:wrap}.model-input-row input{flex-basis:100%}}
+
+/* 丝带模型配置页：与素材提取页共用同一套表单排版 */
+#ribbon-form{margin:18px 0}
+#ribbon-form>label{display:block;font-weight:600;margin-bottom:8px}
+#ribbon-form>label:not(:first-child){margin-top:16px}
+#ribbon-form>.muted{margin-top:6px}
+#ribbon-form input[type=password],#ribbon-form input[type=text]{width:100%;border:1px solid #bdc9d8;border-radius:7px;background:#fff;color:#18243a;padding:9px 11px}
+#ribbon-form input:focus{outline:2px solid #d8e4ff;border-color:#5277cc}
+#ribbon-enable-form{margin-top:18px;padding-top:16px;border-top:1px solid #e4e9f0}
+.ribbon-key-value{overflow-wrap:anywhere;font-family:ui-monospace,Consolas,monospace;font-size:13px}

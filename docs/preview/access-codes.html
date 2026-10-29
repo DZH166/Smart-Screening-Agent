@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>员工访问码 · HSD 图号助手</title>
+  <link rel="stylesheet" href="../../hsd_tool/static/admin.css">
+  <link rel="stylesheet" href="../../hsd_tool/static/admin-page.css">
+  <link rel="stylesheet" href="../../hsd_tool/static/access-codes.css">
+</head>
+<body>
+<div style="position:fixed;left:50%;top:12px;transform:translateX(-50%);z-index:99;padding:8px 16px;border-radius:999px;background:#17233a;color:#fff;font:13px/1.4 system-ui">static preview</div>
+  <div class="admin-shell access-shell">
+    <header class="admin-header">
+      <div><a class="back-link" href="/admin#keys">← 返回 Key 账本</a><h1>员工访问码</h1></div>
+      <button id="access-refresh" class="button secondary" type="button">刷新列表</button>
+    </header>
+    <div id="access-message" class="notice hidden" role="status" aria-live="polite"></div>
+    <a id="access-login" class="button primary login-link hidden" href="/admin/login">重新登录</a>
+    <main>
+      <section class="panel" aria-labelledby="access-heading">
+        <div class="section-heading"><h2 id="access-heading">已设置的访问码</h2><span id="access-count" class="muted"></span></div>
+        <p id="access-state" class="state-line">正在读取…</p>
+        <div id="access-list" class="access-list" aria-live="polite"></div>
+      </section>
+      <section class="panel" aria-labelledby="access-add-heading">
+        <h2 id="access-add-heading">增加访问码</h2>
+        <form id="access-form" class="access-form" autocomplete="off">
+          <div class="access-field"><label for="access-label">备注 <span class="muted">（选填）</span></label><input id="access-label" type="text" maxlength="40" autocomplete="off" placeholder="例如：设计组" aria-describedby="access-label-help" disabled><p id="access-label-help" class="muted">备注会显示在列表中，请不要填写访问码。</p></div>
+          <div class="access-field"><label for="access-code">新访问码</label><div class="access-input"><input id="access-code" type="password" autocomplete="new-password" autocapitalize="off" spellcheck="false" aria-describedby="access-code-help" disabled><button id="access-reveal" class="button quiet" type="button" aria-pressed="false" disabled>显示</button></div></div>
+          <p id="access-code-help" class="muted">请先自行保存，再点击增加。保存后不显示原码。</p>
+          <button id="access-add" class="button primary" type="submit" disabled>增加访问码</button>
+        </form>
+      </section>
+      <section class="panel access-help">
+        <details><summary>使用说明</summary><ol>
+          <li>设置成功后，把访问码告诉员工。员工在登录页输入任意一个已启用的访问码，即可使用图号助手。</li>
+          <li>备注只用于辨认，不是访问码。每个浏览器的任务仍然分开，不会因为使用同一个码就共用任务。</li>
+          <li>停用或删除后，该码不能用于新的登录；已经登录的员工不会被强制退出。</li>
+          <li>“原有访问码”来自服务器原先的设置，仍可使用；此页面不能停用或删除它。忘记新码时，可以增加另一个，再停用或删除旧码。</li>
+          <li>提示其他页面改过设置时，先点击“刷新列表”核对，再重新操作。保存结果不明确时也请先刷新，避免重复增加。</li>
+        </ol></details>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
