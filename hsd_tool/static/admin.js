@@ -110,6 +110,10 @@
   function renderKeys() {
     const keys = currentKeys();
     $('key-count').textContent = `（${keys.length} 个）`;
+    document.querySelectorAll?.('[data-key-total]')?.forEach((node) => { node.textContent = String(keys.length); });
+    document.querySelectorAll?.('[data-key-enabled]')?.forEach((node) => {
+      node.textContent = String(keys.filter((key) => key.enabled !== false).length);
+    });
     const signature = JSON.stringify(keys.map(({id,label,enabled,source}) => ({id,label,enabled,source})));
     if (signature !== state.keysSignature) {
       state.keysSignature = signature;

@@ -218,7 +218,9 @@ async function main(){
   retry.resolve({status:200,body:{ok:true}});await retrying;fetchHandler=null;assert.equal(sandbox.window.location.replacements.at(-1),'/admin/login');
 
   const html=fs.readFileSync(path.join(__dirname,'../hsd_tool/static/admin.html'),'utf8'),css=fs.readFileSync(path.join(__dirname,'../hsd_tool/static/admin.css'),'utf8');
-  assert.ok(html.includes('window.HSD_TOKEN = __HSD_TOKEN__'));assert.ok(html.includes('href="/"'));assert.equal((html.match(/<section class="panel\b/g)||[]).length,8,'DeepSeek controls and ledger, Ark, ribbon and access configuration, functions and help');
+  assert.ok(html.includes('window.HSD_TOKEN = __HSD_TOKEN__'));assert.ok(html.includes('href="/"'));assert.equal((html.match(/class="panel feature-card"/g)||[]).length,4,'one card per admin-managed feature');
+  assert.ok(html.includes('service-strip')&&html.includes('class="console-grid"'),'two-part console layout');
+  assert.ok(html.includes('id="key-list"')&&html.includes('id="key-add-form"')&&html.includes('id="key-count"'),'key pool keeps its hooks');
   assert.ok(html.indexOf('id="material-config-heading"')<html.indexOf('id="functions"'),'Ark configuration is under Key ledger');
   const functions=html.slice(html.indexOf('id="functions"'),html.indexOf('id="help"'));assert.equal((functions.match(/class="function-card"/g)||[]).length,3);assert.ok(!functions.includes('/admin/access-codes'));assert.ok(html.indexOf('id="access-config-heading"')<html.indexOf('id="functions"'));
   const keys=html.slice(html.indexOf('data-admin-section="keys"'),html.indexOf('id="functions"'));
