@@ -1,0 +1,586 @@
+
+/* ---------------------------------------------------------------------------
+   Key ledger console (2026-10-29)
+   Layout + type refinements for the admin page: a single hero, a two-column
+   console grid (services on the left, key pool on the right) and compact,
+   scannable key rows. Additive overrides only; every hook used by admin.js
+   (#keys, #key-list, #key-add-form, #ledger-details, #ribbon-settings-panel)
+   keeps its id and behaviour.
+--------------------------------------------------------------------------- */
+:root {
+  --ink: #17233a;
+  --muted: #64718a;
+  --faint: #8b98ad;
+  --line: #e4e9f1;
+  --line-strong: #d5dde9;
+  --accent: #315ccc;
+  --accent-soft: #eef2fd;
+  --ok: #1c6b48;
+  --warn: #8a5d12;
+  --bad: #9c2436;
+  --radius: 14px;
+}
+body {
+  background:
+    radial-gradient(1100px 460px at 12% -12%, #eaf1fd 0%, rgba(234, 241, 253, 0) 62%),
+    #f5f6f8;
+}
+.admin-shell {
+  max-width: 1180px;
+  padding: 28px 30px 56px;
+}
+.admin-header {
+  align-items: flex-start;
+  margin-bottom: 22px;
+}
+.header-title h1 {
+  font-size: 26px;
+  letter-spacing: -0.01em;
+  margin: 8px 0 2px;
+}
+.build-line {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--faint);
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.header-actions {
+  align-items: center;
+  gap: 10px;
+}
+.admin-body {
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+.admin-body > main {
+  display: block;
+}
+.admin-nav {
+  border-color: var(--line);
+  border-radius: var(--radius);
+  padding: 10px;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.03);
+}
+.admin-nav-item {
+  border-radius: 9px;
+  padding: 9px 11px;
+}
+.admin-nav-item.active {
+  background: var(--accent-soft);
+  border-color: #d6e2ff;
+  color: #1d3f9e;
+}
+.admin-section {
+  display: grid;
+  gap: 18px;
+}
+
+/* Hero ------------------------------------------------------------------- */
+.console-hero {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 24px;
+  padding: 22px 24px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: linear-gradient(180deg, #ffffff 0%, #f7f9ff 100%);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 20px 44px -32px rgba(24, 46, 94, 0.35);
+  overflow: hidden;
+  margin-bottom: 20px;
+}
+.console-hero::after {
+  content: "";
+  position: absolute;
+  right: -70px;
+  bottom: -130px;
+  width: 300px;
+  height: 300px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #dfe8fb 0%, rgba(223, 232, 251, 0) 68%);
+  pointer-events: none;
+}
+.eyebrow {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  color: var(--faint);
+  text-transform: uppercase;
+}
+.hero-title {
+  font-size: 22px;
+  letter-spacing: -0.01em;
+  margin: 0 0 6px;
+}
+.hero-desc {
+  margin: 0;
+  max-width: 58ch;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.7;
+}
+.hero-meta {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-end;
+}
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: #fff;
+  color: #4a5a75;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.pill-muted {
+  color: var(--faint);
+  background: #f7f9fc;
+  border-color: #ebeff6;
+}
+
+/* Grid + cards ----------------------------------------------------------- */
+.console-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.04fr);
+  gap: 20px;
+  align-items: start;
+}
+.console-col {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.panel {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  padding: 18px 20px;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.03);
+}
+.card-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+.card-title {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.enable-form {
+  margin-left: auto;
+}
+.card-title h2 {
+  font-size: 16px;
+  letter-spacing: -0.005em;
+  margin: 0;
+}
+.card-desc {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.6;
+  max-width: 48ch;
+}
+.card-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+}
+.service-card .state-line {
+  margin: 0;
+  padding: 9px 12px;
+  border: 1px solid #eef1f6;
+  border-radius: 9px;
+  background: #f7f9fc;
+  font-size: 13px;
+  color: #5b6a83;
+}
+.enable-form {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  padding: 5px 6px 5px 14px;
+  border: 1px solid #eef1f6;
+  border-radius: 999px;
+  background: #f7f9fc;
+}
+.enable-control {
+  gap: 8px;
+  font-size: 13px;
+  color: #3d4d68;
+}
+.enable-form .button {
+  min-height: 32px;
+  padding: 5px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+}
+.card-head > p {
+  margin: 0;
+  flex: none;
+}
+.card-head .button.secondary {
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 13px;
+  min-height: 34px;
+}
+
+/* Key pool --------------------------------------------------------------- */
+.key-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 15px;
+}
+.key-card {
+  min-width: 0;
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.key-card + .key-card {
+  border-top: 1px solid var(--line);
+}
+.key-card:hover {
+  border-color: #c9d5e8;
+  box-shadow: 0 8px 20px -16px rgba(24, 46, 94, 0.45);
+}
+.key-heading {
+  gap: 10px;
+  align-items: center;
+  flex-wrap: nowrap;
+}
+.key-name {
+  gap: 8px;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.key-name > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Status dot in front of the label: scanning a long list should not require
+   reading every badge. :has keeps it a CSS-only enhancement. */
+.key-name::before {
+  content: "";
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #b9c4d4;
+  box-shadow: 0 0 0 3px rgba(185, 196, 212, 0.18);
+}
+.key-card:has(.badge.ok) .key-name::before {
+  background: var(--ok);
+  box-shadow: 0 0 0 3px rgba(28, 107, 72, 0.14);
+}
+.key-card:has(.badge.warning) .key-name::before {
+  background: #b07c1c;
+  box-shadow: 0 0 0 3px rgba(176, 124, 28, 0.16);
+}
+.key-card:has(.badge.error) .key-name::before {
+  background: var(--bad);
+  box-shadow: 0 0 0 3px rgba(156, 36, 54, 0.14);
+}
+.badge {
+  font-size: 12px;
+  line-height: 1.7;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+.badge.ok {
+  background: #e8f6ef;
+  border: 1px solid #c9e9d9;
+  color: var(--ok);
+}
+.badge.warning {
+  background: #fff6e0;
+  border: 1px solid #f0dfb0;
+  color: var(--warn);
+}
+.badge.error {
+  background: #fdecef;
+  border: 1px solid #f2c9d1;
+  color: var(--bad);
+}
+.key-name .badge:not(.ok):not(.warning):not(.error) {
+  background: #f2f5fa;
+  border: 1px solid var(--line);
+  color: #5a6b84;
+}
+.key-actions {
+  gap: 2px;
+}
+.key-actions .button {
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-size: 13px;
+}
+.key-actions .button.quiet {
+  color: #5b6a83;
+}
+.key-actions .button.quiet:hover:enabled {
+  background: #f1f5fc;
+  color: var(--accent);
+}
+.key-actions .button.secondary {
+  border-color: var(--line-strong);
+}
+.key-actions [data-action="remove"] {
+  color: #a3424f;
+}
+.key-note {
+  margin: 8px 0 0;
+  padding: 6px 10px;
+  border: 1px solid #f3e4bd;
+  border-radius: 8px;
+  background: #fff9ec;
+  color: var(--warn);
+  font-size: 12.5px;
+}
+.key-edit,
+.key-delete {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+/* Add form --------------------------------------------------------------- */
+.add-form {
+  margin: 16px 0 0;
+  padding: 14px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 12px;
+  background: #fbfcfe;
+}
+.add-form label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #3d4d68;
+}
+.add-input {
+  display: block;
+}
+#key-batch {
+  min-height: 78px;
+  border-color: #d9e1ee;
+  background: #fff;
+}
+.add-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+.add-footer .muted {
+  margin: 0;
+  flex: 1 1 200px;
+  font-size: 12.5px;
+  color: var(--faint);
+}
+.add-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* Ledger ----------------------------------------------------------------- */
+.ledger-panel {
+  padding: 0;
+  overflow: hidden;
+}
+.ledger-panel details {
+  margin: 0;
+}
+.ledger-panel summary {
+  list-style: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  cursor: pointer;
+}
+.ledger-panel summary::-webkit-details-marker {
+  display: none;
+}
+
+.ledger-panel summary::marker {
+  content: "";
+}
+.ledger-panel summary::-webkit-details-marker {
+  display: none;
+}
+/* The base sheet draws a "+" marker; replace it with a quiet chevron. */
+.ledger-panel summary::before {
+  content: "";
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid var(--faint);
+  border-bottom: 1.5px solid var(--faint);
+  transform: rotate(-45deg);
+  transition: transform 0.15s;
+  margin-right: 2px;
+}
+.ledger-panel details[open] > summary::before {
+  content: "";
+  transform: rotate(45deg);
+}
+.ledger-panel summary .ledger-hint {
+  margin-left: auto;
+}
+.ledger-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.ledger-hint {
+  font-size: 12px;
+  color: #9aa6b8;
+}
+.ledger-body {
+  padding: 0 20px 18px;
+}
+.ledger-tools {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.ledger-warning {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--warn);
+}
+
+/* Functions / help -------------------------------------------------------- */
+.functions-panel .function-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 16px;
+}
+.function-card {
+  border-radius: 12px;
+  transition: transform 0.12s, box-shadow 0.12s, border-color 0.12s;
+}
+.function-card:hover {
+  border-color: #c3d2ea;
+  box-shadow: 0 12px 26px -20px rgba(24, 46, 94, 0.55);
+  transform: translateY(-1px);
+}
+.help-panel {
+  border-radius: var(--radius);
+}
+
+@media (max-width: 1120px) {
+  .console-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .hero-meta {
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .functions-panel .function-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 820px) {
+  .admin-shell {
+    padding: 20px 16px 40px;
+  }
+  .admin-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .admin-nav {
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .console-hero {
+    flex-direction: column;
+  }
+  .card-head {
+    flex-direction: column;
+  }
+  .functions-panel .function-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Ribbon service card ----------------------------------------------------- */
+#ribbon-settings-panel details {
+  margin: 0;
+}
+#ribbon-settings-panel summary {
+  padding: 0 0 10px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+#ribbon-settings-panel .help-content {
+  display: grid;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+#ribbon-settings-panel .help-content p {
+  margin: 0;
+}
+#ribbon-settings-panel .help-content label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #3d4d68;
+}
+#ribbon-settings-panel #ribbon-inherited-status {
+  padding: 9px 12px;
+  border: 1px solid #eef1f6;
+  border-radius: 9px;
+  background: #f7f9fc;
+  color: #5b6a83;
+}
+#ribbon-settings-panel .button {
+  min-height: 34px;
+  border-radius: 999px;
+  font-size: 13px;
+  padding: 6px 16px;
+}
+
+@media (max-width: 820px) {
+  .key-heading {
+    flex-wrap: wrap;
+  }
+}

@@ -6,6 +6,7 @@
   <meta name="color-scheme" content="light">
   <title>管理员设置 · HSD 图号助手</title>
   <link rel="stylesheet" href="/static/admin.css">
+  <link rel="stylesheet" href="/static/admin-console.css">
   <script>window.HSD_TOKEN = __HSD_TOKEN__; window.HSD_BUILD = "__HSD_BUILD__";</script>
   <script src="/static/build-check.js" defer></script>
   <script src="/static/admin.js" defer></script>
@@ -15,10 +16,14 @@
 <body>
   <div class="admin-shell">
     <header class="admin-header">
-      <div><a class="back-link" href="/">← 返回员工页面</a><h1>管理员设置</h1><p class="muted" id="admin-build" style="font-size:12px;margin:2px 0 0">构建 __HSD_BUILD__</p></div>
+      <div class="header-title">
+        <a class="back-link" href="/">← 返回员工页面</a>
+        <h1>管理员设置</h1>
+        <p class="build-line" id="admin-build">构建 __HSD_BUILD__</p>
+      </div>
       <div class="header-actions">
         <button id="admin-refresh" class="button secondary" type="button">刷新设置</button>
-        <button id="admin-logout" class="button secondary" type="button">退出登录</button>
+        <button id="admin-logout" class="button quiet" type="button">退出登录</button>
       </div>
     </header>
     <div id="admin-message" class="notice hidden" role="status" aria-live="polite"></div>
@@ -29,102 +34,173 @@
         <a class="admin-nav-item" href="#functions"><span class="admin-nav-name">功能区</span></a>
         <a class="admin-nav-item" href="#help"><span class="admin-nav-name">帮助</span></a>
       </aside>
-    <main>
-      <div class="admin-section" data-admin-section="keys">
-      <section class="panel settings-panel" id="keys" aria-labelledby="settings-heading">
-        <div class="section-heading">
-          <h2 id="settings-heading">DeepSeek · 图号匹配与素材裁剪</h2>
-          <form id="enable-form">
-            <label class="enable-control"><input id="ai-enabled" type="checkbox" disabled><span>启用 DeepSeek</span></label>
-            <button id="enable-save" class="button secondary" type="submit" disabled>保存</button>
-          </form>
+      <main class="console">
+        <div class="admin-section" data-admin-section="keys">
+          <section class="console-hero">
+            <div class="hero-copy">
+              <p class="eyebrow">KEY LEDGER</p>
+              <h2 class="hero-title">Key 账本与模型服务</h2>
+              <p class="hero-desc">员工共用这里的 Key，不必在各自电脑配置。左侧维护服务开关与模型，右侧管理 Key 池和敏感内容。</p>
+            </div>
+            <div class="hero-meta">
+              <span class="pill">构建 <span id="hero-build">__HSD_BUILD__</span></span>
+              <span class="pill pill-muted">仅内部人员可见</span>
+            </div>
+          </section>
+
+          <div class="console-grid">
+            <div class="console-col">
+              <section class="panel service-card" id="keys" data-service="deepseek">
+                <div class="card-head">
+                  <div class="card-title">
+                    <p class="eyebrow">SERVICE 01</p>
+                    <h2 id="settings-heading">DeepSeek · 图号匹配与素材裁剪</h2>
+                    <p class="card-desc">图号匹配、素材范围识别与文字精修共用下面这组 Key。</p>
+                  </div>
+                </div>
+                <div class="card-foot">
+                  <p id="settings-state" class="state-line">正在读取设置…</p>
+                  <form id="enable-form" class="enable-form">
+                    <label class="enable-control"><input id="ai-enabled" type="checkbox" disabled><span>启用</span></label>
+                    <button id="enable-save" class="button primary" type="submit" disabled>保存</button>
+                  </form>
+                </div>
+                <div id="storage-warning" class="notice warning hidden" role="alert"></div>
+              </section>
+
+              <section class="panel service-card">
+                <div class="card-head">
+                  <div class="card-title">
+                    <p class="eyebrow">SERVICE 02</p>
+                    <h2 id="material-config-heading">火山方舟 · 素材清理</h2>
+                    <p class="card-desc">Seedream 负责清理整图，DeepSeek 识别需要裁剪的设计范围。</p>
+                  </div>
+                  <a class="button secondary" href="/admin/material">管理 Key 与模型 →</a>
+                </div>
+              </section>
+
+              <section class="panel service-card" id="ribbon-settings-panel" aria-label="丝带设计模型设置"></section>
+
+              <section class="panel service-card">
+                <div class="card-head">
+                  <div class="card-title">
+                    <p class="eyebrow">SERVICE 03</p>
+                    <h2 id="access-config-heading">员工访问码 · 登录管理</h2>
+                    <p class="card-desc">管理员工进入网站使用的访问码；停用后只影响之后登录的会话。</p>
+                  </div>
+                  <a class="button secondary" href="/admin/access-codes">管理访问码 →</a>
+                </div>
+              </section>
+            </div>
+
+            <div class="console-col">
+              <section class="panel keys-panel">
+                <div class="card-head">
+                  <div class="card-title">
+                    <p class="eyebrow">KEY POOL</p>
+                    <h2 id="keys-heading">API Key <span id="key-count" class="count"></span></h2>
+                    <p class="card-desc">员工共用这些 Key。「待验证」表示还没有成功调用记录，不是错误。</p>
+                  </div>
+                </div>
+                <div id="key-list" class="key-list" aria-live="polite"><p class="empty">正在读取 Key…</p></div>
+                <form id="key-add-form" class="add-form" autocomplete="off">
+                  <label for="key-batch">批量添加</label>
+                  <div class="add-input">
+                    <textarea id="key-batch" rows="3" autocomplete="off" spellcheck="false" autocapitalize="off" aria-describedby="batch-help" placeholder="每行粘贴一个 API Key" disabled></textarea>
+                  </div>
+                  <div class="add-footer">
+                    <p id="batch-help" class="muted">每行一个，最多 100 个；提交即清空，默认遮罩。</p>
+                    <div class="add-actions">
+                      <button id="key-reveal" class="button quiet" type="button" aria-pressed="false">显示</button>
+                      <button id="key-add" class="button primary" type="submit" disabled>添加 Key</button>
+                    </div>
+                  </div>
+                </form>
+              </section>
+
+              <section class="panel ledger-panel" id="shared-ledger">
+                <details id="ledger-details">
+                  <summary>
+                    <span class="ledger-title" id="ledger-heading">查看或复制 Key</span>
+                    <span class="ledger-hint">敏感内容 · 默认遮罩</span>
+                  </summary>
+                  <div class="ledger-body">
+                    <div class="ledger-tools">
+                      <p class="ledger-warning">仅在展开时读取。默认遮罩，显示后请避免截图或录屏。</p>
+                      <button id="ledger-refresh" class="button quiet" type="button">重新读取</button>
+                    </div>
+                    <p id="ledger-state" class="muted" role="status" aria-live="polite"></p>
+                    <div id="ledger-list" class="ledger-list"></div>
+                  </div>
+                </details>
+              </section>
+            </div>
+          </div>
         </div>
-        <p id="settings-state" class="state-line">正在读取设置…</p>
-        <div id="storage-warning" class="notice warning hidden" role="alert"></div>
-      </section>
-      <section class="panel keys-panel" aria-labelledby="keys-heading">
-        <div class="section-heading"><div><h2 id="keys-heading">API Key <span id="key-count" class="count"></span></h2><p class="muted">员工共用这些 Key，无需在各自电脑配置。</p></div></div>
-        <div id="key-list" class="key-list" aria-live="polite"><p class="empty">正在读取 Key…</p></div>
-        <form id="key-add-form" class="add-form" autocomplete="off">
-          <label for="key-batch">批量添加</label>
-          <div class="add-input"><textarea id="key-batch" rows="2" autocomplete="off" spellcheck="false" autocapitalize="off" aria-describedby="batch-help" placeholder="每行粘贴一个 API Key" disabled></textarea><button id="key-reveal" class="button quiet" type="button" aria-pressed="false">显示</button><button id="key-add" class="button primary" type="submit" disabled>添加 Key</button></div>
-          <p id="batch-help" class="muted">每行一个，最多 100 个；提交即清空。默认遮罩，可按需显示。</p>
-        </form>
-      </section>
-      <section class="panel ledger-panel" id="shared-ledger" aria-labelledby="ledger-heading">
-        <details id="ledger-details"><summary><span id="ledger-heading">查看或复制 Key</span><span class="muted">Key 账本</span></summary>
-          <div class="ledger-body">
-            <div class="ledger-tools"><p class="ledger-warning">仅在展开时读取。默认遮罩，显示后请避免截图或录屏。</p><button id="ledger-refresh" class="button quiet" type="button">重新读取</button></div>
-            <p id="ledger-state" class="muted" role="status" aria-live="polite"></p>
-            <div id="ledger-list" class="ledger-list"></div>
+
+        <section class="panel hidden functions-panel" id="functions" data-admin-section="functions">
+          <div class="card-head">
+            <div class="card-title">
+              <p class="eyebrow">WORKSPACES</p>
+              <h2>功能区</h2>
+              <p class="card-desc">三个员工工具共用同一套登录与权限，不需要分别开账号。</p>
+            </div>
+            <p><a class="button secondary" href="/#ribbon-admin">维护丝带排版与输出规格 →</a></p>
           </div>
-        </details>
-      </section>
-      <section class="panel" aria-labelledby="material-config-heading">
-        <div class="section-heading"><div><h2 id="material-config-heading">火山方舟 · 素材清理</h2><p class="muted">Seedream 清理整图；DeepSeek 使用上方的 Key 识别裁剪范围。</p></div><a class="button secondary" href="/admin/material">管理 Key 与模型 →</a></div>
-      </section>
-      <section class="panel" id="ribbon-settings-panel" aria-label="丝带设计模型设置"></section>
-      <section class="panel" aria-labelledby="access-config-heading">
-        <div class="section-heading"><div><h2 id="access-config-heading">员工访问码 · 登录管理</h2><p class="muted">统一管理员工进入网站使用的访问码。</p></div><a class="button secondary" href="/admin/access-codes">管理访问码 →</a></div>
-      </section>
-      </div>
-      <section class="panel hidden" id="functions" data-admin-section="functions">
-        <h2>功能区</h2>
-        <div class="function-grid">
-          <a class="function-card" href="/">
-            <strong>图号助手</strong>
-            <span>上传表格与 AI 文件，自动匹配并编号</span>
-            <em>打开功能 →</em>
-          </a>
-          <a class="function-card" href="/#material">
-            <strong>素材提取</strong>
-            <span>清理整图、识别设计范围，裁剪为单张 PNG</span>
-            <em>打开功能 →</em>
-          </a>
-          <a class="function-card" href="/#ribbon">
-            <strong>丝带设计</strong>
-            <span>组合图案、排版与底图，生成、精修并下载设计</span>
-            <em>打开功能 →</em>
-          </a>
-        </div>
-        <p><a href="/#ribbon-admin">维护丝带排版与输出规格 →</a></p>
-      </section>
-      <section class="panel help-panel hidden" id="help" data-admin-section="help" aria-labelledby="help-heading">
-        <details id="admin-help">
-          <summary id="help-heading">使用说明与故障排查</summary>
-          <div class="help-body">
-            <section aria-labelledby="usage-heading">
-              <h3 id="usage-heading">怎么使用</h3>
-              <ol>
-                <li><strong>先设置 Key。</strong>每行粘贴一个，点击“添加 Key”，再勾选“启用 DeepSeek”并保存。员工共用这些 Key，不用各自填写。</li>
-                <li><strong>员工上传文件。</strong>选择图片编号表（.xlsx）和 AI 压缩包（.zip），确认本批起始号，再开始处理。已有编号保留；成功匹配的缺号图片按 HSD 加四位数字编号。</li>
-                <li><strong>只处理有疑问的图片。</strong>可靠匹配直接通过；剩余图片按提示确认、换候选或跳过。不需要逐张检查全部图片。</li>
-                <li><strong>确认摘要，再下载。</strong>核对数量后点击“确认并导出”。未处理或跳过的原始行保持原状，不会被当作完成项。请检查下载的 ZIP 能否打开。</li>
-                <li><strong>想中途停止。</strong>点击“停止上传”或“停止本批”，等页面显示已经停止，再处理下一批。已发出的 AI 请求需要等返回或超时，已产生的用量仍会记录。</li>
-                <li><strong>提取素材。</strong>在“Key 账本”配置火山方舟图片模型与 DeepSeek，启用素材提取。员工选择图片后可查看处理进度，生成后直接下载 PNG 或 ZIP。需要提升细腻度时点“精修”，成功后可对比前后；不需要的素材可舍弃并恢复。漏提取时可以框选补提，模型效果仍需自行检查。</li>
-                <li><strong>云端结果及时保存。</strong>结果下载到员工电脑，不存 OSS；服务器副本在本批结束或成功修改后保留 50 小时（约两天）。原浏览器重新登录可找回保留期内同版本任务；换浏览器、清除网站数据或版本升级后不能找回旧批次。</li>
-              </ol>
-            </section>
-            <section aria-labelledby="troubleshooting-heading">
-              <h3 id="troubleshooting-heading">遇到问题怎么办</h3>
-              <ul>
-                <li><strong>网页打不开或要求重新登录。</strong>先检查网络和网址；登录过期就在原浏览器重新登录。大家都打不开时，请联系维护人员检查服务。</li>
-                <li><strong>Key 不可用。</strong>检查是否粘贴完整、DeepSeek 账户是否还有余额。修复后先停用，再启用该 Key。保存成功不代表已经调用成功，增加 Key 也不会增加官方账户额度。</li>
-                <li><strong>上传失败。</strong>按文件旁的提示检查格式和文件是否完整；空间不足时联系维护人员。网络中断先按页面提示核对或重试，避免重复提交。</li>
-                <li><strong>排队或处理较慢。</strong>查看当前阶段和队列位置，先等待，不要反复点击开始。确实不想继续时，使用“停止本批”，不要把“正在停止”当成已经结束。</li>
-                <li><strong>AI 失败或仍有图片待确认。</strong>按页面提示人工处理剩余图片。AI 建议相同不等于已经确认；缺图、颜色差异或相近文件仍可能需要人工判断。</li>
-                <li><strong>下载失败。</strong>留在当前页面按提示重试或重新登录，并检查浏览器下载列表。超过保留期或版本升级后，需要重新上传处理。</li>
-                <li><strong>设置没有保存。</strong>以页面的成功提示为准；提示其他页面改过设置时，点击“刷新设置”，核对后重新保存。不要把按钮点击成功当成设置已经生效。</li>
-              </ul>
-            </section>
+          <div class="function-grid">
+            <a class="function-card" href="/">
+              <strong>图号助手</strong>
+              <span>上传表格与 AI 文件，自动匹配并编号</span>
+              <em>打开功能 →</em>
+            </a>
+            <a class="function-card" href="/#material">
+              <strong>素材提取</strong>
+              <span>清理整图、识别设计范围，裁剪为单张 PNG</span>
+              <em>打开功能 →</em>
+            </a>
+            <a class="function-card" href="/#ribbon">
+              <strong>丝带设计</strong>
+              <span>组合图案、排版与底图，生成、精修并下载设计</span>
+              <em>打开功能 →</em>
+            </a>
           </div>
-          <div class="help-notes">
-            <p><strong>图片会发到哪里？</strong>图号助手发送用于查找和核对的图片预览给 DeepSeek，原始表格、压缩包、AI 文件和电脑路径不会发送。素材提取将所选图片与修改要求交给火山方舟清理，再由 DeepSeek 识别清理图中的完整设计范围。两个服务的 Key 分开设置。</p>
-            <p id="qualification-state"></p><p id="persistence-state"></p>
-          </div>
-        </details>
-      </section>
-    </main>
+        </section>
+        <section class="panel help-panel hidden" id="help" data-admin-section="help" aria-labelledby="help-heading">
+          <details id="admin-help">
+            <summary id="help-heading">使用说明与故障排查</summary>
+            <div class="help-body">
+              <section aria-labelledby="usage-heading">
+                <h3 id="usage-heading">怎么使用</h3>
+                <ol>
+                  <li><strong>先设置 Key。</strong>每行粘贴一个，点击“添加 Key”，再勾选“启用 DeepSeek”并保存。员工共用这些 Key，不用各自填写。</li>
+                  <li><strong>员工上传文件。</strong>选择图片编号表（.xlsx）和 AI 压缩包（.zip），确认本批起始号，再开始处理。已有编号保留；成功匹配的缺号图片按 HSD 加四位数字编号。</li>
+                  <li><strong>只处理有疑问的图片。</strong>可靠匹配直接通过；剩余图片按提示确认、换候选或跳过。不需要逐张检查全部图片。</li>
+                  <li><strong>确认摘要，再下载。</strong>核对数量后点击“确认并导出”。未处理或跳过的原始行保持原状，不会被当作完成项。请检查下载的 ZIP 能否打开。</li>
+                  <li><strong>想中途停止。</strong>点击“停止上传”或“停止本批”，等页面显示已经停止，再处理下一批。已发出的 AI 请求需要等返回或超时，已产生的用量仍会记录。</li>
+                  <li><strong>提取素材。</strong>在“Key 账本”配置火山方舟图片模型与 DeepSeek，启用素材提取。员工选择图片后可查看处理进度，生成后直接下载 PNG 或 ZIP。需要提升细腻度时点“精修”，成功后可对比前后；不需要的素材可舍弃并恢复。漏提取时可以框选补提，模型效果仍需自行检查。</li>
+                  <li><strong>云端结果及时保存。</strong>结果下载到员工电脑，不存 OSS；服务器副本在本批结束或成功修改后保留 50 小时（约两天）。原浏览器重新登录可找回保留期内同版本任务；换浏览器、清除网站数据或版本升级后不能找回旧批次。</li>
+                </ol>
+              </section>
+              <section aria-labelledby="troubleshooting-heading">
+                <h3 id="troubleshooting-heading">遇到问题怎么办</h3>
+                <ul>
+                  <li><strong>网页打不开或要求重新登录。</strong>先检查网络和网址；登录过期就在原浏览器重新登录。大家都打不开时，请联系维护人员检查服务。</li>
+                  <li><strong>Key 不可用。</strong>检查是否粘贴完整、DeepSeek 账户是否还有余额。修复后先停用，再启用该 Key。保存成功不代表已经调用成功，增加 Key 也不会增加官方账户额度。</li>
+                  <li><strong>上传失败。</strong>按文件旁的提示检查格式和文件是否完整；空间不足时联系维护人员。网络中断先按页面提示核对或重试，避免重复提交。</li>
+                  <li><strong>排队或处理较慢。</strong>查看当前阶段和队列位置，先等待，不要反复点击开始。确实不想继续时，使用“停止本批”，不要把“正在停止”当成已经结束。</li>
+                  <li><strong>AI 失败或仍有图片待确认。</strong>按页面提示人工处理剩余图片。AI 建议相同不等于已经确认；缺图、颜色差异或相近文件仍可能需要人工判断。</li>
+                  <li><strong>下载失败。</strong>留在当前页面按提示重试或重新登录，并检查浏览器下载列表。超过保留期或版本升级后，需要重新上传处理。</li>
+                  <li><strong>设置没有保存。</strong>以页面的成功提示为准；提示其他页面改过设置时，点击“刷新设置”，核对后重新保存。不要把按钮点击成功当成设置已经生效。</li>
+                </ul>
+              </section>
+            </div>
+            <div class="help-notes">
+              <p><strong>图片会发到哪里？</strong>图号助手发送用于查找和核对的图片预览给 DeepSeek，原始表格、压缩包、AI 文件和电脑路径不会发送。素材提取将所选图片与修改要求交给火山方舟清理，再由 DeepSeek 识别清理图中的完整设计范围。两个服务的 Key 分开设置。</p>
+              <p id="qualification-state"></p><p id="persistence-state"></p>
+            </div>
+          </details>
+        </section>
+      </main>
     </div>
   </div>
 </body>
