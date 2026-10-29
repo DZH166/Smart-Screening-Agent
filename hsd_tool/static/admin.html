@@ -6,7 +6,8 @@
   <meta name="color-scheme" content="light">
   <title>管理员设置 · HSD 图号助手</title>
   <link rel="stylesheet" href="/static/admin.css">
-  <script>window.HSD_TOKEN = __HSD_TOKEN__;</script>
+  <script>window.HSD_TOKEN = __HSD_TOKEN__; window.HSD_BUILD = "__HSD_BUILD__";</script>
+  <script src="/static/build-check.js" defer></script>
   <script src="/static/admin.js" defer></script>
   <script src="/static/admin-workspace.js" defer></script>
   <script src="/static/ribbon-settings.js" defer></script>
@@ -14,7 +15,7 @@
 <body>
   <div class="admin-shell">
     <header class="admin-header">
-      <div><a class="back-link" href="/">← 返回员工页面</a><h1>管理员设置</h1></div>
+      <div><a class="back-link" href="/">← 返回员工页面</a><h1>管理员设置</h1><p class="muted" id="admin-build" style="font-size:12px;margin:2px 0 0">构建 __HSD_BUILD__</p></div>
       <div class="header-actions">
         <button id="admin-refresh" class="button secondary" type="button">刷新设置</button>
         <button id="admin-logout" class="button secondary" type="button">退出登录</button>

@@ -54,9 +54,23 @@ def test_admin_endpoints_are_closed_before_login(app, path):
 def test_correct_credentials_open_the_console(app, stub_credentials):
     client = app.test_client()
     assert post_login(client).status_code == 200
-    page = client.get("/admin").get_data(as_text=True)
+    response = client.get("/admin")
+    page = response.get_data(as_text=True)
     assert "API Key" in page and "退出登录" in page and "Key 账本" in page
     assert client.get("/api/admin/overview").status_code == 200
+    # The page must say which build it came from and load versioned assets, so an
+    # old tab can be spotted instead of silently looking broken.
+    build = response.headers.get("X-HSD-Build")
+    assert build and "构建 " + build in page
+    assert "window.HSD_BUILD = " + repr(build).replace("'", '"') in page
+    assert "/static/admin.css?v=" + build in page
+    assert "/static/build-check.js?v=" + build in page
+
+
+def test_healthz_reports_the_running_build(app):
+    response = app.test_client().get("/healthz")
+    assert response.status_code == 200
+    assert response.headers.get("X-HSD-Build")
 
 
 def test_wrong_password_and_unknown_account_are_rejected_without_echo(app, stub_credentials):

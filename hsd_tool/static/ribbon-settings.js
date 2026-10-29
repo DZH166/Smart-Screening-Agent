@@ -6,7 +6,7 @@
   // 火山方舟 Seedream key already configured for the other tools. The OpenAI route
   // stays in the backend but is not offered here, so no preset can be picked by
   // accident; the server rejects enabling it without a saved key anyway.
-  root.innerHTML = `<details id="ribbon-settings-details"><summary>丝带设计 · 模型服务</summary>
+  root.innerHTML = `<details id="ribbon-settings-details" open><summary>丝带设计 · 模型服务</summary>
     <form id="ribbon-settings-form" class="help-content">
       <p>仅影响丝带设计。首稿由原素材排版，不调用模型；AI 底图和文字精修使用下面这条路线。</p>
       <p><strong>调用路线：</strong>DeepSeek ＋ Seedream（沿用 Key 账本中已启用的 DeepSeek 和火山方舟配置，不复制、不改动它们的 Key）</p>
@@ -86,4 +86,7 @@
     finally { if (ticket === epoch) { busy = false; controls(); } }
   });
   controls();
+  // Rendered expanded so the block is visible on the ledger page instead of
+  // hiding behind a summary; the toggle handler covers later collapses.
+  if ($("ribbon-settings-details").open) load();
 })();

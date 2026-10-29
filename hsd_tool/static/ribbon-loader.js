@@ -21,7 +21,8 @@
     if (!isRibbon(name)) { app?.setView("ribbon", false); return; }
     if (app) { app.setView(name, true); return; }
     if (loading) return;
-    loading = import("/static/ribbon/ribbon.js");
+    const build = window.HSD_BUILD ? "?v=" + encodeURIComponent(window.HSD_BUILD) : "";
+    loading = import("/static/ribbon/ribbon.js" + build);
     try {
       const module = await loading;
       host.replaceChildren();

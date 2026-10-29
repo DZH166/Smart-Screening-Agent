@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import subprocess
 import sys
@@ -84,6 +85,32 @@ class EmployeeUploadRequest(Request):
         if failure is not None:
             raise failure
         self._hsd_upload_released = True
+
+
+_ASSET_REF = re.compile(r'(/static/[^"\']+\.(?:js|css))')
+
+
+def _build_id():
+    """Identify this deployment so an open page can notice it is stale.
+
+    The release directory is the commit hash under /opt/hsd-agent/releases; a
+    local checkout falls back to the package version.
+    """
+    try:
+        from . import __version__
+
+        candidate = Path(__file__).resolve().parents[1].name
+        if re.fullmatch(r"[0-9a-f]{7,40}", candidate):
+            return f"{__version__}+{candidate[:8]}"
+        return __version__
+    except Exception:
+        return "unknown"
+
+
+def _version_assets(html, build):
+    """Give every static reference the current build, so a reload cannot mix
+    an old script with a new page even if a proxy caches one of them."""
+    return _ASSET_REF.sub(lambda match: f"{match.group(1)}?v={build}", html)
 
 
 def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, settings_dir=None, cloud=None):
@@ -361,6 +388,7 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
             response.direct_passthrough = False
             response.call_on_close(lambda: release_job_lease(identifier, state))
             state["bound"] = True
+        response.headers["X-HSD-Build"] = _build_id()
         if request.endpoint not in {"image", "material_image"} or response.status_code not in {200, 304}:
             response.headers["Cache-Control"] = "no-store"
         response.headers["X-Content-Type-Options"] = "nosniff"
@@ -445,7 +473,9 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
     def index():
         html = (static / "index.html").read_text("utf-8")
         access = {"lan": bool(lan), "remote": bool(lan and not lan.is_host(request.remote_addr))}
-        return html.replace("__HSD_TOKEN__", json.dumps(token)).replace("__HSD_ACCESS__", json.dumps(access))
+        build = _build_id()
+        html = html.replace("__HSD_TOKEN__", json.dumps(token)).replace("__HSD_ACCESS__", json.dumps(access))
+        return _version_assets(html.replace("__HSD_BUILD__", build), build)
 
     @app.get("/material-demo")
     def material_demo_redirect():
@@ -464,11 +494,15 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
 
     @app.get("/admin")
     def admin_page():
-        return (static / "admin.html").read_text("utf-8").replace("__HSD_TOKEN__", json.dumps(token))
+        build = _build_id()
+        html = (static / "admin.html").read_text("utf-8").replace("__HSD_TOKEN__", json.dumps(token))
+        return _version_assets(html.replace("__HSD_BUILD__", build), build)
 
     @app.get("/admin/material")
     def material_settings_page():
-        return (static / "material-settings.html").read_text("utf-8").replace("__HSD_TOKEN__", json.dumps(token))
+        build = _build_id()
+        html = (static / "material-settings.html").read_text("utf-8").replace("__HSD_TOKEN__", json.dumps(token))
+        return _version_assets(html.replace("__HSD_BUILD__", build), build)
 
     def material_settings_snapshot():
         existing = manager.ai_config()
@@ -567,7 +601,9 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
 
     @app.get("/admin/access-codes")
     def admin_access_codes_page():
-        return (static / "access-codes.html").read_text("utf-8").replace("__HSD_TOKEN__", json.dumps(token))
+        build = _build_id()
+        html = (static / "access-codes.html").read_text("utf-8").replace("__HSD_TOKEN__", json.dumps(token))
+        return _version_assets(html.replace("__HSD_BUILD__", build), build)
 
     def access_codes_snapshot():
         if access_codes is None:
