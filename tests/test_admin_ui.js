@@ -218,8 +218,9 @@ async function main(){
   retry.resolve({status:200,body:{ok:true}});await retrying;fetchHandler=null;assert.equal(sandbox.window.location.replacements.at(-1),'/admin/login');
 
   const html=fs.readFileSync(path.join(__dirname,'../hsd_tool/static/admin.html'),'utf8'),css=fs.readFileSync(path.join(__dirname,'../hsd_tool/static/admin.css'),'utf8');
-  assert.ok(html.includes('window.HSD_TOKEN = __HSD_TOKEN__'));assert.ok(html.includes('href="/"'));assert.equal((html.match(/class="panel feature-card"/g)||[]).length,4,'one card per admin-managed feature');
-  assert.ok(html.includes('service-strip')&&html.includes('class="console-grid"'),'two-part console layout');
+  assert.ok(html.includes('window.HSD_TOKEN = __HSD_TOKEN__'));assert.ok(html.includes('href="/"'));assert.equal((html.match(/class="panel feature-card"/g)||[]).length,3,'three feature cards');
+  assert.equal((html.match(/class="panel entry-card"/g)||[]).length,3,'three key and access entry cards');
+  assert.ok(html.includes('class="console-grid"')&&html.includes('console-features')&&html.includes('console-keys'),'two-part console layout');
   const deepseek=fs.readFileSync(path.join(__dirname,'../hsd_tool/static/deepseek-keys.html'),'utf8');
   assert.ok(deepseek.includes('id="key-list"')&&deepseek.includes('id="key-add-form"')&&deepseek.includes('id="key-count"'),'key pool hooks live on the DeepSeek page');
   const ribbonPage=fs.readFileSync(path.join(__dirname,'../hsd_tool/static/ribbon-settings.html'),'utf8');

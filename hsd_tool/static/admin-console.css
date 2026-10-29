@@ -788,3 +788,24 @@ body {
   padding: 7px 18px;
   font-size: 13px;
 }
+
+/* Two columns with a deliberate visual difference ------------------------- */
+.console-features .feature-card {
+  border-left: 3px solid #2f7d5b;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbf8 100%);
+}
+.console-features .feature-card .eyebrow {
+  color: #7f9a8c;
+}
+.console-keys .entry-card {
+  border-left: 3px solid var(--accent);
+  background: linear-gradient(180deg, #ffffff 0%, #f7f9ff 100%);
+}
+.console-keys .entry-card .eyebrow {
+  color: #8394b4;
+}
+.entry-list {
+  display: grid;
+  gap: 14px;
+  grid-auto-rows: 1fr;
+}

@@ -37,7 +37,7 @@
             <div class="hero-copy">
               <p class="eyebrow">KEY LEDGER</p>
               <h2 class="hero-title">Key 账本与模型服务</h2>
-              <p class="hero-desc">员工共用这里的 Key，不必在各自电脑配置。左侧维护服务开关与模型，右侧管理 Key 池和敏感内容。</p>
+              <p class="hero-desc">左侧是三个员工功能及其使用的模型，右侧是支撑它们的 Key 与访问权限；员工共用，不必在各自电脑配置。</p>
             </div>
             <div class="hero-meta">
               <span class="pill">构建 <span id="hero-build">1.20.0+preview</span></span>
@@ -46,104 +46,85 @@
           </section>
 
           <div class="console-grid">
-            <div class="console-col">
+            <div class="console-col console-features">
               <div class="section-label">
                 <h2>功能与模型</h2>
                 <span>每个功能用到的 Key 与模型</span>
               </div>
 
-              <section class="panel service-strip" id="keys" data-service="deepseek">
-                <div class="strip-main">
-                  <p class="eyebrow">SERVICE · SHARED</p>
-                  <h3 id="settings-heading">DeepSeek · 图号匹配与素材裁剪</h3>
-                  <p class="card-desc">图号匹配、素材范围识别与丝带文字精修共用这组 Key；启用开关和 Key 管理在独立页面。</p>
-                </div>
-                <a class="button secondary" href="/admin/deepseek">打开 DeepSeek Key →</a>
-              </section>
-
               <div class="feature-list">
-              <section class="panel feature-card">
-                <div class="feature-top">
-                  <div class="feature-title"><p class="eyebrow">WORKSPACE 01</p><h3>图号助手</h3></div>
-                  <a class="button secondary" href="/">打开功能 →</a>
-                </div>
-                <p class="card-desc">导入表格与 AI 文件，自动匹配、核验并导出编号结果。</p>
-                <ul class="chips">
-                  <li><span>Key</span>DeepSeek 池 · <b data-key-enabled>—</b> 把启用</li>
-                  <li><span>模型</span>deepseek-flash</li>
-                </ul>
-              </section>
+                <section class="panel feature-card">
+                  <div class="feature-top">
+                    <div class="feature-title"><p class="eyebrow">WORKSPACE 01</p><h3>图号助手</h3></div>
+                    <a class="button secondary" href="/">打开功能 →</a>
+                  </div>
+                  <p class="card-desc">DeepSeek · 图号匹配与素材裁剪：导入表格与 AI 文件，自动匹配、核验并导出编号结果。</p>
+                  <ul class="chips">
+                    <li><span>Key</span>DeepSeek 池</li>
+                    <li><span>模型</span>deepseek-flash</li>
+                  </ul>
+                </section>
 
-              <section class="panel feature-card">
-                <div class="feature-top">
-                  <div class="feature-title"><p class="eyebrow">WORKSPACE 02</p><h3 id="material-config-heading">素材提取</h3></div>
-                  <a class="button secondary" href="/admin/material">管理 Key 与模型 →</a>
-                </div>
-                <p class="card-desc">Seedream 清理整图，DeepSeek 识别需要裁剪的设计范围。</p>
-                <ul class="chips">
-                  <li><span>Key</span>DeepSeek 池 + 火山方舟</li>
-                  <li><span>模型</span>Seedream · 见素材设置</li>
-                </ul>
-              </section>
+                <section class="panel feature-card">
+                  <div class="feature-top">
+                    <div class="feature-title"><p class="eyebrow">WORKSPACE 02</p><h3>素材提取</h3></div>
+                    <a class="button secondary" href="/admin/material">管理 Key 与模型 →</a>
+                  </div>
+                  <p class="card-desc">Seedream 清理整图，DeepSeek 识别需要裁剪的设计范围。</p>
+                  <ul class="chips">
+                    <li><span>Key</span>DeepSeek 池 + 火山方舟</li>
+                    <li><span>模型</span>Seedream</li>
+                  </ul>
+                </section>
 
-              <section class="panel feature-card" id="ribbon-card">
-                <div class="feature-top">
-                  <div class="feature-title"><p class="eyebrow">WORKSPACE 03</p><h3>丝带设计</h3></div>
-                  <a class="button secondary" href="/admin/ribbon">管理 Key 与模型 →</a>
-                </div>
-                <p class="card-desc">组合图案、排版与底图，生成、精修并按版本下载。</p>
-                <ul class="chips">
-                  <li><span>Key</span>DeepSeek 池 + 火山方舟</li>
-                  <li><span>模型</span>Seedream 5.0 Flash</li>
-                </ul>
-              </section>
-
-              <section class="panel feature-card">
-                <div class="feature-top">
-                  <div class="feature-title"><p class="eyebrow">WORKSPACE 04</p><h3 id="access-config-heading">员工访问码</h3></div>
-                  <a class="button secondary" href="/admin/access-codes">管理访问码 →</a>
-                </div>
-                <p class="card-desc">管理员工进入网站使用的访问码；停用只影响之后登录的会话。</p>
-                <ul class="chips">
-                  <li><span>用途</span>员工登录</li>
-                  <li><span>存储</span>只存带盐哈希</li>
-                </ul>
-              </section>
+                <section class="panel feature-card">
+                  <div class="feature-top">
+                    <div class="feature-title"><p class="eyebrow">WORKSPACE 03</p><h3>丝带设计</h3></div>
+                    <a class="button secondary" href="/admin/ribbon">管理 Key 与模型 →</a>
+                  </div>
+                  <p class="card-desc">组合图案、排版与底图，生成、精修并按版本下载；模型默认沿用素材提取。</p>
+                  <ul class="chips">
+                    <li><span>Key</span>DeepSeek 池 + 火山方舟</li>
+                    <li><span>模型</span>Seedream 5.0 Flash</li>
+                  </ul>
+                </section>
               </div>
             </div>
 
-            <div class="console-col">
+            <div class="console-col console-keys">
               <div class="section-label">
-                <h2>Key 账本</h2>
+                <h2>Key 与访问权限</h2>
                 <span>员工共用，无需各自配置</span>
               </div>
 
-              <section class="panel entry-card">
-                <div class="entry-main">
-                  <p class="eyebrow">DEEPSEEK</p>
-                  <h3>DeepSeek Key</h3>
-                  <p class="card-desc">图号匹配、素材识别与丝带文字精修共用这组 Key，含启用开关与敏感内容查看。</p>
-                </div>
-                <a class="button secondary" href="/admin/deepseek">管理 →</a>
-              </section>
+              <div class="entry-list">
+                <section class="panel entry-card">
+                  <div class="entry-main">
+                    <p class="eyebrow">DEEPSEEK</p>
+                    <h3>DeepSeek Key</h3>
+                    <p class="card-desc">三个功能共用这组 Key，含启用开关与敏感内容查看。</p>
+                  </div>
+                  <a class="button secondary" href="/admin/deepseek">管理 →</a>
+                </section>
 
-              <section class="panel entry-card">
-                <div class="entry-main">
-                  <p class="eyebrow">SEEDREAM</p>
-                  <h3>火山方舟 Key</h3>
-                  <p class="card-desc">素材提取与丝带设计使用；丝带可在自己的页面单独保存一份配置。</p>
-                </div>
-                <a class="button secondary" href="/admin/material">管理 →</a>
-              </section>
+                <section class="panel entry-card">
+                  <div class="entry-main">
+                    <p class="eyebrow">SEEDREAM</p>
+                    <h3>火山方舟 Key</h3>
+                    <p class="card-desc">素材提取与丝带设计使用；丝带可在自己的页面单独保存一份配置。</p>
+                  </div>
+                  <a class="button secondary" href="/admin/material">管理 →</a>
+                </section>
 
-              <section class="panel entry-card">
-                <div class="entry-main">
-                  <p class="eyebrow">RIBBON</p>
-                  <h3>丝带模型服务</h3>
-                  <p class="card-desc">沿用素材提取的 DeepSeek 与 Seedream，或保存丝带专用配置。</p>
-                </div>
-                <a class="button secondary" href="/admin/ribbon">管理 →</a>
-              </section>
+                <section class="panel entry-card">
+                  <div class="entry-main">
+                    <p class="eyebrow">ACCESS</p>
+                    <h3 id="access-config-heading">员工访问码</h3>
+                    <p class="card-desc">管理员工登录使用的访问码；停用只影响之后登录的会话。</p>
+                  </div>
+                  <a class="button secondary" href="/admin/access-codes">管理访问码 →</a>
+                </section>
+              </div>
             </div>
           </div>
         </div>
