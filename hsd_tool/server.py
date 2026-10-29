@@ -252,7 +252,7 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
             # Liveness for the service manager and monitoring. Deliberately
             # says nothing: no version, instance, options, or usage data.
             return None
-        admin_area = (request.path in {"/admin", "/admin/material", "/admin/access-codes"}
+        admin_area = (request.path in {"/admin", "/admin/material", "/admin/ribbon", "/admin/access-codes"}
                       or request.path.startswith(("/api/admin/", "/api/ribbon/admin/")))
         material_admin_static = (request.endpoint == "static" and
             Path(str((request.view_args or {}).get("filename", "")).replace("\\", "/")).name.split(":", 1)[0].rstrip(" .").casefold()
@@ -503,6 +503,12 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
     def admin_page():
         build = _build_id()
         html = (static / "admin.html").read_text("utf-8").replace("__HSD_TOKEN__", json.dumps(token))
+        return _version_assets(html.replace("__HSD_BUILD__", build), build)
+
+    @app.get("/admin/ribbon")
+    def ribbon_settings_page():
+        build = _build_id()
+        html = (static / "ribbon-settings.html").read_text("utf-8").replace("__HSD_TOKEN__", json.dumps(token))
         return _version_assets(html.replace("__HSD_BUILD__", build), build)
 
     @app.get("/admin/material")

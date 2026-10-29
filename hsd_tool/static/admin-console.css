@@ -636,8 +636,19 @@ body {
   flex-basis: 100%;
   margin: 0;
 }
+.feature-list {
+  display: grid;
+  gap: 14px;
+  grid-auto-rows: 1fr;
+}
 .feature-card {
+  display: flex;
+  flex-direction: column;
   padding: 16px 18px;
+}
+.feature-card .chips {
+  margin-top: auto;
+  padding-top: 12px;
 }
 .feature-top {
   display: flex;
@@ -722,4 +733,58 @@ body {
   margin: 0;
   font-size: 12px;
   color: var(--warn);
+}
+
+/* Ribbon model service page ---------------------------------------------- */
+.ribbon-form-host {
+  margin-top: 16px;
+  display: grid;
+  gap: 12px;
+}
+.ribbon-inherit {
+  margin: 0;
+  padding: 11px 14px;
+  border: 1px solid #e6ecf5;
+  border-radius: 10px;
+  background: #f7f9fc;
+  color: #3d4d68;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.ribbon-inherit.warn {
+  border-color: #f0dfb0;
+  background: #fff9ec;
+  color: var(--warn);
+}
+.ribbon-switch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  color: #26364f;
+}
+.ribbon-note {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--faint);
+}
+.ribbon-state {
+  margin: 0;
+  font-size: 13px;
+  color: #5b6a83;
+  min-height: 20px;
+}
+.ribbon-state.error {
+  color: var(--bad);
+}
+.ribbon-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 4px;
+}
+.ribbon-actions .button {
+  border-radius: 999px;
+  min-height: 36px;
+  padding: 7px 18px;
+  font-size: 13px;
 }

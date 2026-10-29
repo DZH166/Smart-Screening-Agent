@@ -65,6 +65,7 @@
                 <div id="storage-warning" class="notice warning hidden" role="alert"></div>
               </section>
 
+              <div class="feature-list">
               <section class="panel feature-card">
                 <div class="feature-top">
                   <div class="feature-title"><p class="eyebrow">WORKSPACE 01</p><h3>图号助手</h3></div>
@@ -92,26 +93,13 @@
               <section class="panel feature-card" id="ribbon-card">
                 <div class="feature-top">
                   <div class="feature-title"><p class="eyebrow">WORKSPACE 03</p><h3>丝带设计</h3></div>
-                  <a class="button secondary" href="/#ribbon">打开功能 →</a>
+                  <a class="button secondary" href="/admin/ribbon">管理 Key 与模型 →</a>
                 </div>
                 <p class="card-desc">组合图案、排版与底图，生成、精修并按版本下载。</p>
                 <ul class="chips">
                   <li><span>Key</span>DeepSeek 池 + 火山方舟</li>
                   <li><span>模型</span>Seedream 5.0 Flash</li>
                 </ul>
-                <section class="panel service-card" id="ribbon-settings-panel" aria-label="丝带设计模型设置">
-<details id="ribbon-settings-details" open><summary>丝带设计 · 模型服务</summary>
-  <form class="help-content">
-    <p>仅影响丝带设计。首稿由原素材排版，不调用模型；AI 底图和文字精修使用下面这条路线。</p>
-    <p><strong>调用路线：</strong>DeepSeek ＋ Seedream（沿用 Key 账本中已启用的 DeepSeek 和火山方舟配置，不复制、不改动它们的 Key）</p>
-    <p id="ribbon-inherited-status">已就绪：语言模型 deepseek-flash，图片模型 doubao-seedream-5-0-flash-260915。</p>
-    <label><input type="checkbox" checked> 启用丝带 AI 底图和精修</label>
-    <p class="muted">启用后，员工每使用一次底图或精修会按实际调用计费。关闭后首稿排版照常可用。</p>
-    <p id="ribbon-settings-state">已启用；真实效果仍需样图确认。</p>
-    <div style="display:flex;gap:10px;margin-top:12px"><button type="button" class="button primary">保存</button><button type="button" class="button secondary">重新读取</button></div>
-  </form>
-</details>
-</section>
               </section>
 
               <section class="panel feature-card">
@@ -125,6 +113,7 @@
                   <li><span>存储</span>只存带盐哈希</li>
                 </ul>
               </section>
+              </div>
             </div>
 
             <div class="console-col">

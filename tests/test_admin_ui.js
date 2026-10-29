@@ -224,7 +224,8 @@ async function main(){
   assert.ok(html.indexOf('id="material-config-heading"')<html.indexOf('id="functions"'),'Ark configuration is under Key ledger');
   const functions=html.slice(html.indexOf('id="functions"'),html.indexOf('id="help"'));assert.equal((functions.match(/class="function-card"/g)||[]).length,3);assert.ok(!functions.includes('/admin/access-codes'));assert.ok(html.indexOf('id="access-config-heading"')<html.indexOf('id="functions"'));
   const keys=html.slice(html.indexOf('data-admin-section="keys"'),html.indexOf('id="functions"'));
-  assert.ok(keys.includes('id="ribbon-settings-panel"'),'ribbon model settings belong to Key ledger');
+  assert.ok(keys.includes('href="/admin/ribbon"'),'ribbon model service has its own admin page');
+  assert.ok(!keys.includes('id="ribbon-settings-panel"'),'the ledger links to ribbon settings instead of inlining them');
   assert.ok(!functions.includes('id="ribbon-settings-panel"'),'function section does not expose model settings');
   assert.match(functions,/<a class="function-card" href="\/#ribbon">/,'ribbon function opens the same employee workspace');
   assert.ok(functions.includes('href="/#ribbon-admin"'),'maintenance has its own admin entry');

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light">
+  <title>丝带设计 · 模型服务</title>
+  <link rel="stylesheet" href="/static/admin.css">
+  <link rel="stylesheet" href="/static/admin-console.css">
+  <script>window.HSD_TOKEN = __HSD_TOKEN__; window.HSD_BUILD = "__HSD_BUILD__";</script>
+  <script src="/static/build-check.js" defer></script>
+  <script src="/static/ribbon-settings.js" defer></script>
+</head>
+<body>
+  <div class="admin-shell">
+    <header class="admin-header">
+      <div class="header-title">
+        <a class="back-link" href="/admin#keys">← 返回 Key 账本</a>
+        <h1>丝带设计 · 模型服务</h1>
+        <p class="build-line" id="admin-build">构建 __HSD_BUILD__</p>
+      </div>
+      <div class="header-actions">
+        <button id="ribbon-refresh" class="button secondary" type="button">刷新设置</button>
+      </div>
+    </header>
+    <div id="ribbon-message" class="notice hidden" role="status" aria-live="polite"></div>
+    <a id="ribbon-login" class="button primary hidden" href="/admin/login">重新登录</a>
+    <main class="console">
+      <section class="panel">
+        <div class="card-head">
+          <div class="card-title">
+            <p class="eyebrow">SERVICE · RIBBON</p>
+            <h2>沿用 Key 账本中的模型</h2>
+            <p class="card-desc">丝带设计与素材提取使用同一组 DeepSeek 与火山方舟配置，这里不重复保存 Key。</p>
+          </div>
+        </div>
+        <div id="ribbon-settings-panel" class="ribbon-form-host"></div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
