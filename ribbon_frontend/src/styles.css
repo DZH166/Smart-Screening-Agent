@@ -2201,3 +2201,91 @@ small {
   .header-actions > .text-button { font-size: 12px; gap: 5px; }
   .workspace-title > .secondary { font-size: 12px; margin-top: 0; }
 }
+
+/* Case viewing is a read-only sibling of template selection. */
+.template-option {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.template-option > .template-card { width: 100%; }
+.template-example-button,
+.template-examples-all {
+  color: #345e45;
+  background: transparent;
+  border: 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+.template-example-button { min-height: 30px; padding: 4px 6px; }
+.template-examples-all { padding: 4px 0 4px 8px; }
+.template-example-button:hover,
+.template-examples-all:hover { color: #193f29; background: #edf3e9; }
+.template-example-button:focus-visible,
+.template-examples-all:focus-visible { outline: 2px solid #507857; outline-offset: 2px; }
+.layout-examples-modal { width: 1160px; }
+.layout-examples-modal .modal-heading {
+  position: sticky;
+  top: -27px;
+  z-index: 2;
+  background: #fff;
+  padding-top: 12px;
+  padding-bottom: 12px;
+  margin-top: -12px;
+  margin-bottom: 14px;
+}
+.layout-examples-intro { margin-bottom: 22px; }
+.layout-mode-summary {
+  color: #284a36;
+  font-size: 16px;
+  line-height: 1.65;
+  margin: 0 0 8px;
+}
+.layout-mode-note {
+  color: #455b49;
+  background: #f2f6ee;
+  border-left: 3px solid #90a77f;
+  padding: 10px 13px;
+  font-size: 14px;
+  line-height: 1.7;
+  margin: 8px 0 12px;
+}
+.layout-examples-tools { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+.layout-examples-tools > button { min-height: 34px; font-size: 13px; }
+.layout-examples-loading,
+.layout-examples-error { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; min-height: 140px; color: #37513d; }
+.layout-examples-error { display: block; padding: 20px 0; }
+.layout-examples-error > p { margin: 0 0 16px; font-size: 15px; line-height: 1.7; }
+.layout-examples-list { display: flex; flex-direction: column; gap: 22px; }
+.layout-example { border-top: 1px solid #dbe5d7; padding-top: 18px; min-width: 0; }
+.layout-example-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.layout-example-heading h3 { font-size: 19px; margin: 0; color: #284a36; line-height: 1.5; }
+.layout-example-heading > div { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.layout-example-code { color: #50624d; font-size: 13px; font-variant-numeric: tabular-nums; }
+.layout-reference-tag { background: #f4f1e6; color: #6b5828; padding: 3px 7px; border-radius: 4px; font-size: 12px; }
+.layout-example-description { color: #304f3a; font-size: 15px; line-height: 1.7; margin: 8px 0 0; }
+.layout-example-image-tools { display: flex; gap: 12px; align-items: center; min-height: 38px; }
+.layout-example-image-tools > button { color: #335c40; font-size: 13px; min-height: 34px; padding: 5px 0; }
+.layout-example-image-tools > span { color: #53644d; font-size: 12px; }
+.layout-example-viewport { overflow-x: auto; overflow-y: hidden; border: 1px solid #e3e9df; background: #f7f9f5; border-radius: 5px; }
+.layout-example-viewport > img { display: block; width: 100%; height: auto; max-width: none; }
+.layout-example-viewport.is-zoomed > img { width: max(100%, var(--example-width)); }
+.layout-example-viewport:focus-visible { outline: 2px solid #507857; outline-offset: 3px; }
+.layout-example-look { font-size: 14px; line-height: 1.7; color: #3e5941; margin: 10px 0 0; }
+.layout-example-look strong { font-weight: 600; }
+.layout-example-reference { font-size: 13px; color: #6b5828; margin: 8px 0 0; line-height: 1.7; }
+.layout-example-unavailable { border: 1px dashed #b8c7b1; padding: 18px; border-radius: 5px; margin-top: 14px; background: #f7f9f5; color: #465d48; font-size: 14px; line-height: 1.7; }
+.layout-example-unavailable p { margin: 0; }
+.layout-example-unavailable button { margin-top: 12px; font-size: 13px; }
+.layout-examples-source { border-top: 1px solid #dbe5d7; padding-top: 14px; margin: 20px 0 0; color: #53644d; font-size: 12px; line-height: 1.8; }
+@media (max-width: 600px) {
+  .layout-examples-modal .modal-heading { top: -20px; }
+  .layout-examples-modal .modal-heading h2 { font-size: 20px; }
+  .layout-mode-summary { font-size: 15px; }
+  .layout-example-heading h3 { font-size: 17px; }
+  .layout-example-heading { gap: 4px; }
+}

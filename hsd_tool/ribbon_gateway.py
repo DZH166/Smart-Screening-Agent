@@ -92,9 +92,38 @@ class RibbonGateway:
 
 
 def register_ribbon(app, manager, material_settings, employee_id):
+    from .ribbon_examples import IMAGE_SPECS, RibbonExamples
     gateway = RibbonGateway(manager, material_settings)
     app.config['HSD_RIBBON'] = gateway
     manager.ribbon_gateway = gateway
+    examples = RibbonExamples(manager.ai_settings.path.parent / 'ribbon_layout_examples')
+    app.config['HSD_RIBBON_EXAMPLES'] = examples
+
+    @app.get('/api/ribbon/layout-examples')
+    def ribbon_layout_examples():
+        # The existing host guard authenticates the employee before any read.
+        # No design, worker, quota, provider call or uploaded asset is created.
+        return jsonify(examples.catalog())
+
+    @app.get('/api/ribbon/layout-examples/<code>/image')
+    def ribbon_layout_example_image(code):
+        expected = IMAGE_SPECS.get(code)
+        versions = request.args.getlist('v')
+        if set(request.args) - {'v'} or len(versions) > 1:
+            return jsonify(error='案例图片地址无效，请重新打开案例。'), 400
+        if expected is None or (versions and versions[0] != expected[3][:16]):
+            return jsonify(error='案例图片暂时无法查看，请重新打开案例。'), 404
+        data = examples.image(code)
+        if data is None:
+            return jsonify(error='案例图片暂未准备好，请联系管理员。'), 404
+        response = Response(data, mimetype='image/jpeg')
+        response.headers['Cache-Control'] = 'private, no-cache, must-revalidate'
+        response.headers['Vary'] = 'Cookie'
+        response.headers['Cross-Origin-Resource-Policy'] = 'same-origin'
+        response.set_etag(expected[3])
+        # Authentication and current-byte verification precede even a 304/HEAD.
+        response.make_conditional(request)
+        return response
 
     @app.route('/api/admin/ribbon-settings', methods=['GET', 'POST'])
     def ribbon_settings():

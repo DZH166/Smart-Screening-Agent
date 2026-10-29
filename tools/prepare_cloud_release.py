@@ -22,7 +22,12 @@ import tarfile
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_NAME = 'release-manifest.json'
-EXCLUDED = frozenset({'tests/sample_visual_reference.json'})
+# Keep the original design-review renderings in Git; they are not runtime files
+# and are omitted from this text-only Linux source archive by exact name.
+EXCLUDED = frozenset({'tests/sample_visual_reference.json',
+    'docs/preview/admin-key-ledger-desktop.png', 'docs/preview/admin-key-ledger-narrow.png',
+    'docs/preview/admin-key-ledger.html', 'docs/preview/ribbon-model-service.html',
+    'docs/preview/ribbon-model-service.png'})
 DEMO_SVG_FILES = frozenset('tools/material_demo/assets/' + name + '.svg' for name in
     ('orange-bear', 'mint-cat', 'sunshine', 'flower', 'rocket', 'cherry', 'source-sheet'))
 ROOT_FILES = frozenset({'.gitignore', '.gitattributes', 'AGENTS.md', 'README.md', 'CONTRACTS.md',
@@ -48,7 +53,8 @@ PRIVATE_DIRS = frozenset({'employee_access', 'material_tasks', 'tmp', '.venv', '
     '.pytest_cache', '.pytest_tmp', '__pycache__', '测试样本', '测试输出', '输出结果',
     '自测输出', 'uploads', 'jobs', 'employee_outputs', 'screenshots', '交付', 'cache', '缓存',
     'matching', 'task_records', 'ai_runs', 'ai_first_runs', 'export_records', 'build', 'dist',
-    'node_modules', 'data', 'codex-handoff', 'test-results', 'playwright-report'})
+    'node_modules', 'data', 'codex-handoff', 'test-results', 'playwright-report',
+    'ribbon_layout_examples'})
 FORBIDDEN_SUFFIXES = frozenset({'.xlsx', '.xls', '.ai', '.log', '.pyc', '.pyo', '.pem', '.key',
     '.png', '.jpg', '.jpeg', '.webp', '.gif', '.pdf', '.zip', '.gz', '.exe', '.dll', '.pyd',
     '.so', '.whl', '.db', '.sqlite', '.sqlite3', '.docx', '.doc', '.p12', '.pfx', '.csv'})
@@ -93,7 +99,8 @@ REQUIRED_FILES = frozenset({'hsd_tool/__init__.py', 'hsd_tool/cloud_server.py',
     'hsd_tool/static/material.js', 'hsd_tool/static/material.css', 'hsd_tool/static/admin-workspace.js',
     'hsd_tool/static/access-codes.html', 'hsd_tool/static/access-codes.js', 'hsd_tool/static/access-codes.css',
     'hsd_tool/static/material-settings.html', 'hsd_tool/static/material-settings.js',
-    'hsd_tool/ribbon_gateway.py', 'hsd_tool/ribbon_settings.py', 'hsd_tool/static/ribbon-loader.js',
+    'hsd_tool/ribbon_gateway.py', 'hsd_tool/ribbon_settings.py', 'hsd_tool/ribbon_examples.py',
+    'hsd_tool/static/ribbon-loader.js',
     'hsd_tool/static/ribbon-settings.js', 'hsd_tool/static/ribbon/ribbon.js',
     'ribbon_backend/app.py', 'ribbon_backend/service.py', 'ribbon_backend/retention.py',
     'ribbon_backend/providers.py', 'ribbon_backend/config.py', 'ribbon_backend/imaging.py',

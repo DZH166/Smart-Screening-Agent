@@ -22,6 +22,7 @@ import {
   type Version,
 } from "./api";
 import Admin from "./Admin";
+import LayoutExamples, { type LayoutExamplesCatalog } from "./LayoutExamples";
 
 type IconName =
   | "spark"
@@ -105,11 +106,13 @@ export function Modal({
   children,
   onClose,
   wide = false,
+  className = "",
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
   wide?: boolean;
+  className?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -123,7 +126,7 @@ export function Modal({
       if (e.key === "Escape") onClose();
       if (e.key === "Tab") {
         const focusables = ref.current?.querySelectorAll<HTMLElement>(
-          "button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href]",
+          "button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href],[tabindex=\"0\"]",
         );
         if (!focusables?.length) return;
         const firstEl = focusables[0],
@@ -155,7 +158,7 @@ export function Modal({
     >
       <div
         ref={ref}
-        className={`modal ${wide ? "modal-wide" : ""}`}
+        className={`modal ${wide ? "modal-wide" : ""} ${className}`}
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -298,6 +301,14 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
   const [search, setSearch] = useState(""),
     [uploading, setUploading] = useState(false),
     [sharedUpload, setSharedUpload] = useState(false);
+  const [examplesView, setExamplesView] = useState<{ mode: string | null; name: string } | null>(null);
+  const examplesCache = useRef<LayoutExamplesCatalog | null>(null);
+  useEffect(() => {
+    if (!active || view !== "ribbon") {
+      setExamplesView(null);
+      examplesCache.current = null;
+    }
+  }, [active, view]);
   const gate = useRef(false),
     uploadRef = useRef<HTMLInputElement>(null),
     lastVersion = useRef<string | null>(null),
@@ -1007,29 +1018,36 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
               <section className="source-section">
                 <div className="section-label">
                   <h3>排版模式</h3>
-                  <span>选择一种排列方式</span>
+                  <button type="button" className="template-examples-all" onClick={() => setExamplesView({ mode: null, name: "全部排版案例" })}>查看全部案例</button>
                 </div>
                 <div className="template-grid">
                   {templates
                     .filter((t) => t.enabled || t.id === selection.template_id)
                     .map((t) => (
-                      <button
-                        key={t.id}
-                        className={`template-card ${selection.template_id === t.id ? "selected" : ""}`}
-                        disabled={locked}
-                        aria-pressed={selection.template_id === t.id}
-                        onClick={() =>
-                          updateSelection({ ...selection, template_id: t.id })
-                        }
-                      >
-                        <img src={t.thumbnail_url} alt={`${t.name}样式图`} />
-                        <span>
-                          {t.name}
-                          {selection.template_id === t.id && (
-                            <Icon name="check" size={14} />
-                          )}
-                        </span>
-                      </button>
+                      <div key={t.id} className="template-option">
+                        <button
+                          className={`template-card ${selection.template_id === t.id ? "selected" : ""}`}
+                          disabled={locked}
+                          aria-pressed={selection.template_id === t.id}
+                          onClick={() =>
+                            updateSelection({ ...selection, template_id: t.id })
+                          }
+                        >
+                          <img src={t.thumbnail_url} alt={`${t.name}样式图`} />
+                          <span>
+                            {t.name}
+                            {selection.template_id === t.id && (
+                              <Icon name="check" size={14} />
+                            )}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          className="template-example-button"
+                          aria-label={`查看${t.name}案例`}
+                          onClick={() => setExamplesView({ mode: t.mode, name: t.name })}
+                        >查看案例</button>
+                      </div>
                     ))}
                 </div>
               </section>
@@ -1441,6 +1459,21 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
           <span>个人作品与素材保留 {config?.retention_hours ?? 50} 小时，请及时下载。</span>
         </footer>
       </main>
+      {examplesView && active && view === "ribbon" && (
+        <Modal
+          title={examplesView.mode ? `${examplesView.name} · 案例` : "全部排版案例"}
+          onClose={() => setExamplesView(null)}
+          wide
+          className="layout-examples-modal"
+        >
+          <LayoutExamples
+            mode={examplesView.mode}
+            cache={examplesCache}
+            onUnauthorized={onLogout}
+            onViewAll={() => setExamplesView({ mode: null, name: "全部排版案例" })}
+          />
+        </Modal>
+      )}
       {(modal === "pattern" || modal === "background") && (
         <Modal
           title={modal === "pattern" ? "图案素材库" : "底图素材库"}

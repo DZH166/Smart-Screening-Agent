@@ -46,3 +46,4 @@ node_modules/
 ribbon_settings.json
 ribbon_model_settings.json
 .ribbon-settings-*.tmp
+ribbon_layout_examples/

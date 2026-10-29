@@ -14,6 +14,7 @@ from tools import prepare_cloud_release as release
     '.gitattributes', 'README.md', 'hsd_tool/server.py', 'hsd_tool/static/material.js',
     'hsd_tool/static/ribbon/ribbon.js', 'ribbon_backend/providers.py',
     'ribbon_frontend/src/App.tsx', 'ribbon_frontend/src/api.ts', 'ribbon_frontend/src/styles.css',
+    'hsd_tool/ribbon_examples.py', 'ribbon_frontend/src/LayoutExamples.tsx',
     'ribbon_frontend/package.json', 'ribbon_frontend/tsconfig.json', 'ribbon_frontend/vite.config.ts',
     'ribbon_frontend/pnpm-lock.yaml', 'ribbon_frontend/.gitignore', 'ribbon_frontend/index.html',
     'ribbon_frontend/tests/api.test.mjs', 'deploy/backup.sh', 'deploy/hsd-healthcheck.service',
@@ -21,6 +22,16 @@ from tools import prepare_cloud_release as release
     'tests/ribbon/test_workflow.py', 'tools/material_demo/assets/flower.svg'])
 def test_closed_allowlist_keeps_required_public_sources(name):
     release.public_name(name)
+
+
+@pytest.mark.parametrize('name', [
+    'hsd_tool/static/ribbon_layout_examples/HSD31620.jpg',
+    'hsd_tool/ribbon_layout_examples/provenance.md',
+    'ribbon_layout_examples/catalog.txt',
+])
+def test_company_reference_files_never_enter_public_release(name):
+    with pytest.raises(RuntimeError):
+        release.public_name(name)
 
 
 @pytest.mark.parametrize('name', [
@@ -90,7 +101,14 @@ def test_archive_is_reproducible_with_exact_modes_and_manifest_hashes():
     assert packed == release.build_archive(sources, encoded, 100000)
     assert release.verify_archive(packed, manifest['source_files'], encoded) == 4
     assert manifest['version'] == '9.8.7' and manifest['tag'] == 'v9.8.7'
-    assert manifest['explicit_exclusions'] == ['tests/sample_visual_reference.json']
+    assert manifest['explicit_exclusions'] == sorted([
+        'tests/sample_visual_reference.json',
+        'docs/preview/admin-key-ledger-desktop.png',
+        'docs/preview/admin-key-ledger-narrow.png',
+        'docs/preview/admin-key-ledger.html',
+        'docs/preview/ribbon-model-service.html',
+        'docs/preview/ribbon-model-service.png',
+    ])
     with tarfile.open(fileobj=BytesIO(packed), mode='r:gz') as archive:
         assert archive.getmember('deploy/check.sh').mode == 0o755
         assert archive.extractfile('README.md').read() == sources['README.md'][1]
