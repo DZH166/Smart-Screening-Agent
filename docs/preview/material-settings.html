@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>素材提取设置 · 智筛 Agent</title>
+  <link rel="stylesheet" href="../../hsd_tool/static/admin.css">
+  <link rel="stylesheet" href="../../hsd_tool/static/admin-page.css">
+</head>
+<body>
+<div style="position:fixed;left:50%;top:12px;transform:translateX(-50%);z-index:99;padding:8px 16px;border-radius:999px;background:#17233a;color:#fff;font:13px/1.4 system-ui">static preview</div>
+  <div class="admin-shell">
+    <header class="admin-header">
+      <div><a class="back-link" href="/admin#keys">← 返回 Key 账本</a><h1>素材清理 · 火山方舟配置</h1></div>
+      <button id="material-refresh" class="button secondary" type="button">刷新设置</button>
+    </header>
+    <div id="material-message" class="notice hidden" role="status" aria-live="polite"></div>
+    <a id="material-login" class="button primary hidden" href="/admin/login">重新登录</a>
+    <main>
+      <section class="panel">
+        <div class="section-heading"><h2>火山引擎 · 火山方舟</h2></div>
+        <p>用于素材提取的逐个设计生成。设计识别使用 <a href="/admin#keys">DeepSeek 配置</a>，员工无需各自填写。</p>
+        <p id="material-ark" class="state-line">正在读取设置…</p>
+        <form id="material-form" autocomplete="off">
+          <label for="material-key">API Key</label>
+          <input id="material-key" type="password" autocomplete="new-password" spellcheck="false" aria-describedby="material-key-help" placeholder="粘贴火山方舟 API Key" disabled>
+          <p id="material-key-help" class="muted">加密保存，输入框不会回填。已有配置时留空，可保留原 Key。</p>
+          <label for="material-model">图片模型 ID</label>
+          <div class="model-input-row"><input id="material-model" type="password" autocomplete="new-password" spellcheck="false" maxlength="128" aria-describedby="material-model-help" placeholder="粘贴图片模型 ID 或接入点 ID" disabled><button id="material-model-reveal" class="button secondary" type="button" aria-pressed="false" disabled>显示</button><button id="material-model-copy" class="button secondary" type="button" disabled>复制</button></div>
+          <p id="material-model-help" class="muted">先在火山方舟开通图片模型，再复制对应 ID。不要填写模型昵称。</p>
+          <div class="material-actions"><button id="material-save" class="button primary" type="submit" disabled>保存配置</button><button id="material-remove" class="button quiet" type="button" disabled>删除配置</button></div>
+        </form>
+        <details id="material-key-details" class="material-key-details">
+          <summary>查看或复制已保存的 Key</summary>
+          <div class="material-key-view">
+            <code id="material-key-value">••••••••</code>
+            <button id="material-key-reveal" class="button secondary" type="button" disabled>显示 Key</button>
+            <button id="material-key-copy" class="button secondary" type="button" disabled>复制 Key</button>
+          </div>
+          <p class="muted">仅管理员可操作。收起、刷新或离开页面后重新隐藏，不会改动已保存的配置。</p>
+        </details>
+        <form id="material-enable-form">
+          <div class="section-heading"><label class="enable-control"><input id="material-enabled" type="checkbox" disabled><span>启用素材提取</span></label><button id="material-enable-save" class="button secondary" type="submit" disabled>保存开关</button></div>
+        </form>
+      </section>
+      <section class="panel help-panel">
+        <details><summary>怎么填写与常见问题</summary>
+          <ol>
+            <li>打开<a href="https://ark.volcengine.com/region:cn-beijing/apiKey" target="_blank" rel="noopener noreferrer">火山方舟控制台</a>创建 API Key。这里使用方舟 API Key，不填写云账号的 AK/SK，也不填写 DeepSeek Key。</li>
+            <li>开通所需图片模型，复制 Model ID 或自己的推理接入点 ID，粘贴到上方。Key 需要有该模型的使用权限。</li>
+            <li>保存后输入框会清空 Key，这是正常保护。想更换 Key，重新粘贴并保存；删除配置会同时关闭验证开关。</li>
+            <li>提示“其他页面已更新”时，先刷新再修改；保存结果不明确时，也先刷新核对。</li>
+            <li>保存设置不会调用图片服务。启用后，员工开始提取时才会把所选图片交给火山方舟处理；不确定的结果会提示员工确认。</li>
+          </ol>
+          <p id="material-deepseek" class="muted">正在读取 DeepSeek 状态…</p>
+          <p class="muted">图片服务固定使用火山方舟北京接口；现有 DeepSeek 配置独立保留。本项目不接入 OSS，不设置调用费用上限。</p>
+          <p class="muted"><a href="https://console.volcengine.com/ark/region:cn-beijing/docs/image-generation-api" target="_blank" rel="noopener noreferrer">火山方舟官方图片接口说明</a></p>
+        </details>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
