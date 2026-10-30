@@ -32,16 +32,16 @@ def installed_example(employee_app, example_bytes):
     return repository, path
 
 
-def test_catalog_covers_actual_modes_and_marks_extended_references(tmp_path):
+def test_catalog_covers_every_implemented_mode_without_reference_only_shortcuts(tmp_path):
+    from ribbon_backend.imaging import MODES
     catalog = ribbon_examples.RibbonExamples(tmp_path / 'not-installed').catalog()
-    assert {m['mode'] for m in catalog['modes']} == {'grid', 'stagger', 'scatter', 'single', 'ends', 'panels'}
+    assert {m['mode'] for m in catalog['modes']} == set(MODES)
     cases = {item['id']: item for item in catalog['examples']}
-    assert len(cases) == 10
+    assert len(cases) == 13
     for guide in catalog['modes']:
         assert guide['example_ids']
         assert all(guide['mode'] in cases[code]['mode_tags'] for code in guide['example_ids'])
-    assert {item['code'] for item in cases.values() if item['reference_only']} == {
-        'HSD68618', 'HSD68402', 'HSD67181'}
+    assert not any(item['reference_only'] for item in cases.values())
     assert all(not item['available'] and item['image_url'] is None for item in cases.values())
     assert not (tmp_path / 'not-installed').exists()
 

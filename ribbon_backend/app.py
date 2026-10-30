@@ -56,7 +56,8 @@ class Rollback(StrictModel):
 class TemplateInput(StrictModel):
     id: str | None = None
     name: str = Field(min_length=1, max_length=80)
-    mode: Literal['grid', 'stagger', 'scatter', 'single', 'ends', 'panels']
+    mode: Literal['grid', 'stagger', 'scatter', 'single', 'ends', 'panels', 'bordered', 'scene', 'fullwidth',
+                  'alternating', 'ends_open', 'split', 'stacked', 'opposed']
     enabled: bool = True
     rules: dict = Field(default_factory=dict)
 

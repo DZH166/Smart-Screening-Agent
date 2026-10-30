@@ -2210,6 +2210,20 @@ small {
   gap: 3px;
 }
 .template-option > .template-card { width: 100%; }
+.more-layouts { margin-top: 12px; border-top: 1px solid var(--line); }
+.more-layouts-toggle {
+  width: 100%; min-height: 40px; padding: 9px 2px;
+  display: flex; align-items: center; justify-content: space-between;
+  border: 0; background: transparent; font-size: 13px; font-weight: 600;
+  color: #345e45;
+}
+.more-layouts-toggle:hover { background: #edf3e9; }
+.layout-selection-help, .layout-selection-issue {
+  margin-top: 12px; font-size: 12px; line-height: 1.7;
+}
+.layout-selection-help { color: #526a5d; }
+.layout-selection-issue { color: #9e4634; }
+.template-rules-help { display: block; color: #526a5d; font-size: 12px; line-height: 1.7; }
 .template-example-button,
 .template-examples-all {
   color: #345e45;

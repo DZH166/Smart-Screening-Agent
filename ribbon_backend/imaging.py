@@ -17,7 +17,9 @@ from typing import Callable
 
 from PIL import Image, ImageColor, ImageDraw, ImageOps
 
-MODES = ("grid", "stagger", "scatter", "single", "ends", "panels")
+MODES = ("grid", "stagger", "scatter", "single", "ends", "panels", "bordered", "scene", "fullwidth",
+         "alternating", "ends_open", "split", "stacked", "opposed")
+EXTENSION_MODES = ("bordered", "scene", "fullwidth", "alternating", "ends_open", "split", "stacked", "opposed")
 MAX_PIXELS = 40_000_000
 # Check our own dimensions below; do not mutate Pillow's process-wide limit in
 # the host, which also serves the existing HSD and material workflows.
@@ -244,6 +246,19 @@ def estimate_render_space(snapshot):
     refs = snapshot.get('asset_refs', [])
     if not refs:
         return required
+    if mode in EXTENSION_MODES:
+        # The estimator does not open source files. The one-image scene case
+        # uses the full available width as its conservative aspect bound.
+        boxes = _extension_boxes(mode, width, height, params, rules, len(refs))
+        required = png_space(width, height) + png_space(min(width, 3600), min(height, 1200))
+        scale = float(params['scale']) * float(rules.get('motif_ratio', .27)) / .27
+        unique = {(box['asset_index'], box['box_width'], box['box_height'], box.get('extra_rotation', 0)) for box in boxes}
+        for _, box_width, box_height, _ in unique:
+            # A rotated image is contained inside this box before scaling;
+            # include rounding/rotation expansion and a PNG margin per stage.
+            edge_width, edge_height = math.ceil(box_width * scale) + 4, math.ceil(box_height * scale) + 4
+            required += min(edge_width * edge_height, MAX_PIXELS) * 5 + 1024 * 1024
+        return required
     base_size = height * float(rules.get('motif_ratio', .27)) * float(params['scale'])
     unique = {(index % len(refs), max(1, min(int(base_size*factor), height*3)),
                float(params['rotation']) + rotation)
@@ -253,6 +268,241 @@ def estimate_render_space(snapshot):
         edge = math.ceil(size * (abs(math.cos(radians)) + abs(math.sin(radians)))) + 2
         required += min(edge * edge, MAX_PIXELS) * 5 + 1024 * 1024
     return required
+
+
+def _extension_boxes(mode, width, height, params, rules, asset_count, shapes=None):
+    """Layout real content boxes; no inferred scene or library artwork is used.
+
+    The original six modes keep their exact legacy positioning and sizing.
+    These modes need width/height boxes so a wide complete design is contained,
+    rather than being reduced to the legacy square motif's longest-edge size.
+    """
+    if mode == 'bordered' and asset_count < 2:
+        raise ValueError('上下边饰至少选择两个图案：第一张是主体，其余用于边饰')
+    if mode == 'fullwidth' and asset_count != 1:
+        raise ValueError('整幅定位需要选择一张完整设计图')
+    if mode == 'ends_open' and asset_count not in (1, 2):
+        raise ValueError('两端留白请选择一张或两张图案')
+    if mode == 'split' and asset_count < 2:
+        raise ValueError('左右分区至少选择两个图案')
+    if mode == 'stacked' and asset_count < 2:
+        raise ValueError('上下分区至少选择两个图案')
+    if asset_count < 1:
+        raise ValueError('至少选择一个图案')
+    spacing = float(params['spacing'])
+    step_factor = float(rules.get('step_ratio', .64)) / .64
+    boxes = []
+
+    def add(index, x, y, box_width, box_height, role, group=0, extra_rotation=0):
+        boxes.append(dict(asset_index=index, x=x, y=y,
+                          box_width=max(1.0, box_width), box_height=max(1.0, box_height),
+                          role=role, group=group, extra_rotation=extra_rotation))
+
+    if mode == 'fullwidth':
+        # spacing has no meaning for a non-repeated complete design. Scale,
+        # rotation and offsets still affect its real content below.
+        add(0, width / 2, height / 2, width * .96, height * .96, 'complete')
+    elif mode == 'bordered':
+        main_count = max(1, min(120, int(width / (height * .76 * spacing * step_factor))))
+        main_step = width / main_count
+        for col in range(main_count):
+            add(0, (col + .5) * main_step, height / 2,
+                min(height * .72, main_step * .88), height * .56, 'main', col)
+        edge_count = max(asset_count - 1, min(240, int(width / (height * .20 * spacing * step_factor))))
+        edge_step = width / edge_count
+        for row, y in enumerate((height * .11, height * .89)):
+            for col in range(edge_count):
+                add(1 + col % (asset_count - 1), (col + .5) * edge_step, y,
+                    edge_step * .90, height * .14, 'top-border' if row == 0 else 'bottom-border', col)
+    elif mode == 'alternating':
+        count = max(asset_count, min(240, math.ceil(width / (height * .76 * spacing * step_factor))))
+        # Even counts preserve large/small alternation at the repeated seam.
+        count += count % 2
+        step = width / count
+        for col in range(count):
+            large = col % 2 == 0
+            maximum_height = height * (.72 if large else .40)
+            add(col % asset_count, (col + .5) * step, height / 2,
+                min(maximum_height, step * (.92 if large else .65) / max(1.0, spacing ** .5)),
+                maximum_height, 'large' if large else 'small', col // 2)
+    elif mode == 'opposed':
+        count = max(asset_count, min(240, math.ceil(width / (height * .76 * spacing * step_factor))))
+        count += count % 2
+        step = width / count
+        for col in range(count):
+            upside_down = col % 2 == 1
+            add(col % asset_count, (col + .5) * step, height / 2,
+                min(height * .66, step * .90 / max(1.0, spacing ** .5)), height * .66,
+                'upside-down' if upside_down else 'upright', col // 2,
+                extra_rotation=180 if upside_down else 0)
+    elif mode == 'ends_open':
+        zone = min(width * .44, height * 1.05)
+        add(0, zone / 2, height / 2, zone * .86, height * .84, 'left-end')
+        add(0 if asset_count == 1 else 1, width - zone / 2, height / 2,
+            zone * .86, height * .84, 'right-end')
+    elif mode == 'split':
+        boundary = width // 2
+        left_count = (asset_count + 1) // 2
+        for start, end, indices, side in (
+                (0, boundary, list(range(left_count)), 'left-zone'),
+                (boundary, width, list(range(left_count, asset_count)), 'right-zone')):
+            zone_width = end - start
+            count = max(len(indices), min(120, math.ceil(zone_width / (height * .62 * spacing * step_factor))))
+            step = zone_width / count
+            for row in range(2):
+                for col in range(count):
+                    add(indices[(col + row) % len(indices)], start + (col + .5) * step,
+                        height * (row + .5) / 2, step * .86, height * .38,
+                        side, row * count + col)
+                    # Explicit later enlargement/offset cannot contaminate the
+                    # other region. Default fitting keeps each full source.
+                    boxes[-1]['clip_x'] = (start, end)
+    elif mode == 'stacked':
+        boundary = height // 2
+        top_count = (asset_count + 1) // 2
+        for start, end, indices, side in (
+                (0, boundary, list(range(top_count)), 'top-zone'),
+                (boundary, height, list(range(top_count, asset_count)), 'bottom-zone')):
+            zone_height = end - start
+            count = max(len(indices), min(240, math.ceil(width / (zone_height * .80 * spacing * step_factor))))
+            step = width / count
+            for col in range(count):
+                add(indices[col % len(indices)], (col + .5) * step, start + zone_height / 2,
+                    step * .88, zone_height * .76, side, col)
+                boxes[-1]['clip_y'] = (start, end)
+    elif mode == 'scene':
+        if asset_count == 1:
+            # An already composed scene retains all of its internal relations.
+            # No computer-vision segmentation or AI reconstruction is implied.
+            if shapes:
+                source_width, source_height = shapes[0]
+                content_width = min(width * .96, max(height * .35, height * .82 * source_width / source_height))
+            else:
+                content_width = width
+            count = max(1, min(120, int(width / (content_width * spacing * step_factor))))
+            step = width / count
+            for col in range(count):
+                add(0, (col + .5) * step, height / 2,
+                    min(content_width * .96, step * .94), height * .82, 'scene', col)
+        else:
+            preferred_width = height * (.62 * asset_count + .20)
+            count = max(1, min(120, int(width / (preferred_width * spacing * step_factor))))
+            step = width / count
+            slot = min(height * .62, step * .88 / asset_count)
+            for col in range(count):
+                for index in range(asset_count):
+                    box_height = height * (.74 if index == 0 else (.52, .65, .58)[(index - 1) % 3])
+                    x = (col + .5) * step + (index - (asset_count - 1) / 2) * slot
+                    add(index, x, height * .91 - box_height / 2,
+                        slot * .90, box_height, 'scene', col)
+    else:
+        raise ValueError('不支持的排版模式')
+    return boxes
+
+
+def _extension_shapes(refs, resolve_asset):
+    """Read dimensions without retaining or fully decoding every source."""
+    shapes = []
+    for ref in refs:
+        with Image.open(resolve_asset(ref)) as image:
+            if image.width * image.height > MAX_PIXELS or getattr(image, 'n_frames', 1) != 1:
+                raise ValueError('图案像素数量过大或不是单帧图片')
+            size = image.size
+            if image.getexif().get(274, 1) in (5, 6, 7, 8):
+                size = size[::-1]
+            shapes.append(size)
+    return shapes
+
+
+def _compose_extensions(canvas, snapshot, resolve_asset, master_path):
+    refs = snapshot['asset_refs']
+    params = {**PARAM_DEFAULTS, **snapshot.get('params', {})}
+    rules = snapshot.get('template_rules', {})
+    mode = snapshot['template_mode']
+    shapes = _extension_shapes(refs, resolve_asset)
+    boxes = _extension_boxes(mode, canvas.width, canvas.height, params, rules, len(refs), shapes)
+    scale = float(params['scale']) * float(rules.get('motif_ratio', .27)) / .27
+    transforms = []
+    Path(master_path).parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='ribbon-motifs-', dir=Path(master_path).parent) as staged:
+        prepared = {}
+        for index, ref in enumerate(refs):
+            relevant = {(box['box_width'], box['box_height'],
+                         float(params['rotation']) + box.get('extra_rotation', 0))
+                        for box in boxes if box['asset_index'] == index}
+            if not relevant:
+                continue
+            with closing(read_image(resolve_asset(ref))) as source:
+                for box_width, box_height, angle in sorted(relevant):
+                    radians = math.radians(angle)
+                    cosine, sine = abs(math.cos(radians)), abs(math.sin(radians))
+                    rotated_width = source.width * cosine + source.height * sine
+                    rotated_height = source.width * sine + source.height * cosine
+                    ratio = min(box_width / rotated_width, box_height / rotated_height) * scale
+                    tw, th = max(1, round(source.width * ratio)), max(1, round(source.height * ratio))
+                    bw, bh = math.ceil(tw * cosine + th * sine) + 2, math.ceil(tw * sine + th * cosine) + 2
+                    if bw * bh > MAX_PIXELS or tw * th > MAX_PIXELS:
+                        raise ValueError('当前图案大小与旋转生成的中间图像过大，请减小图案')
+                    motif = source.resize((tw, th), Image.Resampling.LANCZOS)
+                    if angle:
+                        rotated = motif.rotate(-angle, resample=Image.Resampling.BICUBIC, expand=True)
+                        motif.close()
+                        motif = rotated
+                    path = Path(staged) / f'{len(prepared)}.png'
+                    try:
+                        _save_png(motif, path)
+                    finally:
+                        motif.close()
+                    prepared[index, box_width, box_height, angle] = path
+        for layer, box in enumerate(boxes):
+            index = box['asset_index']
+            angle = float(params['rotation']) + box.get('extra_rotation', 0)
+            with closing(read_image(prepared[index, box['box_width'], box['box_height'], angle])) as motif:
+                x, y = box['x'] + float(params['offset_x']), box['y'] + float(params['offset_y'])
+                position = round(x - motif.width / 2), round(y - motif.height / 2)
+                if 'clip_x' in box or 'clip_y' in box:
+                    clip_left, clip_right = box.get('clip_x', (0, canvas.width))
+                    clip_top, clip_bottom = box.get('clip_y', (0, canvas.height))
+                    left = max(position[0], clip_left)
+                    right = min(position[0] + motif.width, clip_right)
+                    top = max(position[1], clip_top)
+                    bottom = min(position[1] + motif.height, clip_bottom)
+                    if right > left and bottom > top:
+                        with closing(motif.crop((left - position[0], top - position[1],
+                                                 right - position[0], bottom - position[1]))) as clipped:
+                            canvas.alpha_composite(clipped, (left, top))
+                else:
+                    canvas.alpha_composite(motif, position)
+                # Group repetition wraps at the ribbon seam; fixed complete
+                # designs and decorative borders are not silently repeated.
+                if mode == 'scene':
+                    if position[0] + motif.width > canvas.width:
+                        canvas.alpha_composite(motif, (position[0] - canvas.width, position[1]))
+                    if position[0] < 0:
+                        canvas.alpha_composite(motif, (position[0] + canvas.width, position[1]))
+                transform = dict(asset_ref=refs[index], x=x, y=y,
+                                 size=max(motif.size), width=motif.width, height=motif.height,
+                                 rotation=angle, layer=layer, role=box['role'], group=box['group'])
+                if 'clip_x' in box:
+                    transform['clip_x'] = list(box['clip_x'])
+                if 'clip_y' in box:
+                    transform['clip_y'] = list(box['clip_y'])
+                transforms.append(transform)
+    return transforms
+
+
+def _finish_render(canvas, snapshot, master_path, preview_path, object_transforms):
+    _, _, dpi = _profile(snapshot['output_profile'])
+    _save_png(canvas, Path(master_path), dpi)
+    preview = canvas.copy()
+    # A ribbon is a very wide strip; retain useful detail in the bounded preview.
+    preview.thumbnail((3600, 1200), Image.Resampling.LANCZOS)
+    _save_png(preview, Path(preview_path), dpi)
+    preview.close()
+    canvas.close()
+    metadata = validate_image(Path(master_path), snapshot['output_profile'])
+    return {**metadata, 'object_transforms': object_transforms,
+            'render_kind': 'composite' if snapshot.get('composite_ref') else 'layered'}
 
 
 @memory_bounded_operation
@@ -299,6 +549,13 @@ def render(snapshot: dict, resolve_asset: Callable[[str], Path], master_path: Pa
         rules = snapshot.get("template_rules", {})
         mode = snapshot.get("template_mode", "stagger")
         object_transforms = []
+        if mode in EXTENSION_MODES:
+            try:
+                object_transforms = _compose_extensions(canvas, snapshot, resolve_asset, master_path)
+                return _finish_render(canvas, snapshot, master_path, preview_path, object_transforms)
+            except BaseException:
+                canvas.close()
+                raise
         base_size = height * float(rules.get("motif_ratio", .27)) * float(params["scale"])
         if mode == "panels":
             d = ImageDraw.Draw(canvas, "RGBA")
@@ -348,18 +605,7 @@ def render(snapshot: dict, resolve_asset: Callable[[str], Path], master_path: Pa
                             canvas.alpha_composite(motif, (position[0]+width, position[1]))
                     object_transforms.append({'asset_ref': refs[index], 'x': x, 'y': y,
                                               'size': size, 'rotation': angle, 'layer': layer})
-    _save_png(canvas, Path(master_path), dpi)
-    preview = canvas.copy()
-    # A ribbon is a very wide strip. A 1800 px wide preview would be only
-    # ~80 px tall, which cannot show a motif at all; keep enough height for
-    # the detail view while still bounding the file.
-    preview.thumbnail((3600, 1200), Image.Resampling.LANCZOS)
-    _save_png(preview, Path(preview_path), dpi)
-    preview.close()
-    canvas.close()
-    metadata = validate_image(Path(master_path), snapshot["output_profile"])
-    return {**metadata, "object_transforms": object_transforms,
-            "render_kind": "composite" if snapshot.get("composite_ref") else "layered"}
+    return _finish_render(canvas, snapshot, master_path, preview_path, object_transforms)
 
 
 def template_thumbnail(mode: str, path: Path, rules: dict | None = None) -> None:
@@ -370,5 +616,9 @@ def template_thumbnail(mode: str, path: Path, rules: dict | None = None) -> None
     snapshot = {"asset_refs": ["demo-flower", "demo-star", "demo-ring"],
                 "background_ref": "demo-bg-sage", "template_mode": mode, "template_rules": rules or {}, "seed": 42,
                 "output_profile": {"width": 640, "height": 200, "dpi": 96, "format": "PNG", "is_demo": True}}
+    if mode == 'fullwidth':
+        snapshot['asset_refs'] = ['demo-flower']
+    elif mode == 'ends_open':
+        snapshot['asset_refs'] = ['demo-flower', 'demo-star']
     # Thumbnail and master are the same dimensions; avoid retaining a second throwaway file.
     render(snapshot, refs.__getitem__, path, path)

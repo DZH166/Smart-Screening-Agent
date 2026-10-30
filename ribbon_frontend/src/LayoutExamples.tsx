@@ -178,7 +178,7 @@ export default function LayoutExamples({ mode, cache, onUnauthorized, onViewAll 
       <div className="layout-examples-intro">
         {currentMode && <p className="layout-mode-summary">{currentMode.summary}</p>}
         {currentMode?.note && <p className="layout-mode-note">{currentMode.note}</p>}
-        {!mode && <p className="layout-mode-summary">先看案例里的排列方式，再选择适合的排版。标记“延展参考”的案例只作设计参考。</p>}
+        {!mode && <p className="layout-mode-summary">先看排列方式，再选择适合的排版。案例只说明结构，生成时使用你自己选择的素材。</p>}
         {mode && !currentMode && <p>当前排版暂无对应的公司案例，可先查看其他排法。</p>}
         <div className="layout-examples-tools">
           {mode && <button type="button" className="secondary" onClick={onViewAll}>查看全部案例</button>}

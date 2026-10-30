@@ -13,7 +13,7 @@ import pytest
 from PIL import Image
 
 from ribbon_backend.config import Settings
-from ribbon_backend.service import Service, ServiceError
+from ribbon_backend.service import Service, ServiceError, MODES
 from hsd_tool.retention_window import RETENTION_SECONDS
 
 
@@ -71,7 +71,7 @@ def test_cleanup_only_expired_private_work(service):
     assert not path.exists()
     assert service.designs(owner) == []
     assert any(a['id'] == shared['id'] for a in service.assets(owner))
-    assert len(service.templates()) == 6
+    assert {item['mode'] for item in service.templates()} == set(MODES)
     assert service.config()['output_profile']['is_demo']
     with service.db.connect() as db:
         assert db.execute('SELECT COUNT(*) FROM output_profiles').fetchone()[0] == 1
@@ -177,7 +177,7 @@ def test_fifty_hour_boundary_keeps_shared_resources(service):
     result = service.cleanup_expired(now=settled + 50 * 3600)
     assert result['designs'] == 1 and result['assets'] == 1
     assert any(a['id'] == shared['id'] for a in service.assets(owner))
-    assert len(service.templates()) == 6
+    assert {item['mode'] for item in service.templates()} == set(MODES)
     assert service.config()['output_profile']['is_demo']
 
 

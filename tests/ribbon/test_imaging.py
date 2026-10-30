@@ -31,7 +31,7 @@ def scene(tmp_path):
     return snapshot, refs
 
 
-@pytest.mark.parametrize('mode', MODES)
+@pytest.mark.parametrize('mode', tuple(ORIGINAL_RGBA_HASHES))
 def test_memory_bounded_renderer_preserves_original_pixels(scene, tmp_path, mode):
     snapshot, refs = scene
     snapshot['template_mode'] = mode
@@ -80,12 +80,17 @@ def test_standalone_render_checks_free_space_before_output(scene, tmp_path, monk
     assert not list(tmp_path.glob('ribbon-motifs-*'))
 
 
-def test_all_six_modes_are_distinct_decodable_and_keep_input_bytes(scene, tmp_path):
-    snapshot, refs = scene
+def test_all_modes_are_distinct_decodable_and_keep_input_bytes(scene, tmp_path):
+    original, refs = scene
     input_hashes = {key: hashlib.sha256(path.read_bytes()).hexdigest() for key, path in refs.items()}
     hashes = []
     for mode in MODES:
+        snapshot = deepcopy(original)
         snapshot["template_mode"] = mode
+        if mode == 'fullwidth':
+            snapshot['asset_refs'] = snapshot['asset_refs'][:1]
+        elif mode == 'ends_open':
+            snapshot['asset_refs'] = snapshot['asset_refs'][:2]
         master, preview = tmp_path/f"{mode}.png", tmp_path/f"{mode}-preview.png"
         metadata = render(snapshot, refs.__getitem__, master, preview)
         hashes.append(metadata["sha256"])
@@ -94,7 +99,7 @@ def test_all_six_modes_are_distinct_decodable_and_keep_input_bytes(scene, tmp_pa
         assert validate_image(master, snapshot["output_profile"])["width"] == 1800
         with Image.open(preview) as image:
             assert image.size == (1800, 400)
-    assert len(set(hashes)) == 6
+    assert len(set(hashes)) == len(MODES)
     assert input_hashes == {key: hashlib.sha256(path.read_bytes()).hexdigest() for key, path in refs.items()}
 
 

@@ -210,6 +210,27 @@ const emptySelection: Selection = {
   background_id: "",
   template_id: "",
 };
+const basicLayoutModes = new Set(["grid", "stagger", "scatter", "single", "ends", "panels"]);
+const layoutHints: Record<string, string> = {
+  bordered: "第一个图案放中间，其余图案做上下边饰；至少选择 2 个图案。",
+  scene: "所选图案先组成一组，再整组循环；不会自动补画或拼接无缝场景。",
+  fullwidth: "只选 1 张完整设计，保持比例放置一次；重复间距不适用。",
+  alternating: "图案一大一小依次重复，可选择 1–12 个图案。",
+  ends_open: "选 1–2 个图案放在两端，中间留白；重复间距不适用。",
+  split: "至少选择 2 个图案，前半组放左侧，后半组放右侧。",
+  stacked: "至少选择 2 个图案，前半组放上方，后半组放下方。",
+  opposed: "相邻图案正向、倒置交替，旋转 180°，不会镜像翻字。",
+};
+function layoutSelectionIssue(mode: string | undefined, count: number) {
+  if (!count) return "";
+  if (mode === "fullwidth" && count !== 1)
+    return "整幅定位只使用 1 个完整图案，请移除多余图案。";
+  if (mode === "ends_open" && count > 2)
+    return "两端留白最多使用 2 个图案，请保留 1–2 个。";
+  if (mode && ["bordered", "split", "stacked"].includes(mode) && count < 2)
+    return "这类排版至少需要 2 个图案，请再选择一个。";
+  return "";
+}
 function recommendedSelection(
   assets: Asset[],
   templates: Template[],
@@ -302,6 +323,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
     [uploading, setUploading] = useState(false),
     [sharedUpload, setSharedUpload] = useState(false);
   const [examplesView, setExamplesView] = useState<{ mode: string | null; name: string } | null>(null);
+  const [moreLayoutsOpen, setMoreLayoutsOpen] = useState(false);
   const examplesCache = useRef<LayoutExamplesCatalog | null>(null);
   useEffect(() => {
     if (!active || view !== "ribbon") {
@@ -329,10 +351,13 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
         `${((shownProfile.width / shownProfile.dpi) * 2.54).toFixed(1)}×` +
         `${((shownProfile.height / shownProfile.dpi) * 2.54).toFixed(1)} cm`
       : "";
+  const template = templates.find((t) => t.id === selection.template_id);
+  const layoutIssue = layoutSelectionIssue(template?.mode, selection.asset_ids.length);
   const ready =
     selection.asset_ids.length > 0 &&
     !!selection.background_id &&
-    !!selection.template_id;
+    !!template &&
+    !layoutIssue;
   const changed =
     !!current &&
     (JSON.stringify(current.snapshot.asset_refs) !==
@@ -342,9 +367,36 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
   const selectedPatterns = selection.asset_ids
     .map((id) => assets.find((a) => a.id === id))
     .filter(Boolean) as Asset[];
-  const background = assets.find((a) => a.id === selection.background_id),
-    template = templates.find((t) => t.id === selection.template_id);
+  const background = assets.find((a) => a.id === selection.background_id);
+  const visibleTemplates = templates.filter((t) => t.enabled || t.id === selection.template_id);
+  const basicTemplates = visibleTemplates.filter((t) => basicLayoutModes.has(t.mode));
+  const moreTemplates = visibleTemplates.filter((t) => !basicLayoutModes.has(t.mode));
   const testMode = config?.provider === "test";
+  useEffect(() => {
+    if (template && !basicLayoutModes.has(template.mode)) setMoreLayoutsOpen(true);
+  }, [template?.id, template?.mode]);
+
+  function templateOption(t: Template) {
+    return (
+      <div key={t.id} className="template-option">
+        <button
+          className={`template-card ${selection.template_id === t.id ? "selected" : ""}`}
+          disabled={locked}
+          aria-pressed={selection.template_id === t.id}
+          onClick={() => updateSelection({ ...selection, template_id: t.id })}
+        >
+          <img src={t.thumbnail_url} alt={`${t.name}样式图`} />
+          <span>{t.name}{selection.template_id === t.id && <Icon name="check" size={14} />}</span>
+        </button>
+        <button
+          type="button"
+          className="template-example-button"
+          aria-label={`查看${t.name}案例`}
+          onClick={() => setExamplesView({ mode: t.mode, name: t.name })}
+        >查看案例</button>
+      </div>
+    );
+  }
 
   function updateSelection(value: Selection) {
     setSelection(value);
@@ -1021,35 +1073,23 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                   <button type="button" className="template-examples-all" onClick={() => setExamplesView({ mode: null, name: "全部排版案例" })}>查看全部案例</button>
                 </div>
                 <div className="template-grid">
-                  {templates
-                    .filter((t) => t.enabled || t.id === selection.template_id)
-                    .map((t) => (
-                      <div key={t.id} className="template-option">
-                        <button
-                          className={`template-card ${selection.template_id === t.id ? "selected" : ""}`}
-                          disabled={locked}
-                          aria-pressed={selection.template_id === t.id}
-                          onClick={() =>
-                            updateSelection({ ...selection, template_id: t.id })
-                          }
-                        >
-                          <img src={t.thumbnail_url} alt={`${t.name}样式图`} />
-                          <span>
-                            {t.name}
-                            {selection.template_id === t.id && (
-                              <Icon name="check" size={14} />
-                            )}
-                          </span>
-                        </button>
-                        <button
-                          type="button"
-                          className="template-example-button"
-                          aria-label={`查看${t.name}案例`}
-                          onClick={() => setExamplesView({ mode: t.mode, name: t.name })}
-                        >查看案例</button>
-                      </div>
-                    ))}
+                  {basicTemplates.map(templateOption)}
                 </div>
+                {moreTemplates.length > 0 && (
+                  <div className="more-layouts">
+                    <button type="button" className="more-layouts-toggle"
+                      aria-expanded={moreLayoutsOpen} aria-controls="ribbon-more-layouts"
+                      onClick={() => setMoreLayoutsOpen((open) => !open)}>
+                      <span>更多排法（{moreTemplates.length}）</span>
+                      <span aria-hidden="true">{moreLayoutsOpen ? "▾" : "▸"}</span>
+                    </button>
+                    {moreLayoutsOpen && <div className="template-grid" id="ribbon-more-layouts">{moreTemplates.map(templateOption)}</div>}
+                  </div>
+                )}
+                {template && layoutHints[template.mode] && (
+                  <p className="layout-selection-help">{layoutHints[template.mode]}</p>
+                )}
+                {layoutIssue && <p className="layout-selection-issue" id="ribbon-layout-issue" role="alert">{layoutIssue}</p>}
               </section>
               <section className="source-section background-section">
                 <div className="section-label">
@@ -1267,6 +1307,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                     <button
                       className="primary full"
                       disabled={!ready || locked || backgroundProcessing}
+                      aria-describedby={layoutIssue ? "ribbon-layout-issue" : undefined}
                       onClick={() => void generate()}
                     >
                       {processing ? (
@@ -1284,7 +1325,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                           ? "请选择一种排版模式"
                           : !selection.background_id
                             ? "请选择或生成底图"
-                            : "素材已就绪 · 首稿不占用精修次数"}
+                            : layoutIssue || "素材已就绪 · 首稿不占用精修次数"}
                     </small>
                   </div>
                 )}
@@ -1378,7 +1419,9 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                   onChange={(e) => setPrompt(e.target.value)}
                   maxLength={2000}
                   disabled={!current || locked || remaining === 0 || isHistory}
-                  placeholder="例如：把图案缩小一些，间距拉开一点，保留现在的底色。"
+                  placeholder={template?.mode === "fullwidth" || template?.mode === "ends_open"
+                    ? "例如：把图案缩小一些，保留现在的底色。"
+                    : "例如：把图案缩小一些，间距拉开一点，保留现在的底色。"}
                 />
                 <div className="text-limit">{prompt.length} / 2000</div>
                 <div className="suggestions">
@@ -1386,7 +1429,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                     {testMode ? "可试试这些测试指令" : "给灵感一点提示"}
                   </span>
                   {[
-                    "图案缩小一些，间距拉开一点",
+                    template?.mode === "fullwidth" || template?.mode === "ends_open" ? "图案缩小一些" : "图案缩小一些，间距拉开一点",
                     "背景添加波点",
                     "给第一个图案添加星光",
                   ].map((text) => (
@@ -1404,6 +1447,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                 </div>
                 <button
                   className="primary full refine-button"
+                  aria-describedby={layoutIssue ? "ribbon-layout-issue" : undefined}
                   disabled={
                     !current ||
                     locked ||

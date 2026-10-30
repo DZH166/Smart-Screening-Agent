@@ -21,7 +21,8 @@ const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="150"><r
 const imageUrl = "/api/ribbon/synthetic.svg";
 const assets = ["flower", "star", "ring"].map(name => ({ id: `demo-${name}`, name: `测试图案 ${name}`, kind: "pattern", source: "synthetic", is_demo: true, shared: true, url: imageUrl }));
 assets.push({ id: "demo-bg-sage", name: "测试底图", kind: "background", source: "synthetic", is_demo: true, shared: true, url: imageUrl });
-const templates = ["grid", "stagger", "scatter", "single", "ends", "panels"].map((mode, i) => ({ id: `t${i}`, name: ["整齐平铺", "错位平铺", "随机散点", "单排重复", "两端主图", "分区拼接"][i], version: 1, mode, thumbnail_url: imageUrl, enabled: true, rules: {} }));
+const modes = ["grid", "stagger", "scatter", "single", "ends", "panels", "bordered", "scene", "fullwidth", "alternating", "ends_open", "split", "stacked", "opposed"];
+const templates = modes.map((mode, i) => ({ id: `t${i}`, name: ["整齐平铺", "错位平铺", "随机散点", "单排重复", "两端主图", "分区拼接", "上下边饰", "组合循环", "整幅定位", "大小交替", "两端留白", "左右分区", "上下分区", "正倒交替"][i], version: 1, mode, thumbnail_url: imageUrl, enabled: true, rules: {} }));
 const exampleCode = mode => `SYNTHETIC-${mode.toUpperCase()}`;
 const modeNotes = {
   grid: "合成案例说明排列思路，行数和间距以当前模板为准。",
@@ -30,6 +31,14 @@ const modeNotes = {
   single: "一个图案重复，多个图案依次排列。",
   ends: "案例中间留白；当前模板中间仍有小图。",
   panels: "案例为两段；当前模板按左中右三段生成。",
+  bordered: "第一个图案放中间，其余图案作为上下边饰。",
+  scene: "完整组合沿长度重复，不保证无缝拼接。",
+  fullwidth: "完整图案保持比例，仅放置一次。",
+  alternating: "一大一小交替。",
+  ends_open: "两端放图，中间留白。",
+  split: "前半组在左，后半组在右。",
+  stacked: "前半组在上，后半组在下。",
+  opposed: "正向与旋转180度的图案交替，不做镜像。",
 };
 function exampleCatalog() {
   const examples = templates.map(template => {
@@ -38,7 +47,7 @@ function exampleCatalog() {
       image_url: missing ? null : exampleVariant === "unsafe" && template.mode === "grid" ? "https://example.invalid/unsafe-preview.svg" : `/api/ribbon/layout-examples/${code}/image?v=synthetic-${exampleImageRevision}` };
   });
   for (const [id, title] of [["SCENE", "场景参考"], ["BORDER", "边饰参考"], ["SHAPE", "整幅造型参考"]]) {
-    const code = `SYNTHETIC-${id}`;
+    const code = `SYNTHETIC-REFERENCE_${id}`;
     examples.push({ id: code, code, title, description: "明确的合成延展参考，不是新增生成模式。", look_for: "只作排版参考", mode_tags: [], reference_only: true, width: 1200, height: 150, available: true, image_url: `/api/ribbon/layout-examples/${code}/image` });
   }
   return { modes: templates.map(template => ({ mode: template.mode, name: template.name, summary: `合成 ${template.mode} 模式说明`, note: modeNotes[template.mode], example_ids: [exampleCode(template.mode)] })), examples, source_name: `合成案例图库：${user.id}`, note: "仅合成接口，不包含真实图库或模型调用。" };
@@ -85,7 +94,7 @@ const server = createServer(async (req, res) => {
       if (failExampleCatalog > 0) { failExampleCatalog--; return json({ error: "合成目录暂时不可用" }, 503); }
       return json(exampleCatalog());
     }
-    const exampleImage = /^\/api\/ribbon\/layout-examples\/(SYNTHETIC-[A-Z]+)\/image$/.exec(pathname);
+    const exampleImage = /^\/api\/ribbon\/layout-examples\/(SYNTHETIC-[A-Z_]+)\/image$/.exec(pathname);
     if (exampleImage) {
       exampleImageReads.push(exampleImage[1]);
       res.writeHead(200, { "Content-Type": "image/svg+xml", "Cache-Control": "no-store" });
@@ -138,16 +147,70 @@ try {
   await page.locator('[data-workspace="ribbon"]').click();
   await page.getByRole("button", { name: "生成首稿", exact: true }).waitFor();
   assert.equal(await page.locator(".template-card").count(), 6);
+  const moreLayouts = page.getByRole("button", { name: "更多排法（8）", exact: true });
+  assert.equal(await moreLayouts.getAttribute("aria-expanded"), "false", "extra modes stay collapsed initially");
   assert.equal(await page.getByRole("button", { name: "排版与规格", exact: true }).count(), 0);
   assert.equal(await page.locator("#ribbon-mount iframe").count(), 0);
   assert.match(await page.locator(".environment-strip").innerText(), /演示输出/);
   assert.match(await page.locator(".page-footer").innerText(), /保留 50 小时/);
   assert.equal(exampleCatalogReads, 0, "case catalog remains lazy before viewing");
   assert.equal(exampleImageReads.length, 0, "case images remain lazy before viewing");
+  async function selectLayout(mode) {
+    if (modes.indexOf(mode) >= 6 && await moreLayouts.getAttribute("aria-expanded") !== "true") await moreLayouts.click();
+    const template = templates.find(item => item.mode === mode);
+    const button = page.locator(".template-card").filter({ hasText: template.name });
+    await button.click();
+    assert.equal(await button.getAttribute("aria-pressed"), "true");
+  }
+  async function setPatterns(ids) {
+    await page.getByRole("button", { name: "素材库", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "图案素材库", exact: true });
+    await dialog.waitFor();
+    for (const asset of assets.filter(item => item.kind === "pattern")) {
+      const button = dialog.locator(".library-card").filter({ has: page.getByRole("img", { name: asset.name, exact: true }) });
+      const wanted = ids.includes(asset.id);
+      if ((await button.getAttribute("aria-pressed") === "true") !== wanted) await button.click();
+      assert.equal(await button.getAttribute("aria-pressed"), String(wanted));
+    }
+    await dialog.getByRole("button", { name: "关闭弹窗", exact: true }).click();
+    await dialog.waitFor({ state: "hidden" });
+  }
+  await moreLayouts.click();
+  assert.equal(await page.locator(".template-card").count(), 14, "all eight new algorithms can be selected");
+  const generateButton = page.getByRole("button", { name: "生成首稿", exact: true });
+  await selectLayout("fullwidth");
+  assert.match(await page.locator(".layout-selection-issue").innerText(), /只使用 1 个/);
+  assert.equal(await generateButton.isEnabled(), false, "multiple patterns cannot be submitted as a whole fixed design");
+  await setPatterns(["demo-flower"]);
+  assert.equal(await generateButton.isEnabled(), true);
+  assert.match(await page.locator(".layout-selection-help").innerText(), /重复间距不适用/);
+  for (const mode of ["bordered", "split", "stacked"]) {
+    await selectLayout(mode);
+    assert.match(await page.locator(".layout-selection-issue").innerText(), /至少需要 2 个/);
+    assert.equal(await generateButton.isEnabled(), false, `${mode} requires two patterns`);
+  }
+  await setPatterns(["demo-flower", "demo-star"]);
+  for (const mode of ["bordered", "split", "stacked", "ends_open"]) {
+    await selectLayout(mode);
+    assert.equal(await page.locator(".layout-selection-issue").count(), 0);
+    assert.equal(await generateButton.isEnabled(), true, `valid ${mode} selection is usable`);
+  }
+  await setPatterns(["demo-flower", "demo-star", "demo-ring"]);
+  assert.equal(await generateButton.isEnabled(), false, "two open ends reject three patterns");
+  assert.match(await page.locator(".layout-selection-issue").innerText(), /最多使用 2 个/);
+  for (const mode of ["scene", "alternating", "opposed"]) {
+    await selectLayout(mode);
+    assert.equal(await generateButton.isEnabled(), true, `${mode} accepts the selected three patterns`);
+  }
+  await selectLayout("stagger");
+  await moreLayouts.click();
+  assert.equal(await page.locator(".template-card").count(), 6);
+  assert.equal(writes.length, 0, "choosing layouts and correcting selection only edits the local draft");
   await page.getByRole("button", { name: "生成首稿", exact: true }).click();
   await page.getByRole("link", { name: "下载当前图", exact: true }).waitFor();
   const text = page.locator(".refinement-body textarea");
   await text.fill("图案缩小一些");
+  await moreLayouts.click();
 
   // The custom template IDs intentionally differ from their modes: employee
   // case viewing must use mode, remain read-only, and preserve the workspace.
@@ -161,6 +224,7 @@ try {
         prompt: scope.querySelector(".refinement-body textarea")?.value,
         download: scope.querySelector("a[download]")?.getAttribute("href"),
         quota: scope.querySelector(".quota-card")?.textContent,
+        moreLayoutsOpen: scope.querySelector(".more-layouts-toggle")?.getAttribute("aria-expanded"),
       };
     });
   }
@@ -212,14 +276,14 @@ try {
     assert.deepEqual(await workspaceState(), unchangedWorkspace, "viewing and closing never edits selection or refinement text");
   }
   assert.equal(exampleCatalogReads, 1, "same workspace reuses the loaded catalog");
-  assert.equal(exampleImageReads.length, 6, "only the six requested case images loaded");
+  assert.equal(exampleImageReads.length, 14, "only the fourteen requested case images loaded");
   await page.getByRole("button", { name: "查看全部案例", exact: true }).click();
   let caseDialog = page.getByRole("dialog", { name: "全部排版案例", exact: true });
   await caseDialog.locator(".layout-example").last().waitFor();
   assert.equal(await caseDialog.locator(".layout-reference-tag").count(), 3, "extensions remain reference-only");
   assert.equal(await caseDialog.locator(".layout-example-reference").count(), 3);
   for (const mode of ["ends", "panels"]) {
-    const article = caseDialog.locator(".layout-example").filter({ hasText: exampleCode(mode) });
+    const article = caseDialog.locator(".layout-example").filter({ has: page.getByText(exampleCode(mode), { exact: true }) });
     assert.match(await article.locator(".layout-mode-note").innerText(), new RegExp(modeNotes[mode]));
   }
   await caseDialog.getByRole("button", { name: "关闭弹窗", exact: true }).click();
@@ -339,6 +403,20 @@ try {
   const reads = jobReads;
   await page.waitForTimeout(1500);
   assert.equal(jobReads, reads, "terminal task stops polling");
+  // An already saved extended layout must reveal its selected option when the
+  // employee returns, rather than resetting to a basic layout or hiding it.
+  const currentVersion = design.versions.find(v => v.id === design.current_version_id);
+  currentVersion.snapshot = { ...currentVersion.snapshot, asset_refs: ["demo-flower"], template_id: templates.find(t => t.mode === "fullwidth").id, template_mode: "fullwidth" };
+  await page.evaluate(() => localStorage.removeItem("ribbon:synthetic-a:selection"));
+  await page.reload();
+  await page.locator('.template-card[aria-pressed="true"]').filter({ hasText: "整幅定位" }).waitFor();
+  assert.equal(await moreLayouts.getAttribute("aria-expanded"), "true", "restoring a new mode automatically expands its section");
+  assert.equal(await page.locator(".pattern-tile").count(), 1);
+  assert.equal(await page.locator(".layout-selection-issue").count(), 0, "valid restored whole design is not incorrectly blocked");
+  await openCase("fullwidth");
+  await page.getByRole("dialog").getByText(exampleCode("fullwidth"), { exact: true }).waitFor();
+  await closeCase("fullwidth", true);
+  assert.equal(await moreLayouts.getAttribute("aria-expanded"), "true", "case viewing preserves the expanded new mode section");
   user = { id: "synthetic-b", username: "另一测试员工", role: "employee" };
   await page.locator('[data-workspace="numbering"]').click();
   await page.locator('[data-workspace="ribbon"]').click();
@@ -357,6 +435,15 @@ try {
     console.error("Browser errors:", errors, await page.locator("#ribbon-mount").innerText());
     throw error;
   });
+  await page.getByRole("button", { name: "排版模式", exact: true }).click();
+  const ruleType = page.locator(".admin-form select");
+  await ruleType.waitFor();
+  assert.equal(await ruleType.locator("option").count(), 14);
+  await ruleType.selectOption("fullwidth");
+  assert.match(await page.locator(".template-rules-help").innerText(), /不使用 rows 或 step_ratio/);
+  await ruleType.selectOption("bordered");
+  assert.match(await page.locator(".template-rules-help").innerText(), /不使用 rows/);
+  assert.match(await page.locator(".template-rules-help").innerText(), /step_ratio/);
   await page.screenshot({ path: path.join(output, "ribbon-admin.png"), fullPage: true });
   authorized = false;
   await page.reload();
@@ -366,5 +453,5 @@ try {
   assert.ok(writes.some(w => w.path.endsWith("/generate")));
   assert.ok(writes.some(w => w.path.endsWith("/refinements")));
   assert.ok(writes.some(w => w.path.endsWith("/rollback")));
-  console.log("PASS built ShadowRoot workspace: existing workflow plus lazy read-only mode examples, custom template IDs, case cache/abort/identity boundaries, close/ESC/focus trap, busy read-only access, reference notes, zoom, catalog/image failure recovery and refused external images; 1366/1920/1100 layouts (synthetic HTTP only)");
+  console.log("PASS built ShadowRoot workspace: 14 modes in basic/more sections, mode-specific selection guards and restored extended layouts, admin rules help; existing workflow plus lazy read-only examples, custom IDs, cache/abort/identity boundaries, close/ESC/focus trap, busy help access, notes, zoom and failure recovery; 1366/1920/1100 layouts (synthetic HTTP only)");
 } finally { releaseCatalog?.(); await browser.close(); await new Promise(resolve => server.close(resolve)); }

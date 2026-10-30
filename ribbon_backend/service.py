@@ -29,7 +29,12 @@ from .db import Database
 from .imaging import memory_bounded_operation, disk_space_guard, png_space, estimate_render_space, STANDALONE_FREE_MARGIN, MAX_PIXELS, _save_png
 
 log = logging.getLogger(__name__)
-MODES = {'grid': '整齐平铺', 'stagger': '错位平铺', 'scatter': '随机散点', 'single': '单排重复', 'ends': '两端主图', 'panels': '分区拼接'}
+MODES = {'grid': '整齐平铺', 'stagger': '错位平铺', 'scatter': '随机散点', 'single': '单排重复', 'ends': '两端主图', 'panels': '分区拼接',
+         'bordered': '上下边饰', 'scene': '组合循环', 'fullwidth': '整幅定位',
+         'alternating': '大小交替', 'ends_open': '两端留白', 'split': '左右分区',
+         'stacked': '上下分区', 'opposed': '正倒交替'}
+EXTENDED_MODES = frozenset({'bordered', 'scene', 'fullwidth', 'alternating', 'ends_open', 'split', 'stacked', 'opposed'})
+NON_REPEATING_MODES = frozenset({'fullwidth', 'ends_open'})
 TERMINAL = ('SUCCEEDED', 'FAILED')
 
 
@@ -197,14 +202,50 @@ class Service:
                 for asset in seed_assets(self.root / 'seed'):
                     self.insert_asset(db, dict(asset, owner_id=None, sha256=digest(Path(asset['path']).read_bytes()), created_at=now()))
             for mode, name in MODES.items():
-                if not db.execute('SELECT 1 FROM templates WHERE id=?', (mode,)).fetchone():
-                    path = self.root / 'templates' / f'{mode}-1.png'
+                template_id = self.default_template_id(db, mode)
+                if template_id is not None:
+                    path = self.root / 'templates' / f'{template_id}-1.png'
                     path.parent.mkdir(parents=True, exist_ok=True)
                     template_thumbnail(mode, path)
-                    db.execute('INSERT INTO templates(id,version,name,mode,rules_json,enabled,thumbnail_path,thumbnail_sha256) VALUES(?,?,?,?,?,?,?,?)', (mode, 1, name, mode, dump({'is_demo': True}), 1, str(path), file_digest(path)))
+                    db.execute('INSERT INTO templates(id,version,name,mode,rules_json,enabled,thumbnail_path,thumbnail_sha256) VALUES(?,?,?,?,?,?,?,?)', (template_id, 1, name, mode, dump({'is_demo': True}), 1, str(path), file_digest(path)))
             if not db.execute('SELECT 1 FROM output_profiles').fetchone():
                 profile = dict(id='demo-v1', version=1, name='演示输出配置', width=2400, height=600, dpi=150, format='PNG', is_demo=True)
                 db.execute('INSERT INTO output_profiles VALUES(?,?,?,?,1)', (profile['id'], 1, profile['name'], dump(profile)))
+
+    def default_template_id(self, db, mode):
+        """Append new built-ins without rewriting an administrator's template.
+
+        Old six defaults retain their existing initialization semantics. A new
+        mode may need a different ID if its short name was already used by a
+        custom template. Any historical row for that built-in mode means it
+        was initialized before, including a subsequently disabled/changed row.
+        """
+        if mode not in EXTENDED_MODES:
+            return None if db.execute('SELECT 1 FROM templates WHERE id=?', (mode,)).fetchone() else mode
+        for candidate in [mode, 'builtin-' + mode, *('builtin-' + mode + '-' + str(i) for i in range(2, 100))]:
+            rows = db.execute('SELECT mode FROM templates WHERE id=?', (candidate,)).fetchall()
+            if any(row['mode'] == mode for row in rows):
+                return None
+            if rows:
+                continue
+            path = self.root / 'templates' / f'{candidate}-1.png'
+            if path.exists() or path.is_symlink():
+                continue
+            return candidate
+        raise ServiceError(409, '新增排版的默认标识已被占用，请联系管理员处理；已有模板没有改动')
+
+    @staticmethod
+    def validate_layout_selection(mode, asset_ids):
+        if mode == 'bordered' and len(asset_ids) < 2:
+            raise ServiceError(422, '上下边饰至少选择2个图案：第1个作主体，其余作上下边饰')
+        if mode == 'fullwidth' and len(asset_ids) != 1:
+            raise ServiceError(422, '整幅定位请选择1张完整设计；不会忽略其他所选图案')
+        if mode == 'ends_open' and len(asset_ids) not in (1, 2):
+            raise ServiceError(422, '两端留白请选择1或2个图案：1个放两端，2个分别放左右')
+        if mode == 'split' and len(asset_ids) < 2:
+            raise ServiceError(422, '左右分区至少选择2个图案：前半组放左区，后半组放右区')
+        if mode == 'stacked' and len(asset_ids) < 2:
+            raise ServiceError(422, '上下分区至少选择2个图案：前半组放上区，后半组放下区')
 
     def insert_asset(self, db, asset):
         db.execute('INSERT INTO assets(id,owner_id,name,kind,path,sha256,source,is_demo,shared,derived_from,created_at,retained_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
@@ -404,6 +445,7 @@ class Service:
         template = db.execute('SELECT * FROM templates WHERE id=? ORDER BY version DESC LIMIT 1', (selection.get('template_id'),)).fetchone()
         if not template or not template['enabled']:
             raise ServiceError(422, '请选择可用的排版模式')
+        self.validate_layout_selection(template['mode'], ids)
         profile = profile or json.loads(db.execute('SELECT profile_json FROM output_profiles WHERE active=1').fetchone()[0])
         result = copy.deepcopy(base) if base else dict(schema_version=1, seed=secrets.randbelow(2**31), params=dict(scale=1.0, spacing=1.0, rotation=0.0, offset_x=0.0, offset_y=0.0, background_color=None))
         result.update(asset_refs=ids, background_ref=selection['background_id'], template_id=template['id'], template_version=template['version'], template_mode=template['mode'], template_rules=json.loads(template['rules_json']), output_profile=profile)
@@ -584,6 +626,7 @@ class Service:
             return dict(assets=new_assets, result_asset_id=asset_id, provider_metadata=metadata)
 
         snapshot = copy.deepcopy(payload['snapshot'])
+        self.validate_layout_selection(snapshot['template_mode'], snapshot['asset_refs'])
         # Check immutable inputs before a paid planner/editor sees them. Recheck
         # when each input is opened and at commit; an old ID cannot silently
         # acquire different pixels while retaining its version provenance.
@@ -602,6 +645,8 @@ class Service:
             operations = plan.get('operations')
             if not isinstance(operations, list) or len(operations) > 8 or (not operations and not payload.get('selection')):
                 raise ClarificationNeeded('请具体说明要调整的图案、参数或内容')
+            removed_unused_spacing = False
+            applied_operations = []
             for index, operation in enumerate(operations):
                 if not isinstance(operation, dict):
                     raise ServiceError(422, '无法执行该编辑计划')
@@ -610,6 +655,16 @@ class Service:
                     raise ClarificationNeeded('当前版本为整幅编辑结果；请描述整体画面修改，或重新选择图案、底图和排版')
                 if kind == 'parameters':
                     self.validate_parameters(operation.get('values'), snapshot['output_profile'])
+                    if snapshot['template_mode'] in NON_REPEATING_MODES and 'spacing' in operation['values']:
+                        if operation['values']['spacing'] != snapshot['params'].get('spacing', 1.0):
+                            raise ClarificationNeeded('该排版不使用重复间距；可调整大小、位置或旋转，无需调整间距')
+                        # Some planners echo an unchanged default alongside a
+                        # real size/position edit. Do not claim it was applied,
+                        # and do not charge a refinement for that default alone.
+                        removed_unused_spacing = True
+                        operation = {**operation, 'values': {key: value for key, value in operation['values'].items() if key != 'spacing'}}
+                        if not operation['values']:
+                            continue
                     snapshot['params'].update(operation['values'])
                 elif kind in ('edit_asset', 'edit_background', 'edit_composite'):
                     self.phase(job, '正在编辑图像内容')
@@ -654,6 +709,23 @@ class Service:
                         render_kind = 'composite'
                 else:
                     raise ServiceError(422, '编辑计划包含不支持的操作')
+                applied_operations.append(operation)
+            if removed_unused_spacing:
+                if not applied_operations:
+                    selection_changed = False
+                    if payload.get('selection'):
+                        with self.db.connect() as db:
+                            base = db.execute('SELECT snapshot_json FROM versions WHERE id=? AND design_id=?',
+                                              (job['base_version_id'], job['design_id'])).fetchone()
+                        if base is None:
+                            raise ServiceError(409, '原版本已变化，请刷新后再精修')
+                        before = json.loads(base['snapshot_json'])
+                        selection_fields = ('asset_refs', 'background_ref', 'template_id', 'template_version',
+                                            'template_mode', 'template_rules', 'composite_ref')
+                        selection_changed = any(before.get(key) != snapshot.get(key) for key in selection_fields)
+                    if not selection_changed:
+                        raise ClarificationNeeded('本次没有可执行的修改：该排版不使用重复间距；可要求调整大小、位置或旋转')
+                plan = {**plan, 'operations': applied_operations}
             snapshot['edit_plan'] = plan
         render_kind = 'composite' if snapshot.get('composite_ref') else 'layered'
         self.phase(job, '正在合成并检查保存文件')
@@ -836,6 +908,8 @@ class Service:
         rules = body.get('rules', {})
         if not isinstance(rules, dict) or set(rules) - {'rows', 'step_ratio', 'motif_ratio', 'is_demo'}:
             raise ServiceError(422, '模板规则支持 rows、step_ratio 与 motif_ratio')
+        if mode in EXTENDED_MODES and ('rows' in rules or (mode in NON_REPEATING_MODES and 'step_ratio' in rules)):
+            raise ServiceError(422, '该排版行数固定，整幅定位和两端留白不使用重复间距；请移除不适用的规则')
         for key, value in rules.items():
             if key == 'is_demo':
                 if type(value) is not bool:

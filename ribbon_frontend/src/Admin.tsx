@@ -9,7 +9,16 @@ const modeNames: Record<string, string> = {
   single: "单排重复",
   ends: "两端主图",
   panels: "分区拼接",
+  bordered: "上下边饰",
+  scene: "组合循环",
+  fullwidth: "整幅定位",
+  alternating: "大小交替",
+  ends_open: "两端留白",
+  split: "左右分区",
+  stacked: "上下分区",
+  opposed: "正倒交替",
 };
+const basicModes = new Set(["grid", "stagger", "scatter", "single", "ends", "panels"]);
 export default function Admin({
   onClose,
   onChanged,
@@ -237,9 +246,13 @@ export default function Admin({
                 rows={5}
               />
             </label>
-            <small>
-              支持
-              rows（1–4）、step_ratio（0.2–2）、motif_ratio（0.05–0.8）；服务端会校验规则。
+            <small className="template-rules-help">
+              {basicModes.has(mode)
+                ? "支持 rows（1–4）、step_ratio（0.2–2）、motif_ratio（0.05–0.8）。"
+                : mode === "fullwidth" || mode === "ends_open"
+                  ? "仅支持 motif_ratio（0.05–0.8）调整图案大小；行数固定，不使用 rows 或 step_ratio。"
+                  : "支持 step_ratio（0.2–2）、motif_ratio（0.05–0.8）；行数由排法固定，不使用 rows。"}
+              服务端会检查，不适用的字段请移除。
             </small>
             <label className="checkbox-line">
               <input
