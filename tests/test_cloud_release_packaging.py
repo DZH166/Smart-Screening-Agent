@@ -103,11 +103,7 @@ def test_archive_is_reproducible_with_exact_modes_and_manifest_hashes():
     assert manifest['version'] == '9.8.7' and manifest['tag'] == 'v9.8.7'
     assert manifest['explicit_exclusions'] == sorted([
         'tests/sample_visual_reference.json',
-        'docs/preview/admin-key-ledger-desktop.png',
-        'docs/preview/admin-key-ledger-narrow.png',
-        'docs/preview/admin-key-ledger.html',
-        'docs/preview/ribbon-model-service.html',
-        'docs/preview/ribbon-model-service.png',
+        'docs/preview/',
     ])
     with tarfile.open(fileobj=BytesIO(packed), mode='r:gz') as archive:
         assert archive.getmember('deploy/check.sh').mode == 0o755
@@ -187,6 +183,21 @@ def test_git_blob_bytes_are_used_instead_of_worktree(tmp_path,monkeypatch):
     def fake_git(repo,*args,data=None):
         if args[0]=='ls-tree':
             return ('100644 blob '+identity+'\tREADME.md\0').encode()
+        assert args==('cat-file','--batch') and data==(identity+'\n').encode()
+        return (identity+' blob '+str(len(blob))+'\n').encode()+blob+b'\n'
+    monkeypatch.setattr(release,'git',fake_git)
+    monkeypatch.setattr(release,'REQUIRED_FILES',{'README.md'})
+    assert release.committed_files(tmp_path,'a'*40)=={'README.md':('100644',blob)}
+
+
+def test_design_review_directory_is_excluded_before_reading_git_blobs(tmp_path,monkeypatch):
+    identity='b'*40
+    blob=b'public source\n'
+    names=['README.md','docs/preview/design.png','docs/preview/nested/mockup.html',
+           'tests/sample_visual_reference.json']
+    def fake_git(repo,*args,data=None):
+        if args[0]=='ls-tree':
+            return b''.join(('100644 blob '+identity+'\t'+name+'\0').encode() for name in names)
         assert args==('cat-file','--batch') and data==(identity+'\n').encode()
         return (identity+' blob '+str(len(blob))+'\n').encode()+blob+b'\n'
     monkeypatch.setattr(release,'git',fake_git)

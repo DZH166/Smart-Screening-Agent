@@ -23,11 +23,9 @@ import tarfile
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_NAME = 'release-manifest.json'
 # Keep the original design-review renderings in Git; they are not runtime files
-# and are omitted from this text-only Linux source archive by exact name.
-EXCLUDED = frozenset({'tests/sample_visual_reference.json',
-    'docs/preview/admin-key-ledger-desktop.png', 'docs/preview/admin-key-ledger-narrow.png',
-    'docs/preview/admin-key-ledger.html', 'docs/preview/ribbon-model-service.html',
-    'docs/preview/ribbon-model-service.png'})
+# and are omitted from this text-only Linux source archive.
+EXCLUDED = frozenset({'tests/sample_visual_reference.json'})
+EXCLUDED_DIRECTORIES = frozenset({'docs/preview'})
 DEMO_SVG_FILES = frozenset('tools/material_demo/assets/' + name + '.svg' for name in
     ('orange-bear', 'mint-cat', 'sunshine', 'flower', 'rocket', 'cherry', 'source-sheet'))
 ROOT_FILES = frozenset({'.gitignore', '.gitattributes', 'AGENTS.md', 'README.md', 'CONTRACTS.md',
@@ -186,7 +184,8 @@ def create_manifest(files, commit, release_date):
         release_date=release_date.isoformat(), timezone='Asia/Shanghai', artifact_type='linux-cloud-source',
         source_files=hashes, source_file_count=len(hashes), archive_file_count=len(hashes)+1,
         business_data_included=False, credentials_included=False, runtime_logs_cache_results_included=False,
-        dependency_binaries_included=False, windows_binary_included=False, explicit_exclusions=sorted(EXCLUDED))
+        dependency_binaries_included=False, windows_binary_included=False,
+        explicit_exclusions=sorted(EXCLUDED | {directory + '/' for directory in EXCLUDED_DIRECTORIES}))
 
 
 def build_archive(files, manifest_bytes, epoch):
@@ -246,7 +245,7 @@ def committed_files(repo, commit):
         attributes, encoded_name = record.split(b'\t', 1)
         mode, kind, identity = attributes.decode('ascii').split()
         name = encoded_name.decode('utf-8')
-        if name in EXCLUDED:
+        if name in EXCLUDED or any(name.startswith(directory + '/') for directory in EXCLUDED_DIRECTORIES):
             continue
         public_name(name)
         require(name not in selected and mode in {'100644', '100755'} and kind == 'blob', 'Duplicate or linked Git source refused')
