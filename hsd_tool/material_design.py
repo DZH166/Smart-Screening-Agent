@@ -15,8 +15,10 @@ queue grows without a meaningful throughput gain, so the pool stays at eight.
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import logging
 import math
 import threading
+import time
 import uuid
 
 from PIL import Image
@@ -25,6 +27,9 @@ from .ai_usage import empty_usage, merge_usage
 from .material_ark import (MAX_INPUT_BYTES, ArkCancelled, ArkLayer, ArkMaterialProvider, ArkProviderError,
                            ArkResult, _cancelled, _decode, _encode)
 from .material_locate import DeepSeekMaterialLocator
+from .material_quality import native_edge_diagnostics
+
+_LOG = logging.getLogger(__name__)
 
 DEFAULT_WORKERS = 8
 MAX_WORKERS = 8
@@ -225,6 +230,10 @@ class MaterialDesignProvider:
         self.ark = ark or ArkMaterialProvider(config["ark_key"], config["model_id"])
         self.locator = locator or DeepSeekMaterialLocator(ai_settings, key_pool=key_pool)
         self.workers = max(1, min(MAX_WORKERS, int(workers)))
+        # One provider serves a batch. When the image service says it is busy,
+        # every worker pauses briefly instead of retrying into the same limit.
+        self._rate_lock = threading.Lock()
+        self._cooldown_until = 0.0
 
     def _note(self, instructions):
         text = DESIGN_NOTE
@@ -243,6 +252,20 @@ class MaterialDesignProvider:
         """One employee-requested clarity pass on this current result only."""
         return self._run(image_bytes, "", check_cancel, on_progress, on_attempt,
                          edit=False, bounds=None, refine=True)
+
+    def _note_rate_limit(self):
+        with self._rate_lock:
+            self._cooldown_until = max(self._cooldown_until, time.monotonic() + 1.5)
+
+    def _wait_cooldown(self, check_cancel):
+        while True:
+            with self._rate_lock:
+                remaining = self._cooldown_until - time.monotonic()
+            if remaining <= 0:
+                return
+            if _cancelled(check_cancel):
+                raise ArkCancelled()
+            time.sleep(min(0.2, remaining))
 
     def _run(self, raw, instructions, check_cancel, on_progress, on_attempt, *, edit, bounds, refine=False):
         attempts, lock = [], threading.Lock()
@@ -272,11 +295,16 @@ class MaterialDesignProvider:
                             provider_usage[provider][key] = provider_usage[provider].get(key, 0) + value
 
         def call(provider, operation, invoke):
+            # A definite rate-limit rejection (429, zero generated images) is
+            # unbilled but is not retried automatically: one lost design is
+            # reported to the employee, and the shared cooldown below keeps the
+            # other workers from walking into the same limit at the same time.
             attempt = {"id": uuid.uuid4().hex, "provider": provider, "operation": operation,
                        "number": 1, "state": "submitted", "usage": {}, "request_id": "",
                        "settled": False, "code": ""}
             publish(attempt)
             try:
+                self._wait_cooldown(check_cancel)
                 result = invoke()
             except (ArkProviderError, ArkCancelled) as error:
                 # A stopped wait does not prove that an already sent request
@@ -287,6 +315,8 @@ class MaterialDesignProvider:
                                settled=error.settled, code=error.code)
                 aggregate(provider, attempt["usage"])
                 publish(attempt)
+                if getattr(error, "retryable", False) and error.settled:
+                    self._note_rate_limit()
                 raise
             except Exception:
                 # A transport failure after dispatch proves nothing about billing.
@@ -463,6 +493,9 @@ class MaterialDesignProvider:
             native_image = _decode(cleaned.layers[0].png, output=True)
             extra_notes = list(cleaned.warnings) + list(cleaned.layers[0].warnings)
             png, crop_notes = preserve_design(native_image)
+            # Local, warning-only diagnostics: nothing is altered or re-generated.
+            edge = native_edge_diagnostics(png)
+            crop_notes = list(crop_notes) + list(edge.get("warnings") or ())
             # Persist source coordinates in ArkLayer's public bounds contract;
             # reference hints and native (left, top, right, bottom) are private.
             bounds = {"x": native[0], "y": native[1],
@@ -486,6 +519,9 @@ class MaterialDesignProvider:
                 progress("designs", "", current=finished, total=total)
         layers.sort(key=lambda layer: layer.z_index)
         failures.sort()
+        codes = sorted(str(getattr(error, "code", "") or "processing_failed") for _, _, error in failures)
+        _LOG.info("material designs total=%d ok=%d failed=%d codes=%s",
+                  total, len(layers), len(failures), ",".join(codes) or "-")
         return layers, failures
 
 

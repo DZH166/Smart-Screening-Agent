@@ -86,3 +86,41 @@ def quality_hook(source_png: bytes, layer_png: bytes, bounds: dict, *, corrected
             Image.DecompressionBombWarning, cv2.error):
         notes.append("图片或位置数据无法完整核验，需要人工确认。")
         return result
+
+
+def native_edge_diagnostics(layer_png: bytes) -> dict:
+    """Cheap local check for a returned native layer; never changes pixels.
+
+    A white pasteboard border around a transparent design is the most common
+    visible defect of image-model extraction. We only measure it so the employee
+    can be told to look; nothing is cropped, eroded or re-generated here.
+    """
+    result = {"white_edge_ratio": None, "opaque_ratio": None, "warnings": []}
+    try:
+        with Image.open(io.BytesIO(layer_png)) as image:
+            if image.format != "PNG" or getattr(image, "n_frames", 1) != 1:
+                return result
+            rgba = image.convert("RGBA")
+    except (OSError, ValueError, Image.DecompressionBombError):
+        return result
+    work = rgba.copy()
+    work.thumbnail((512, 512), Image.Resampling.LANCZOS)
+    alpha = np.asarray(work.getchannel("A"))
+    rgb = np.asarray(work.convert("RGB"), dtype=np.int16)
+    foreground = alpha > 8
+    if not foreground.any():
+        return result
+    # Pixels on the foreground boundary: foreground touching transparency.
+    kernel = np.ones((3, 3), np.uint8)
+    eroded = cv2.erode(foreground.astype(np.uint8), kernel) > 0
+    boundary = foreground & ~eroded
+    if not boundary.any():
+        return result
+    near_white = (rgb[:, :, 0] > 232) & (rgb[:, :, 1] > 232) & (rgb[:, :, 2] > 232)
+    near_white &= (rgb.max(axis=2) - rgb.min(axis=2)) < 14
+    result["white_edge_ratio"] = round(float((boundary & near_white).sum()) / float(boundary.sum()), 4)
+    result["opaque_ratio"] = round(float((alpha >= 250).sum()) / float(foreground.sum()), 4)
+    if result["white_edge_ratio"] >= 0.03:
+        result["warnings"].append(
+            "这个设计的边缘有一圈偏白的像素，可能有白色贴边；请对照原图，必要时重新框选补提。")
+    return result

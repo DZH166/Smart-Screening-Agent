@@ -945,3 +945,28 @@ def test_an_unknown_locate_submission_is_never_retried():
             source_image((400, 400)))
     assert raised.value.code == "submission_unknown" and locator.attempts == 1
     assert len(ark.calls) == 1
+
+
+def test_rate_limit_cooldown_pauses_workers_without_retrying_the_call(monkeypatch):
+    """A definite 429 pauses the pool; it must not silently repeat the request."""
+    provider_instance = provider(FakeArk(), [])
+    clock = {"now": 100.0}
+    sleeps = []
+
+    def fake_sleep(seconds):
+        sleeps.append(seconds)
+        clock["now"] += seconds
+
+    monkeypatch.setattr(design_module.time, "sleep", fake_sleep)
+    monkeypatch.setattr(design_module.time, "monotonic", lambda: clock["now"])
+    provider_instance._note_rate_limit()
+    assert provider_instance._cooldown_until == pytest.approx(101.5)
+    # A worker arriving during the window waits it out; every step advances the
+    # clock so the loop terminates instead of spinning.
+    provider_instance._wait_cooldown(None)
+    assert sleeps and all(seconds > 0 for seconds in sleeps)
+    assert clock["now"] >= 101.5
+    # Once the window has passed there is nothing left to wait for.
+    sleeps.clear()
+    provider_instance._wait_cooldown(None)
+    assert sleeps == []

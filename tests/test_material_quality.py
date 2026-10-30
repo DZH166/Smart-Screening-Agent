@@ -4,7 +4,7 @@ from io import BytesIO
 from PIL import Image, ImageDraw
 import pytest
 
-from hsd_tool.material_quality import quality_hook
+from hsd_tool.material_quality import native_edge_diagnostics, quality_hook
 
 
 def png(image):
@@ -84,3 +84,31 @@ def test_unproved_geometry_repair_and_unreadable_inputs_stay_review(change):
                           corrected=change == "repair")
     assert not result["auto_ready"]
     assert result["warnings"]
+
+
+def _native_layer(border):
+    """A round design on a transparent canvas, optionally with a white rim."""
+    image = Image.new("RGBA", (240, 240), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    draw.ellipse((30, 30, 210, 210), fill=(226, 60, 70, 255))
+    if border:
+        draw.ellipse((30, 30, 210, 210), outline=(255, 255, 255, 255), width=6)
+    return png(image)
+
+
+def test_native_edge_diagnostics_flags_a_white_pasteboard_border():
+    result = native_edge_diagnostics(_native_layer(border=True))
+    assert result["white_edge_ratio"] is not None
+    assert result["white_edge_ratio"] >= 0.03
+    assert result["warnings"] and "白色贴边" in result["warnings"][0]
+
+
+def test_native_edge_diagnostics_stays_quiet_for_a_clean_cutout():
+    result = native_edge_diagnostics(_native_layer(border=False))
+    assert result["white_edge_ratio"] is not None
+    assert result["white_edge_ratio"] < 0.03
+    assert result["warnings"] == []
+
+
+def test_native_edge_diagnostics_never_raises_on_unreadable_input():
+    assert native_edge_diagnostics(b"not a png")["warnings"] == []
