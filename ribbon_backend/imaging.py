@@ -71,14 +71,14 @@ def memory_bounded_operation(function):
     return wrapped
 
 
-def _save_png(image: Image.Image, path: Path, dpi: int | None = 144) -> None:
+def _save_png(image: Image.Image, path: Path, dpi: int | None = 144, *, compress_level: int = 6) -> None:
     path = Path(path)
     require_space(path.parent, png_space(*image.size))
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
         options = {'dpi': (dpi, dpi)} if dpi is not None else {}
-        image.save(temp, format="PNG", optimize=False, **options)
+        image.save(temp, format="PNG", optimize=False, compress_level=compress_level, **options)
         os.replace(temp, path)
     finally:
         temp.unlink(missing_ok=True)

@@ -17,6 +17,7 @@ let exampleCatalogReads = 0, failExampleCatalog = 0, exampleVariant = "normal", 
 let holdNextCatalog = false, releaseCatalog = null;
 let modelProvider = "test", modelReady = true, modelEditing, modelAuthMode = "demo";
 let backgroundFixture = null, rejectBackground = false;
+let assetReads = 0, uploadAttempts = 0, uploadFailureAt = 0, uploadHoldAt = 0, releaseUpload = null;
 const exampleImageReads = [], badExampleImages = new Set();
 const profile = { id: "synthetic-profile", version: 1, name: "合成测试规格", is_demo: true, width: 2400, height: 600, dpi: 150 };
 const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="150"><rect width="600" height="150" fill="#e7eee2"/><circle cx="120" cy="75" r="40" fill="#a4b989"/><text x="210" y="82" font-size="28">SYNTHETIC TEST</text></svg>';
@@ -72,18 +73,32 @@ const server = createServer(async (req, res) => {
       if (!resolved.startsWith(path.join(root, "hsd_tool/static") + path.sep)) return json({ error: "not found" }, 404);
       res.writeHead(200, { "Content-Type": pathname.endsWith(".css") ? "text/css" : "text/javascript" }); res.end(await readFile(resolved)); return;
     }
-    if (pathname === imageUrl) { res.writeHead(200, { "Content-Type": "image/svg+xml" }); res.end(svg); return; }
+    if (pathname === imageUrl || pathname === "/api/ribbon/synthetic-thumbnail.svg") { res.writeHead(200, { "Content-Type": "image/svg+xml" }); res.end(svg); return; }
     if (pathname === "/api/material/config") return json({ available: false, reason: "合成验收不调用素材模型" });
     if (!pathname.startsWith("/api/ribbon/")) return json({}, 404);
     if (!authorized) return json({ error: "登录已失效" }, 401);
     if (!["GET", "HEAD"].includes(req.method)) {
       assert.equal(req.headers["x-hsd-token"], "synthetic-token");
       let body = ""; for await (const chunk of req) body += chunk;
+      if (pathname === "/api/ribbon/assets" && req.headers["content-type"]?.startsWith("multipart/form-data;")) {
+        const attempt = ++uploadAttempts;
+        writes.push({ path: pathname, body: { multipart: true, attempt } });
+        if (attempt === uploadHoldAt) {
+          await new Promise(resolve => { releaseUpload = resolve; });
+          releaseUpload = null;
+          if (res.destroyed) return;
+        }
+        if (attempt === uploadFailureAt) return json({ detail: "合成：本张上传失败，原文件未保存" }, 422);
+        const asset = { id: `synthetic-upload-${attempt}`, name: `上传图案${attempt}`, kind: "pattern", source: "upload", shared: false, is_demo: false,
+          url: imageUrl, thumbnail_url: "/api/ribbon/synthetic-thumbnail.svg" };
+        assets.push(asset);
+        return json(asset);
+      }
       writes.push({ path: pathname, body: JSON.parse(body || "{}") });
     }
     if (pathname.endsWith("/auth/me")) return json(user);
     if (pathname.endsWith("/config")) return json({ provider: modelProvider, ai_ready: modelReady, auth_mode: modelAuthMode, output_profile: profile, max_refinements: 2, editing: modelEditing });
-    if (pathname.endsWith("/assets")) return json(assets);
+    if (pathname.endsWith("/assets")) { assetReads++; return json(assets); }
     if (pathname.endsWith("/templates")) return json(templates);
     if (pathname === "/api/ribbon/layout-examples") {
       exampleCatalogReads++;
@@ -560,9 +575,7 @@ try {
   backgroundFixture = { ...backgroundFixture, status: "SUCCEEDED", phase: "已保存", result_asset_id: "synthetic-ai-background" };
   await page.locator(".background-selected strong").filter({ hasText: "合成AI底图" }).waitFor();
   modelAuthMode = "demo";
-  await page.reload();
-  await localBackground.waitFor();
-  assert.equal(await localBackground.isEnabled(), true, "demo fixture mode is also available without a real API key");
+
   modelAuthMode = "hsd";
   await page.reload();
   await localBackground.waitFor();
@@ -574,6 +587,59 @@ try {
   await localBackground.waitFor();
   assert.equal(await localBackground.isEnabled(), false, "an inconsistent ready flag cannot enable test models for employees");
   modelAuthMode = "demo";
+
+  // Uploads remain serial, expose only acknowledged items, and retain earlier
+  // successes after a later file fails. No extra catalog refresh is needed.
+  user = { id: "synthetic-upload-user", username: "测试上传员工", role: "customer" };
+  await page.reload();
+  await page.getByRole("button", { name: "上传图案", exact: true }).waitFor();
+  const uploadInput = page.locator("#ribbon-mount input[type=file]").first();
+  const syntheticFiles = [1, 2, 3].map(index => ({ name: `synthetic-${index}.png`, mimeType: "image/png", buffer: Buffer.from(svg) }));
+  const readsBeforeUpload = assetReads, attemptsBeforeUpload = uploadAttempts;
+  uploadHoldAt = uploadAttempts + 2;
+  uploadFailureAt = uploadAttempts + 3;
+  await uploadInput.setInputFiles(syntheticFiles);
+  await page.getByRole("img", { name: `上传图案${attemptsBeforeUpload + 1}`, exact: true }).waitFor();
+  await page.getByText("已上传 1 / 3 张，正在上传第 2 张…", { exact: true }).waitFor();
+  assert.equal(uploadAttempts, attemptsBeforeUpload + 2, "third upload waits for the second response");
+  assert.equal(await page.getByRole("img", { name: `上传图案${attemptsBeforeUpload + 2}`, exact: true }).count(), 0, "an unacknowledged file is not shown as saved");
+  await page.locator('[data-workspace="numbering"]').click();
+  await page.locator('[data-workspace="ribbon"]').click();
+  await page.getByRole("img", { name: `上传图案${attemptsBeforeUpload + 1}`, exact: true }).waitFor();
+  assert.ok(releaseUpload);
+  releaseUpload();
+  await page.getByRole("alert").getByText(/已上传 2 个，其余未完成/).waitFor();
+  assert.equal(uploadAttempts, attemptsBeforeUpload + 3, "a failed file is not retried automatically");
+  assert.equal(assetReads, readsBeforeUpload, "upload responses update the catalog without another full read");
+  assert.equal(await uploadInput.inputValue(), "", "the file input can select the same file again");
+  const firstUploadedImage = page.getByRole("img", { name: `上传图案${attemptsBeforeUpload + 1}`, exact: true });
+  assert.equal(await firstUploadedImage.getAttribute("src"), "/api/ribbon/synthetic-thumbnail.svg");
+  assert.equal(await firstUploadedImage.getAttribute("decoding"), "async");
+  await page.getByRole("button", { name: "素材库", exact: true }).click();
+  const libraryImage = page.getByRole("dialog", { name: "图案素材库" }).getByRole("img", { name: `上传图案${attemptsBeforeUpload + 1}`, exact: true });
+  assert.equal(await libraryImage.getAttribute("src"), "/api/ribbon/synthetic-thumbnail.svg");
+  assert.equal(await libraryImage.getAttribute("loading"), "lazy");
+  await page.getByRole("button", { name: "关闭弹窗", exact: true }).click();
+
+  // A different employee identity unmounts the old controller. Its accepted
+  // request may finish server-side, but it cannot send remaining old files.
+  uploadFailureAt = 0;
+  uploadHoldAt = uploadAttempts + 1;
+  const attemptsBeforeIdentityChange = uploadAttempts;
+  await uploadInput.setInputFiles(syntheticFiles);
+  await page.getByText("正在上传第 1 / 3 张…", { exact: true }).waitFor();
+  while (!releaseUpload) await new Promise(resolve => setTimeout(resolve, 10));
+  user = { id: "synthetic-next-upload-user", username: "另一个合成员工", role: "customer" };
+  await page.locator('[data-workspace="numbering"]').click();
+  await page.locator('[data-workspace="ribbon"]').click();
+  await page.getByRole("button", { name: "上传图案", exact: true }).waitFor();
+  releaseUpload();
+  await page.waitForTimeout(150);
+  assert.equal(uploadAttempts, attemptsBeforeIdentityChange + 1, "old files stop at the identity boundary");
+  assert.equal(await page.getByText(/其余未完成/).count(), 0, "old upload notices cannot overwrite a new employee workspace");
+  await page.reload();
+  await localBackground.waitFor();
+  assert.equal(await localBackground.isEnabled(), true, "demo fixture mode is also available without a real API key");
 
   user = { id: "synthetic-admin", username: "测试管理员", role: "admin" };
   await page.goto(`${base}/#ribbon-admin`);
@@ -600,5 +666,5 @@ try {
   assert.ok(writes.some(w => w.path.endsWith("/generate")));
   assert.ok(writes.some(w => w.path.endsWith("/refinements")));
   assert.ok(writes.some(w => w.path.endsWith("/rollback")));
-  console.log("PASS built ShadowRoot workspace: configured/unconfigured model handoff, original-size edit boundaries, ordered target names, background prompt/failure/retry/duplicate guard and draft retention; 14 modes, read-only examples, cache/identity/focus, generation/refinement/rollback/download and 1366/1920/1100 layouts (synthetic HTTP only)");
-} finally { releaseCatalog?.(); await browser.close(); await new Promise(resolve => server.close(resolve)); }
+  console.log("PASS built ShadowRoot workspace: serial upload progress and partial-success retention, thumbnail/lazy image paths, identity-bound upload cancellation; configured/unconfigured model handoff, original-size edit boundaries, 14 modes and examples, generation/refinement/rollback/download and 1366/1920/1100 layouts (synthetic HTTP only)");
+} finally { releaseCatalog?.(); releaseUpload?.(); await browser.close(); await new Promise(resolve => server.close(resolve)); }

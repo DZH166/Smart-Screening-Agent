@@ -30,7 +30,7 @@ class Database:
             # Unknown legacy timestamps remain NULL: do not expire old work by guesswork.
             for table, columns in {
                 'designs': {'retained_at': 'REAL'},
-                'assets': {'retained_at': 'REAL'},
+                'assets': {'retained_at': 'REAL', 'thumbnail_path': 'TEXT', 'thumbnail_sha256': 'TEXT'},
                 'jobs': {'settled_at': 'REAL'},
                 'versions': {'preview_sha256': 'TEXT'},
                 'templates': {'thumbnail_sha256': 'TEXT'},

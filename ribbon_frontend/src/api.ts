@@ -7,6 +7,7 @@ export type Asset = {
   is_demo: boolean;
   shared: boolean;
   url: string;
+  thumbnail_url?: string;
   derived_from?: string;
 };
 export type Template = {

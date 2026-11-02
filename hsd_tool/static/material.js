@@ -13,7 +13,7 @@
     "清理可能改变文字、配色或细节，请对照原图确认。",
     "已按标记位置提出修改要求，模型仍可能改变其他区域，请对照确认。"
   ]);
-  const state = {workspace:"numbering",config:null,job:null,pendingJobId:null,files:[],objectUrls:[],busy:false,uploading:false,uncertain:false,retryUpload:false,stopRequested:false,uploadId:null,xhr:null,timer:null,polling:false,authLost:false,filter:"available",newBatch:false,dialog:null,box:null,startPoint:null,sourcesSignature:"",items:new Map(),scroll:{numbering:0,material:0},epoch:0,refineAcks:new Set(),stream:null,streamJob:null,streamErrors:0,streamDisabled:false,clockTimer:null,clockAnchor:null,progressCounts:null,renewTimer:null};
+  const state = {workspace:"numbering",config:null,job:null,pendingJobId:null,files:[],objectUrls:[],selectedFiles:new Map(),busy:false,uploading:false,uncertain:false,retryUpload:false,stopRequested:false,uploadId:null,xhr:null,timer:null,polling:false,authLost:false,filter:"available",newBatch:false,dialog:null,box:null,startPoint:null,sourcesSignature:"",items:new Map(),scroll:{numbering:0,material:0},epoch:0,refineAcks:new Set(),stream:null,streamJob:null,streamErrors:0,streamDisabled:false,clockTimer:null,clockAnchor:null,progressCounts:null,renewTimer:null};
   const metrics = {cards_created:0,cards_updated:0,previews_loaded:0,polls:0};
   function count(name) {metrics[name]++;document.documentElement.dataset.materialUiMetrics=JSON.stringify(metrics);}
   function stored(key) {try{return sessionStorage.getItem(key);}catch(_){return null;}}
@@ -81,17 +81,31 @@
       else {const id=stored("hsd-material-job")||(!state.newBatch?config.active_job_id:null);if(id&&/^[a-zA-Z0-9_-]{1,100}$/.test(id))await loadJob(id);}
     }catch(error){if(epoch===state.epoch&&!state.authLost)notify(error.message||"无法读取素材设置，请稍后刷新。",true);}finally{if(epoch===state.epoch)controls();}
   }
-  function releaseUrls() {state.objectUrls.forEach(url=>URL.revokeObjectURL(url));state.objectUrls=[];}
+  function releaseUrls() {for(const entry of state.selectedFiles.values()){URL.revokeObjectURL(entry.url);entry.node.remove();}state.selectedFiles.clear();state.objectUrls=[];}
+  function selectedFileKey(file) {return JSON.stringify([file.name,file.size,file.lastModified??null]);}
   function fileError(file) {if(!/\.(png|jpe?g|webp)$/i.test(file?.name||""))return "只支持 PNG、JPG、WebP 图片。";if(!file.size)return "所选图片为空，请换一张。";return "";}
   function selectFiles(files,append=false) {
     if(busy()||state.authLost)return;
     const incoming=[...files],error=incoming.map(fileError).find(Boolean);
     $("material-file-error").textContent=error||"";$("material-file-error").classList.toggle("hidden",!error);if(error)return;
-    const unique=new Map((append?state.files:[]).map(file=>[`${file.name}:${file.size}:${file.lastModified}`,file]));
-    incoming.forEach(file=>unique.set(`${file.name}:${file.size}:${file.lastModified}`,file));state.files=[...unique.values()];renderSelected();controls();
+    const unique=new Map((append?state.files:[]).map(file=>[selectedFileKey(file),file]));
+    incoming.forEach(file=>unique.set(selectedFileKey(file),file));state.files=[...unique.values()];renderSelected();controls();
   }
   function renderSelected() {
-    releaseUrls();$("material-selected-files").innerHTML=state.files.map((file,index)=>{const url=URL.createObjectURL(file);state.objectUrls.push(url);return `<li class="material-selected-file"><img src="${esc(url)}" alt="" decoding="async"><span>${esc(file.name)}<small>${formatBytes(file.size)}</small></span><button type="button" data-remove-file="${index}" aria-label="移除 ${esc(file.name)}">×</button></li>`;}).join("");
+    const wanted=new Map(state.files.map(file=>[selectedFileKey(file),file])),container=$("material-selected-files");
+    for(const [key,entry] of state.selectedFiles){if(wanted.get(key)!==entry.file){URL.revokeObjectURL(entry.url);entry.node.remove();state.selectedFiles.delete(key);}}
+    state.files.forEach((file,index)=>{
+      const key=selectedFileKey(file);let entry=state.selectedFiles.get(key);
+      if(!entry){
+        const node=document.createElement("li"),image=document.createElement("img"),label=document.createElement("span"),size=document.createElement("small"),button=document.createElement("button"),url=URL.createObjectURL(file);
+        node.className="material-selected-file";image.src=url;image.alt="";image.decoding="async";image.loading="lazy";image.width=52;image.height=52;
+        label.textContent=file.name;size.textContent=formatBytes(file.size);label.append(size);button.type="button";button.textContent="×";button.setAttribute("aria-label",`移除 ${file.name}`);node.append(image,label,button);
+        entry={file,node,image,button,url};state.selectedFiles.set(key,entry);
+      }
+      entry.button.dataset.removeFile=String(index);
+      const previous=container.children[index]||null;if(previous!==entry.node)container.insertBefore(entry.node,previous);
+    });
+    state.objectUrls=[...state.selectedFiles.values()].map(entry=>entry.url);
   }
   function formatBytes(bytes) {if(bytes<1024)return `${bytes} B`;if(bytes<1024*1024)return `${(bytes/1024).toFixed(1)} KiB`;return `${(bytes/1024/1024).toFixed(1)} MiB`;}
   function showUpload() {$("material-progress").classList.remove("hidden");$("material-upload-check").classList.toggle("hidden",!state.uncertain);$("material-stop").classList.remove("hidden");$("material-progress-title").textContent=state.uncertain?"正在核对上传结果":"正在上传图片";$("material-progress-message").textContent=state.uncertain?"连接中断，先确认服务器是否收到，避免重复处理。":"上传完成后自动开始提取。";$("material-progress-meter").classList.remove("hidden");$("material-progress-label").textContent="上传进度";$("material-progress-track").setAttribute("aria-label","上传进度");$("material-progress-percent").textContent="";$("material-progress-fill").classList.toggle("indeterminate",true);$("material-progress-track").removeAttribute("aria-valuenow");$("material-progress-detail").textContent="";}

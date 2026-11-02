@@ -167,6 +167,7 @@ def cleanup(service, *, now=None):
                 for v in deleted_versions:
                     removal_paths.update((Path(v['master_path']), Path(v['preview_path'])))
                 removal_paths.update(Path(assets[a]['path']) for a in delete_assets)
+                removal_paths.update(Path(assets[a]['thumbnail_path']) for a in delete_assets if assets[a].get('thumbnail_path'))
                 job_dirs = {root / 'jobs' / jid for jid in delete_jobs}
                 # Any unexpected path or symlink makes the whole owner ineligible.
                 all_paths = removal_paths | job_dirs

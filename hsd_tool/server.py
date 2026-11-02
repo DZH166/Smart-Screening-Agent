@@ -396,7 +396,11 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
             response.call_on_close(lambda: release_job_lease(identifier, state))
             state["bound"] = True
         response.headers["X-HSD-Build"] = _build_id()
-        if request.endpoint not in {"image", "material_image", "ribbon_layout_example_image"} or response.status_code not in {200, 304}:
+        ribbon_thumbnail = (request.endpoint == 'ribbon_api' and request.method in {'GET', 'HEAD'}
+                            and re.fullmatch(r'assets/[A-Za-z0-9_-]{1,160}/thumbnail', (request.view_args or {}).get('ribbon_path', ''))
+                            and response.status_code in {200, 304}
+                            and response.headers.get('Cache-Control') == 'private, no-cache, must-revalidate')
+        if not ribbon_thumbnail and (request.endpoint not in {"image", "material_image", "ribbon_layout_example_image"} or response.status_code not in {200, 304}):
             response.headers["Cache-Control"] = "no-store"
         response.headers["X-Content-Type-Options"] = "nosniff"
         download_frame = request.endpoint in {"download", "material_download"} and request.args.get("frame") == "1"

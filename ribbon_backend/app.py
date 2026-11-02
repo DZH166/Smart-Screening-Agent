@@ -5,7 +5,7 @@ from urllib.parse import urlparse
 import time
 
 from fastapi import Depends, FastAPI, File, Form, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
@@ -182,6 +182,21 @@ def create_app(settings: Settings | None = None, *, service: Service | None = No
     @app.get('/api/assets/{asset_id}/file')
     def asset_file(asset_id: str, current=Depends(user)):
         return FileResponse(service.verified_asset_path(current['id'], asset_id), media_type='image/png')
+
+    @app.api_route('/api/assets/{asset_id}/thumbnail', methods=['GET', 'HEAD'])
+    def asset_thumbnail(asset_id: str, request: Request, current=Depends(user)):
+        if set(request.query_params) - {'v'} or len(request.query_params.getlist('v')) > 1:
+            raise ServiceError(400, '素材缩略图查询参数无效')
+        path, sha256 = service.verified_asset_preview(current['id'], asset_id, request.query_params.get('v'))
+        etag = '"' + sha256 + '"'
+        headers = {'Cache-Control': 'private, no-cache, must-revalidate',
+                   'ETag': etag, 'Vary': 'Cookie', 'Cross-Origin-Resource-Policy': 'same-origin'}
+        # Authorize and verify the source AND derivative before considering a
+        # conditional response. A new employee may not replay another's ETag.
+        candidates = [value.strip() for value in request.headers.get('if-none-match', '').split(',')]
+        if any(value in ('*', etag, 'W/' + etag) for value in candidates):
+            return Response(status_code=304, headers=headers)
+        return FileResponse(path, media_type='image/png', headers=headers)
 
     @app.get('/api/templates')
     def templates(current=Depends(user)):

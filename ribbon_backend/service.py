@@ -35,6 +35,8 @@ MODES = {'grid': '整齐平铺', 'stagger': '错位平铺', 'scatter': '随机�
          'stacked': '上下分区', 'opposed': '正倒交替'}
 EXTENDED_MODES = frozenset({'bordered', 'scene', 'fullwidth', 'alternating', 'ends_open', 'split', 'stacked', 'opposed'})
 NON_REPEATING_MODES = frozenset({'fullwidth', 'ends_open'})
+ASSET_PREVIEW_VERSION = 'asset-preview-v1'
+ASSET_PREVIEW_SIZE = (640, 640)
 TERMINAL = ('SUCCEEDED', 'FAILED')
 
 
@@ -112,6 +114,7 @@ class Service:
         from .retention import registry_for
         self._leases = registry_for(self.root)
         self.stop_event = threading.Event()
+        self._asset_preview_lock = threading.RLock()
         self.thread = None
         self.initialize()
 
@@ -153,6 +156,15 @@ class Service:
             raise ServiceError(422, '主站身份无效')
         role = 'customer' if role == 'employee' else role
         username = 'hsd-' + digest(owner.encode())[:48]
+        # A normal image/list read must not acquire SQLite's write lock merely
+        # to repeat an unchanged host identity. The host supplies the role on
+        # every request; role changes still go through a transaction below.
+        with self.db.connect() as db:
+            previous = db.execute('SELECT * FROM users WHERE id=?', (owner,)).fetchone()
+        if previous and previous['username'] != username:
+            raise ServiceError(409, '主站身份与已有账号冲突')
+        if previous and previous['role'] == role:
+            return dict(id=owner, username=username, role=role)
         with self.db.transaction() as db:
             previous = db.execute('SELECT * FROM users WHERE id=?', (owner,)).fetchone()
             if previous and previous['username'] != username:
@@ -292,7 +304,118 @@ class Service:
                     editing=workflow_editing(settings.provider, dict(output_profile=profile, template_mode='stagger')))
 
     def asset_public(self, row):
-        return {**{k: row[k] for k in ('id', 'name', 'kind', 'source', 'derived_from')}, 'is_demo': bool(row['is_demo']), 'shared': bool(row['shared']), 'url': f"{getattr(self.settings, 'api_prefix', '/api')}/assets/{row['id']}/file"}
+        prefix = f"{getattr(self.settings, 'api_prefix', '/api')}/assets/{row['id']}"
+        return {**{k: row[k] for k in ('id', 'name', 'kind', 'source', 'derived_from')}, 'is_demo': bool(row['is_demo']), 'shared': bool(row['shared']), 'url': prefix + '/file',
+                'thumbnail_url': prefix + '/thumbnail?v=' + self.asset_preview_version(row['sha256'])}
+
+    @staticmethod
+    def asset_preview_version(source_sha256):
+        return ASSET_PREVIEW_VERSION + '-' + source_sha256[:16]
+
+    def asset_preview_path(self, source_path, source_sha256):
+        identity = str(Path(source_path).relative_to(self.root)) + ':' + source_sha256 + ':' + ASSET_PREVIEW_VERSION
+        return self.root / 'assets' / ('preview-' + digest(identity.encode()) + '.png')
+
+    @memory_bounded_operation
+    def write_asset_preview(self, image, path):
+        # Keep the complete canvas and alpha; this is a screen derivative only.
+        preview = image.copy()
+        try:
+            preview.thumbnail(ASSET_PREVIEW_SIZE, Image.Resampling.LANCZOS)
+            self.check_space(path.parent, png_space(*preview.size))
+            if path.is_symlink() or (hasattr(path, 'is_junction') and path.is_junction()):
+                raise ServiceError(409, '素材缩略图不支持链接')
+            encoded = io.BytesIO()
+            preview.save(encoded, format='PNG', optimize=False, compress_level=3)
+            expected = digest(encoded.getvalue())
+            if path.exists():
+                self.verified_file(path, expected, '素材缩略图')
+            else:
+                _save_png(preview, path, dpi=None, compress_level=3)
+                self.verified_file(path, expected, '素材缩略图')
+            return expected
+        finally:
+            preview.close()
+
+    def cleanup_uncommitted_asset_files(self, paths):
+        # A commit exception can be uncertain. Recheck all asset references in
+        # a fresh write transaction before deleting a file or queuing cleanup.
+        try:
+            from .retention import _safe_path
+            with self.db.transaction() as db:
+                for raw in paths:
+                    path = Path(raw).absolute()
+                    if path.parent != self.root / 'assets' or not _safe_path(self.root, path):
+                        continue
+                    referenced = db.execute('SELECT 1 FROM assets WHERE path=? OR thumbnail_path=? LIMIT 1',
+                                            (str(path), str(path))).fetchone()
+                    if referenced:
+                        continue
+                    db.execute('INSERT OR IGNORE INTO cleanup_paths VALUES(?,0)', (str(path),))
+                    try:
+                        path.unlink(missing_ok=True)
+                    except OSError:
+                        pass  # The normal safe cleanup retries the registered file.
+                    else:
+                        db.execute('DELETE FROM cleanup_paths WHERE path=?', (str(path),))
+        except (OSError, sqlite3.Error, ServiceError):
+            # No successful read/transaction means no proof of non-reference.
+            log.warning('Uncommitted asset cleanup postponed; files retained')
+
+    @leased_operation
+    @guarded_file_operations
+    def verified_asset_preview(self, owner, asset_id, version=None):
+        with self.db.connect() as db:
+            asset = self.accessible_asset(db, asset_id, owner)
+        source = self.verified_file(asset['path'], asset['sha256'], '素材文件')
+        if version is not None and version != self.asset_preview_version(asset['sha256']):
+            raise ServiceError(404, '素材缩略图版本不存在')
+        expected_path = self.asset_preview_path(source, asset['sha256'])
+        if asset['thumbnail_path'] or asset['thumbnail_sha256']:
+            if asset['thumbnail_path'] != str(expected_path) or not asset['thumbnail_sha256']:
+                raise ServiceError(409, '素材缩略图记录校验失败')
+            return self.verified_file(expected_path, asset['thumbnail_sha256'], '素材缩略图'), asset['thumbnail_sha256']
+        # Old/source-generated assets get a derivative once. Do not hold the
+        # allocation lock while acquiring a database write transaction.
+        with self._asset_preview_lock:
+            with self.db.connect() as db:
+                current = self.accessible_asset(db, asset_id, owner)
+            if current['path'] != str(source) or current['sha256'] != asset['sha256']:
+                raise ServiceError(409, '素材文件已变化，请刷新')
+            self.verified_file(source, current['sha256'], '素材文件')
+            if current['thumbnail_path'] or current['thumbnail_sha256']:
+                if current['thumbnail_path'] != str(expected_path) or not current['thumbnail_sha256']:
+                    raise ServiceError(409, '素材缩略图记录校验失败')
+                return self.verified_file(expected_path, current['thumbnail_sha256'], '素材缩略图'), current['thumbnail_sha256']
+            try:
+                preview_sha = self.create_asset_preview(source, asset['sha256'], expected_path)
+                self.verified_file(source, asset['sha256'], '素材文件')
+                with self.db.transaction() as db:
+                    current = self.accessible_asset(db, asset_id, owner)
+                    if current['sha256'] != asset['sha256'] or current['path'] != str(source):
+                        raise ServiceError(409, '素材文件已变化，请刷新')
+                    db.execute('UPDATE assets SET thumbnail_path=?,thumbnail_sha256=? WHERE id=?',
+                               (str(expected_path), preview_sha, asset_id))
+                    db.execute('DELETE FROM cleanup_paths WHERE path=?', (str(expected_path),))
+            except BaseException:
+                self.cleanup_uncommitted_asset_files([expected_path])
+                raise
+        return self.verified_file(expected_path, preview_sha, '素材缩略图'), preview_sha
+
+    @memory_bounded_operation
+    def create_asset_preview(self, source, expected_source_sha, target):
+        from .imaging import read_image
+        self.verified_file(source, expected_source_sha, '素材文件')
+        with Image.open(source) as original:
+            # Saved sources are normalized single-frame PNGs. read_image also
+            # checks legacy/derived inputs before any large allocation.
+            if getattr(original, 'n_frames', 1) != 1:
+                raise ServiceError(409, '素材文件不是单帧图片')
+        image = read_image(source)
+        try:
+            return self.write_asset_preview(image, target)
+        finally:
+            image.close()
 
     @leased_operation
     def assets(self, owner, kind=None):
@@ -342,20 +465,30 @@ class Service:
             raise ServiceError(413, '图片须为 20MB 以内的 PNG、JPEG 或 WebP')
         asset_id = uid()
         path = self.root / 'assets' / f'{asset_id}.png'
-        self.store_uploaded_image(data, path)
-        asset = dict(id=asset_id, owner_id=user['id'], name=(name or '上传素材')[:80], kind=kind, path=str(path), sha256=file_digest(path), source='upload', is_demo=False, shared=shared, derived_from=None)
-        with self.db.transaction() as db:
-            self.insert_asset(db, asset)
+        created = [path]
+        try:
+            stored = self.store_uploaded_image(data, path, created)
+            asset = dict(id=asset_id, owner_id=user['id'], name=(name or '上传素材')[:80], kind=kind, path=str(path), sha256=stored['sha256'], source='upload', is_demo=False, shared=shared, derived_from=None)
+            with self.db.transaction() as db:
+                self.insert_asset(db, asset)
+                db.execute('UPDATE assets SET thumbnail_path=?,thumbnail_sha256=? WHERE id=?',
+                           (str(stored['thumbnail_path']), stored['thumbnail_sha256'], asset_id))
+                db.execute('DELETE FROM cleanup_paths WHERE path IN (?,?)', (str(path), str(stored['thumbnail_path'])))
+        except BaseException:
+            self.cleanup_uncommitted_asset_files(created)
+            raise
         return self.asset_public(asset)
 
     @memory_bounded_operation
-    def store_uploaded_image(self, data, path):
+    def store_uploaded_image(self, data, path, created=None):
         # Never take the database write lock while holding this allocation lock:
         # template generation and retention have their own transaction ordering.
         try:
             with Image.open(io.BytesIO(data)) as original:
                 if original.format not in ('PNG', 'JPEG', 'WEBP') or original.width * original.height > 40_000_000:
                     raise ValueError('Unsupported image')
+                if getattr(original, 'n_frames', 1) != 1:
+                    raise ServiceError(422, '暂不支持动态图像，请上传单帧 PNG、JPEG 或 WebP')
                 self.check_space(path.parent, png_space(*original.size))
                 original.load()
                 if original.getexif().get(274, 1) == 1:
@@ -372,7 +505,13 @@ class Service:
             raise ServiceError(422, '图片无法解码，或像素数量超过 4000 万') from None
         path.parent.mkdir(parents=True, exist_ok=True)
         try:
-            _save_png(img, path, dpi=None)
+            _save_png(img, path, dpi=None, compress_level=3)
+            source_sha = file_digest(path)
+            preview = self.asset_preview_path(path, source_sha)
+            if created is not None:
+                created.append(preview)
+            preview_sha = self.write_asset_preview(img, preview)
+            return dict(sha256=source_sha, thumbnail_path=preview, thumbnail_sha256=preview_sha)
         finally:
             img.close()
 

@@ -152,6 +152,7 @@ class MaterialManager:
         self.quality_hook = quality_hook
         self.lock = threading.RLock()
         self.jobs, self.leases, self.futures = {}, {}, {}
+        self._archive_cache, self._packing = {}, set()
         self.upload_leases = set()
         self._closed = False
         self._key = self._load_key()
@@ -470,10 +471,12 @@ class MaterialManager:
             raise TaskCancelled()
 
     def _source_path(self, job, source):
+        return self._source_read(job, source)[0]
+
+    def _source_read(self, job, source):
         path = self._private(self._directory(job["id"]) / (source["id"] + ".png"))
-        if _digest(path) != source["sha256"]:
-            raise ValueError("原图发生变化，请重新上传；本次结果不能下载。")
-        return path
+        path, _, token = self._verified_file(path, source["sha256"], "原图发生变化，请重新上传；本次结果不能下载。")
+        return path, token
 
     def _source(self, job, source_id):
         return next((row for row in job["sources"] if row["id"] == source_id), None)
@@ -903,7 +906,9 @@ class MaterialManager:
                         setting["enabled"] and setting["configured"] and setting["model_id"]) else
                         "识别设计范围需要可用的 DeepSeek 服务，请联系管理员配置并开启。" if not deepseek_available else ""),
                     "active_job_id": own[-1]["id"] if own else None,
-                    "retention_days": 3 if self.cloud else None}
+                    "retention_seconds": _RETENTION if self.cloud else None,
+                    "retention_hours": _RETENTION / 3600 if self.cloud else None,
+                    "retention_days": _RETENTION / 86400 if self.cloud else None}
 
     def restore_upload_claims(self, claims):
         """Replaying an accepted UUID after a lost reply must not pay twice."""
@@ -1169,7 +1174,28 @@ class MaterialManager:
             except Exception:
                 raise Conflict("任务状态写入失败，请稍后重试。") from None
             job.clear(); job.update(candidate)
-            self.futures[identifier] = self.executor.submit(self._run, identifier, deepcopy(payload))
+            try:
+                future = self.executor.submit(self._run, identifier, deepcopy(payload))
+            except Exception:
+                # Queue rejection sends no model request. Publish a terminal
+                # revision, preserving old images and any prior unknown bill.
+                message = "重做未能排队，原素材已保留，请稍后重试。"
+                rejected = deepcopy(job)
+                rejected.update(status="error", error=message, run_finished_at=self.clock())
+                self._progress(rejected, "error")
+                rejected["revision"] += 1
+                try:
+                    self._save(rejected, touch=True)
+                finally:
+                    # A second local save failure must not leave in-memory
+                    # work permanently queued. Restart recovery never replays
+                    # the saved, interrupted operation automatically.
+                    job.clear(); job.update(rejected)
+                    previous = self.futures.get(identifier)
+                    if previous is not None and previous.done():
+                        self.futures.pop(identifier, None)
+                raise Conflict(message) from None
+            self.futures[identifier] = future
             return self.snapshot(identifier, owner)
 
     def cancel(self, identifier, owner, revision):
@@ -1184,73 +1210,179 @@ class MaterialManager:
             return self.snapshot(identifier, owner)
 
     def _item_path(self, job, item):
+        return self._item_read(job, item)[0]
+
+    def _item_read(self, job, item):
         path = self._private(self._directory(job["id"]) / (item["id"] + ".png"))
-        if _digest(path) != item["sha256"]:
-            raise ValueError("素材文件发生变化，请重新处理。")
-        return path
+        path, _, token = self._verified_file(path, item["sha256"], "素材文件发生变化，请重新处理。")
+        return path, token
+
+    def _read_token(self, path):
+        """An in-flight pin only; full hashes are still checked on every read."""
+        info = self._private(path).stat()
+        return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+    def _check_read_tokens(self, tokens):
+        if any(self._read_token(path) != token for path, token in tokens.items()):
+            raise ValueError("图片或下载文件在读取时发生变化，请重新处理。")
+
+    def _verified_file(self, path, expected=None, message="下载文件在读取时发生变化，请重新处理。"):
+        # The full hash and its token are one read. A replacement after hashing
+        # must not bind the old digest to the replacement's newer metadata.
+        before = self._read_token(path)
+        digest = _digest(path)
+        after = self._read_token(path)
+        if before != after or expected is not None and digest != expected:
+            raise ValueError(message)
+        return path, digest, after
 
     def asset(self, identifier, owner, kind, item_id, *, download=False, thumbnail=False, content_version=None):
-        with self.lock:
+        def selection(job):
             if kind not in {"source", "item", "before"} or (download and thumbnail) or (download and kind == "before"):
                 raise ValueError("图片预览参数无效。")
-            job = self._get(identifier, owner)
             rows = job["sources"] if kind == "source" else job["items"]
             item = next((row for row in rows if row["id"] == item_id and row.get("status") != "superseded"), None)
             if item is None:
                 raise KeyError("找不到此图片。")
             if download and item["status"] not in _DOWNLOADABLE:
                 raise Conflict("这张素材正在处理或已舍弃，暂不能下载。")
-            if kind == "source":
-                original = self._source_path(job, item)
-            else:
-                self._source_path(job, self._source(job, item["source_id"]))
-                original = self._item_path(job, item)
-                if kind == "before":
-                    previous = next((row for row in job["items"] if row["id"] == item.get("previous_item_id")
-                                     and row["source_id"] == item["source_id"] and row["status"] == "superseded"), None)
-                    if previous is None:
-                        raise KeyError("这张素材还没有精修前的对照图。")
-                    original = self._item_path(job, previous)
-                    item = previous
-            if not thumbnail:
-                return original, item["sha256"]
-            # Keep all original integrity checks above even for a cached/304
-            # derivative. A stale thumbnail cannot hide a changed source/result.
-            digest = item["thumbnail_sha256"]
-            if content_version is not None and content_version != digest[:16]:
+            source = item if kind == "source" else self._source(job, item["source_id"])
+            previous = None
+            if kind == "before":
+                previous = next((row for row in job["items"] if row["id"] == item.get("previous_item_id")
+                                 and row["source_id"] == item["source_id"] and row["status"] == "superseded"), None)
+                if previous is None:
+                    raise KeyError("这张素材还没有精修前的对照图。")
+            selected = previous or item
+            if thumbnail and content_version is not None and content_version != selected["thumbnail_sha256"][:16]:
                 raise KeyError("图片预览已更新，请刷新页面。")
-            path = self._private(self._directory(identifier) / (item["id"] + ".thumb.png"))
-            if _digest(path) != digest:
-                raise ValueError("图片预览发生变化，请重新处理。")
+            # Only immutable file/reference fields are pinned. Other images'
+            # progress must not invalidate a completed image being downloaded.
+            fields = ("id", "source_id", "sha256", "thumbnail_sha256", "previous_item_id")
+            frozen = lambda row: {key: row[key] for key in fields if key in row}
+            return {"source": frozen(source), "item": frozen(item),
+                    "previous": frozen(previous) if previous else None}
+
+        with self.lease(identifier, owner):
+            with self.lock:
+                pinned = selection(self._get(identifier, owner))
+            # Full source/output verification remains before thumb/304 reads,
+            # but expensive disk I/O does not hold every employee's state lock.
+            stub = {"id": identifier}
+            original, token = self._source_read(stub, pinned["source"])
+            tokens = {original: token}
+            if kind != "source":
+                original, token = self._item_read(stub, pinned["item"])
+                tokens[original] = token
+                if pinned["previous"]:
+                    original, token = self._item_read(stub, pinned["previous"])
+                    tokens[original] = token
+            selected = pinned["previous"] or pinned["item"]
+            path, digest = original, selected["sha256"]
+            if thumbnail:
+                digest = selected["thumbnail_sha256"]
+                path = self._private(self._directory(identifier) / (selected["id"] + ".thumb.png"))
+                path, _, token = self._verified_file(path, digest, "图片预览发生变化，请重新处理。")
+                tokens[path] = token
+            with self.lock:
+                if selection(self._get(identifier, owner)) != pinned:
+                    raise Conflict("图片已在其他页面更新，请刷新后重试。")
+                self._check_read_tokens(tokens)
             return path, digest
 
+    @staticmethod
+    def _download_selection(job):
+        fields = ("id", "source_id", "name", "bounds", "status", "warnings", "sha256")
+        items = [{key: deepcopy(row[key]) for key in fields} for row in job["items"] if row["status"] in _DOWNLOADABLE]
+        if not items:
+            raise ValueError("还没有可下载的素材，请等待生成完成或恢复已舍弃的素材。")
+        source_ids = {row["source_id"] for row in items}
+        sources = [{key: row[key] for key in ("id", "name", "sha256")}
+                   for row in job["sources"] if row["id"] in source_ids]
+        return {"id": job["id"], "sources": sources, "items": items,
+                "unhandled": sum(row["status"] == "skipped" for row in job["items"]),
+                "failed_sources": sum(row["status"] == "error" for row in job["sources"]),
+                "unprocessed_sources": sum(row["status"] in {"queued", "processing", "cancelled"} for row in job["sources"])}
+
+    def _verify_download_files(self, selection):
+        # Shared source images are verified once per read, not once per result.
+        tokens, paths = {}, []
+        for source in selection["sources"]:
+            path, token = self._source_read(selection, source)
+            tokens[path] = token
+        for item in selection["items"]:
+            path, token = self._item_read(selection, item)
+            tokens[path] = token
+            paths.append(path)
+        return paths, tokens
+
     def download(self, identifier, owner):
-        with self.lease(identifier, owner), self.lock:
-            job = self._get(identifier, owner)
-            items = [row for row in job["items"] if row["status"] in _DOWNLOADABLE]
-            if not items:
-                raise ValueError("还没有可下载的素材，请等待生成完成或恢复已舍弃的素材。")
-            target = self._directory(identifier) / "materials.zip"
-            temporary = self._directory(identifier) / (".zip-" + secrets.token_hex(16))
+        with self.lease(identifier, owner):
+            with self.lock:
+                selection = self._download_selection(self._get(identifier, owner))
+                binding = hashlib.sha256(_canonical(selection)).hexdigest()
+                cached = self._archive_cache.get(identifier, {}).get(binding)
+                if identifier in self._packing:
+                    raise Conflict("本批结果正在打包，请稍后再下载。")
+                self._packing.add(identifier)
+            # Candidate files are private and unreferenced until validation is
+            # complete. Exclusive creation and unique names avoid replacing a
+            # ZIP that an earlier response may already be streaming. A crash
+            # leaves only an ordinary file, never an uncleanable hard link.
+            created, published = False, False
             try:
-                with zipfile.ZipFile(temporary, "x", compression=zipfile.ZIP_STORED) as archive:
+                target = self._directory(identifier) / (cached[0] if cached else
+                    "materials-" + binding[:16] + "-" + secrets.token_hex(16) + ".zip")
+                paths, tokens = self._verify_download_files(selection)
+                if cached:
+                    _, digest, token = self._verified_file(target, cached[1], "下载结果发生变化，请重新处理。")
+                    tokens[target] = token
+                else:
+                    # Stable headers retain byte consistency after restart;
+                    # the first read rebuilds a new trusted generation, while
+                    # repeated reads reuse the task/content-bound cache.
+                    def info(name):
+                        value = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+                        value.compress_type = zipfile.ZIP_STORED
+                        value.external_attr = 0o600 << 16
+                        return value
                     records = []
-                    for index, item in enumerate(items, 1):
-                        self._source_path(job, self._source(job, item["source_id"]))
-                        path = self._item_path(job, item)
-                        DiskBudget(target.parent).reserve(path.stat().st_size + 8192)
-                        archive.write(path, f"素材-{index:03d}.png")
-                        records.append({"file": f"素材-{index:03d}.png", "name": item["name"],
-                                        "source": self._source(job, item["source_id"])["name"],
-                                        "bounds": item["bounds"], "status": item["status"], "warnings": item["warnings"]})
-                    archive.writestr("素材说明.json", json.dumps({"note": "生成素材未经质量核验；下载不代表人工确认，请检查文字、配色和设计完整性。",
-                                    "items": records, "unhandled": sum(row["status"] == "skipped" for row in job["items"]),
-                                    "failed_sources": sum(row["status"] == "error" for row in job["sources"]),
-                                    "unprocessed_sources": sum(row["status"] in {"queued", "processing", "cancelled"} for row in job["sources"])}, ensure_ascii=False, indent=2))
-                os.chmod(temporary, 0o600); os.replace(temporary, target)
+                    with target.open("xb") as stream:
+                        created = True
+                        os.chmod(target, 0o600)
+                        with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_STORED) as archive:
+                            for index, (item, path) in enumerate(zip(selection["items"], paths), 1):
+                                DiskBudget(target.parent).reserve(path.stat().st_size + 8192)
+                                copied = hashlib.sha256()
+                                with path.open("rb") as source, archive.open(info(f"素材-{index:03d}.png"), "w") as output:
+                                    while block := source.read(1024 * 1024):
+                                        copied.update(block); output.write(block)
+                                if copied.hexdigest() != item["sha256"]:
+                                    raise ValueError("素材在打包时发生变化，请重新处理。")
+                                records.append({"file": f"素材-{index:03d}.png", "name": item["name"],
+                                                "source": self._source(selection, item["source_id"])["name"],
+                                                "bounds": item["bounds"], "status": item["status"], "warnings": item["warnings"]})
+                            notes = {"note": "生成素材未经质量核验；下载不代表人工确认，请检查文字、配色和设计完整性。",
+                                     "items": records, **{key: selection[key] for key in ("unhandled", "failed_sources", "unprocessed_sources")}}
+                            archive.writestr(info("素材说明.json"), json.dumps(notes, ensure_ascii=False, indent=2))
+                    _, digest, token = self._verified_file(target)
+                    _, tokens = self._verify_download_files(selection)
+                    tokens[target] = token
+                with self.lock:
+                    if self._download_selection(self._get(identifier, owner)) != selection:
+                        raise Conflict("素材结果已在其他页面更新，请重新下载。")
+                    self._check_read_tokens(tokens)
+                    if created:
+                        self._archive_cache.setdefault(identifier, {})[binding] = (target.name, digest)
+                        published = True
+                return self._private(target), digest
             finally:
-                temporary.unlink(missing_ok=True)
-            return target, _digest(target)
+                try:
+                    if created and not published:
+                        target.unlink(missing_ok=True)
+                finally:
+                    with self.lock:
+                        self._packing.discard(identifier)
 
     def has_active_operations(self):
         with self.lock:
@@ -1312,6 +1444,7 @@ class MaterialManager:
                         continue
                     self._remove_tree(directory)
                     self.jobs.pop(job["id"], None); self.futures.pop(job["id"], None)
+                    self._archive_cache.pop(job["id"], None)
                     removed.append(job["id"])
                 except (OSError, ValueError, KeyError, TypeError):
                     continue

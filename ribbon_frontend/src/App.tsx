@@ -322,6 +322,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
     );
   const [search, setSearch] = useState(""),
     [uploading, setUploading] = useState(false),
+    [uploadProgress, setUploadProgress] = useState<{ completed: number; total: number } | null>(null),
     [sharedUpload, setSharedUpload] = useState(false);
   const [examplesView, setExamplesView] = useState<{ mode: string | null; name: string } | null>(null);
   const [moreLayoutsOpen, setMoreLayoutsOpen] = useState(false);
@@ -334,8 +335,19 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
   }, [active, view]);
   const gate = useRef(false),
     uploadRef = useRef<HTMLInputElement>(null),
+    libraryUploadRef = useRef<HTMLInputElement>(null),
+    uploadGate = useRef(false),
+    uploadAbort = useRef<AbortController | null>(null),
+    mounted = useRef(true),
     lastVersion = useRef<string | null>(null),
     designRef = useRef<Design | null>(null);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      uploadAbort.current?.abort();
+    };
+  }, []);
   const isAdmin = user.role === "admin",
     current = design?.versions?.find((v) => v.id === design.current_version_id),
     selected =
@@ -835,44 +847,67 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
     files: FileList | null,
     kind: "pattern" | "background",
   ) {
-    if (!files?.length) return;
+    if (!files?.length || uploadGate.current || locked) return;
+    const batch = Array.from(files);
+    const shared = isAdmin && sharedUpload;
+    uploadGate.current = true;
+    const controller = new AbortController();
+    uploadAbort.current = controller;
     setUploading(true);
-    setNotice(null);
+    setUploadProgress({ completed: 0, total: batch.length });
+    setNotice({ text: `正在上传第 1 / ${batch.length} 张…`, type: "info" });
     const added: Asset[] = [];
     try {
-      for (const file of Array.from(files)) {
+      // Keep requests serial to avoid multiplying image conversion memory.
+      // Publish each acknowledged asset immediately instead of waiting for
+      // the whole batch and another full catalog request.
+      for (const [index, file] of batch.entries()) {
+        if (!mounted.current) return;
         const form = new FormData();
         form.append("file", file);
         form.append("kind", kind);
         form.append("name", file.name.replace(/\.[^.]+$/, ""));
-        form.append("shared", String(isAdmin && sharedUpload));
-        added.push(await api<Asset>("/assets", { method: "POST", body: form }));
-      }
-      const all = await api<Asset[]>("/assets");
-      setAssets(all);
-      if (kind === "pattern")
-        updateSelection({
-          ...selection,
-          asset_ids: [
-            ...new Set([...selection.asset_ids, ...added.map((a) => a.id)]),
-          ].slice(0, 12),
+        form.append("shared", String(shared));
+        const asset = await api<Asset>("/assets", { method: "POST", body: form, signal: controller.signal });
+        if (!mounted.current) return;
+        added.push(asset);
+        setAssets((previous) => previous.some((item) => item.id === asset.id)
+          ? previous.map((item) => item.id === asset.id ? asset : item)
+          : [...previous, asset]);
+        setSelection((previous) => {
+          const value = kind === "pattern"
+            ? { ...previous, asset_ids: [...new Set([...previous.asset_ids, asset.id])].slice(0, 12) }
+            : { ...previous, background_id: asset.id };
+          saveLocal(prefix + "selection", {
+            design_id: designRef.current?.id || null,
+            base_version_id: designRef.current?.current_version_id || null,
+            value,
+          });
+          return value;
         });
-      else updateSelection({ ...selection, background_id: added.at(-1)!.id });
+        setUploadProgress({ completed: added.length, total: batch.length });
+        if (index + 1 < batch.length)
+          setNotice({ text: `已上传 ${added.length} / ${batch.length} 张，正在上传第 ${index + 2} 张…`, type: "info" });
+      }
       setNotice({
         text: `已上传 ${added.length} 个${kind === "pattern" ? "图案" : "底图"}。`,
         type: "success",
       });
     } catch (e) {
-      if (added.length) {
-        setAssets((prev) => [...prev, ...added]);
-        setNotice({
-          text: `已上传 ${added.length} 个，其余未完成：${message(e)}`,
-          type: "error",
-        });
-      } else setNotice({ text: message(e), type: "error" });
+      if (!mounted.current) return;
+      if (e instanceof ApiError && e.status === 401) onLogout();
+      const failure = e instanceof ApiError ? message(e)
+        : "本张上传结果尚未确认。请重新载入网页，在素材库查看后再决定是否重传。";
+      setNotice({ text: added.length ? `已上传 ${added.length} 个，其余未完成：${failure}` : failure, type: "error" });
     } finally {
-      setUploading(false);
+      uploadGate.current = false;
+      uploadAbort.current = null;
+      if (mounted.current) {
+        setUploading(false);
+        setUploadProgress(null);
+      }
       if (uploadRef.current) uploadRef.current.value = "";
+      if (libraryUploadRef.current) libraryUploadRef.current.value = "";
     }
   }
   function togglePattern(id: string) {
@@ -1043,7 +1078,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                     }}
                   >
                     <Icon name="upload" size={16} />
-                    {uploading ? "上传中…" : "上传图案"}
+                    {uploading ? `上传 ${uploadProgress?.completed || 0}/${uploadProgress?.total || 0}` : "上传图案"}
                   </button>
                   <button
                     className="secondary"
@@ -1070,7 +1105,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                     {selectedPatterns.map((a, index) => (
                       <div className="pattern-tile" key={a.id}>
                         <div className="checker">
-                          <img src={a.url} alt={a.name} />
+                          <img src={a.thumbnail_url || a.url} alt={a.name} decoding="async" />
                           <button
                             className="remove-asset"
                             disabled={locked}
@@ -1170,7 +1205,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                 {!aiAvailable && <p className="model-help" id="background-ai-unavailable">AI 尚未配置，仍可从底图库选图或上传后生成首稿。</p>}
                 {background ? (
                   <div className="background-selected">
-                    <img src={background.url} alt="选中的底图" />
+                    <img src={background.thumbnail_url || background.url} alt="选中的底图" loading="lazy" decoding="async" />
                     <div>
                       <strong>{background.name}</strong>
                       <small>
@@ -1391,6 +1426,8 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                       >
                         <img
                           src={v.preview_url}
+                          loading="lazy"
+                          decoding="async"
                           alt={`${versionName(v)}缩略图`}
                         />
                         <div>
@@ -1588,8 +1625,9 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
               className={`secondary upload-label ${uploading ? "disabled" : ""}`}
             >
               <Icon name="upload" />
-              {uploading ? "上传中…" : "上传素材"}
+              {uploading ? `上传 ${uploadProgress?.completed || 0}/${uploadProgress?.total || 0}` : "上传素材"}
               <input
+                ref={libraryUploadRef}
                 type="file"
                 accept="image/png,image/jpeg,image/webp"
                 multiple
@@ -1604,6 +1642,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
               <input
                 type="checkbox"
                 checked={sharedUpload}
+                disabled={locked}
                 onChange={(e) => setSharedUpload(e.target.checked)}
               />
               上传为共享素材，供所有账号使用
@@ -1636,7 +1675,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                     <div
                       className={`library-image ${modal === "pattern" ? "checker" : ""}`}
                     >
-                      <img src={a.url} alt={a.name} />
+                      <img src={a.thumbnail_url || a.url} alt={a.name} loading="lazy" decoding="async" />
                       {picked && (
                         <span className="check-mark">
                           <Icon name="check" size={14} />
