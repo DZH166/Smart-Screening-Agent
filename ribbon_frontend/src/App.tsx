@@ -304,6 +304,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
   // scrolls sideways, "fit" shows the whole length at once.
   const [previewZoom, setPreviewZoom] = useState<"detail" | "fit">("detail");
   const [prompt, setPrompt] = useState(""),
+    [backgroundPrompt, setBackgroundPrompt] = useState(""),
     [job, setJob] = useState<Job | null>(null),
     [backgroundJob, setBackgroundJob] = useState<Job | null>(null),
     [loading, setLoading] = useState(true),
@@ -372,6 +373,32 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
   const basicTemplates = visibleTemplates.filter((t) => basicLayoutModes.has(t.mode));
   const moreTemplates = visibleTemplates.filter((t) => !basicLayoutModes.has(t.mode));
   const testMode = config?.provider === "test";
+  // Local/demo fixtures do not hold real model credentials. They remain
+  // explicitly marked test operations; employee services must never use them.
+  const aiAvailable = testMode ? config?.auth_mode !== "hsd" : config?.ai_ready === true;
+  // A changed selection can be applied by the compositor without a model.
+  // Keep this path available when an administrator has disabled AI.
+  const selectionOnly = changed && (!prompt.trim() || ["应用所选配置", "应用新的素材与排版"].includes(prompt.trim()));
+  const savedEditing = current?.editing || config?.editing;
+  // Reselecting assets recreates independent layers, but retains this work's
+  // immutable output profile. The global profile may have changed meanwhile.
+  const editing = changed && savedEditing && ["test", "openai", "deepseek_seedream"].includes(config?.provider || "")
+    ? { ...savedEditing,
+        allowed_operations: ["parameters", "edit_asset", "edit_background", ...(savedEditing.composite_edit ? ["edit_composite"] : [])],
+        allowed_parameters: ["scale", "rotation", "offset_x", "offset_y", "background_color",
+          ...(["fullwidth", "ends_open"].includes(template?.mode || "") ? [] : ["spacing"])],
+      }
+    : savedEditing;
+  const aiRefinementUnavailable = !selectionOnly && (!aiAvailable || editing?.allowed_operations.length === 0);
+  const canPlanOperation = (kind: string) => !editing || editing.allowed_operations.includes(kind);
+  const spacingAvailable = template?.mode !== "fullwidth" && template?.mode !== "ends_open" &&
+    (!editing || editing.allowed_parameters.includes("spacing"));
+  const suggestions = [
+    ...(canPlanOperation("parameters") ? [spacingAvailable ? "图案缩小一些，间距拉开一点" : "图案缩小一些"] : []),
+    ...(canPlanOperation("edit_background") ? ["背景添加波点"] : []),
+    ...(canPlanOperation("edit_asset") ? ["给第一个图案添加星光"] : []),
+    ...(canPlanOperation("edit_composite") ? ["给画面添加星光"] : []),
+  ];
   useEffect(() => {
     if (template && !basicLayoutModes.has(template.mode)) setMoreLayoutsOpen(true);
   }, [template?.id, template?.mode]);
@@ -731,6 +758,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
       remaining === 0 ||
       isHistory ||
       !ready ||
+      aiRefinementUnavailable ||
       (!prompt.trim() && !changed)
     )
       return;
@@ -790,10 +818,14 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
   }
   async function generateBackground() {
     if (locked || backgroundProcessing) return;
+    if (!aiAvailable) {
+      setNotice({ text: "AI 服务尚未配置，请联系管理员；仍可使用已有底图生成首稿。", type: "info" });
+      return;
+    }
     await action(() =>
       executePending({
         path: "/background-jobs",
-        body: { idempotency_key: crypto.randomUUID() },
+        body: { idempotency_key: crypto.randomUUID(), prompt: backgroundPrompt.trim() },
         kind: "background",
         designId: design?.id,
       }),
@@ -932,14 +964,14 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
               {testMode
                 ? "测试模型 · 演示模式"
                 : config?.ai_ready
-                  ? "真实 AI 已配置"
+                  ? "AI 服务已配置"
                   : "AI 尚未配置"}
             </strong>
             <span>
               {testMode
                 ? "底图和内容编辑使用明确的测试替身，非真实 AI 效果。"
                 : config?.ai_ready
-                  ? "模型结果仍需人工检查。"
+                  ? "AI 理解要求并改图，程序按原规格重新排版。"
                   : "请由内部人员配置模型服务。"}
             </span>
           </div>
@@ -1035,7 +1067,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                 />
                 {selectedPatterns.length ? (
                   <div className="selected-patterns">
-                    {selectedPatterns.map((a) => (
+                    {selectedPatterns.map((a, index) => (
                       <div className="pattern-tile" key={a.id}>
                         <div className="checker">
                           <img src={a.url} alt={a.name} />
@@ -1048,7 +1080,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                             ×
                           </button>
                         </div>
-                        <span title={a.name}>{a.name}</span>
+                        <span title={`第 ${index + 1} 个图案：${a.name}`}>{index + 1}. {a.name}</span>
                       </div>
                     ))}
                   </div>
@@ -1112,7 +1144,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                   </button>
                   <button
                     className="secondary"
-                    disabled={locked || backgroundProcessing}
+                    disabled={locked || backgroundProcessing || !aiAvailable}
                     onClick={() => void generateBackground()}
                   >
                     {backgroundProcessing ? (
@@ -1120,9 +1152,22 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                     ) : (
                       <Icon name="spark" size={16} />
                     )}
-                    AI 随机
+                    {testMode ? "生成测试底图" : "AI 生成底图"}
                   </button>
                 </div>
+                <label className="background-prompt-label" htmlFor="background-prompt">底图要求（可不填）</label>
+                <textarea
+                  id="background-prompt"
+                  className="background-prompt"
+                  value={backgroundPrompt}
+                  onChange={(event) => setBackgroundPrompt(event.target.value)}
+                  maxLength={2000}
+                  rows={2}
+                  disabled={locked || backgroundProcessing || !aiAvailable}
+                  placeholder="例如：浅蓝色细条纹，不要文字；不填则随机生成。"
+                  aria-describedby={!aiAvailable ? "background-ai-unavailable" : undefined}
+                />
+                {!aiAvailable && <p className="model-help" id="background-ai-unavailable">AI 尚未配置，仍可从底图库选图或上传后生成首稿。</p>}
                 {background ? (
                   <div className="background-selected">
                     <img src={background.url} alt="选中的底图" />
@@ -1412,14 +1457,15 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
               </div>
               <div className="refinement-body">
                 <label htmlFor="refinement">告诉我们，你想怎么改</label>
-                <p>一次可填写多项要求，让设计更接近你的想法。</p>
+                <p>可写“第一个图案”或图案名称，再说清要改什么。</p>
+                {editing && !editing.composite_edit && <p className="model-edit-boundary">{editing.composite_edit_reason || "当前长条请修改独立图案或底图，再按原规格重新排版。"}</p>}
                 <textarea
                   id="refinement"
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
                   maxLength={2000}
                   disabled={!current || locked || remaining === 0 || isHistory}
-                  placeholder={template?.mode === "fullwidth" || template?.mode === "ends_open"
+                  placeholder={!spacingAvailable
                     ? "例如：把图案缩小一些，保留现在的底色。"
                     : "例如：把图案缩小一些，间距拉开一点，保留现在的底色。"}
                 />
@@ -1428,15 +1474,11 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                   <span>
                     {testMode ? "可试试这些测试指令" : "给灵感一点提示"}
                   </span>
-                  {[
-                    template?.mode === "fullwidth" || template?.mode === "ends_open" ? "图案缩小一些" : "图案缩小一些，间距拉开一点",
-                    "背景添加波点",
-                    "给第一个图案添加星光",
-                  ].map((text) => (
+                  {suggestions.map((text) => (
                     <button
                       key={text}
                       disabled={
-                        !current || locked || remaining === 0 || isHistory
+                        !current || locked || remaining === 0 || isHistory || !aiAvailable
                       }
                       onClick={() => setPrompt(text)}
                     >
@@ -1454,6 +1496,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                     remaining === 0 ||
                     isHistory ||
                     !ready ||
+                    aiRefinementUnavailable ||
                     (!prompt.trim() && !changed)
                   }
                   onClick={() => void refine()}
@@ -1476,12 +1519,22 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                       ? "请返回当前版本后继续精修。"
                       : remaining === 0
                         ? "仍可查看历史、回退和下载。"
+                        : !aiAvailable
+                          ? changed ? "AI 尚未配置；清空文字可仅应用所选素材与排版，成功后计一次。" : "AI 尚未配置，仍可查看、下载或更换素材后应用所选配置。"
+                          : editing?.allowed_operations.length === 0 && !selectionOnly
+                            ? "当前版本不支持直接修改，请重新选择素材与排版后应用。"
                         : changed
                           ? "本次将同时应用左侧的素材与排版选择。"
                           : "成功完成后计一次，系统失败不扣次。"}
                 </p>
               </div>
               <div className="refine-footer">
+                <details className="model-workflow-help">
+                  <summary>AI 怎么参与</summary>
+                  <p>DeepSeek 根据文字和所选图案的名称、顺序理解要求；当前不把图片发给它审图。对象不明确时请补充说明。</p>
+                  <p>Seedream 负责生成底图、修改图案或底图；程序负责原尺寸排版、版本与下载。首稿使用原素材，不由模型重画。</p>
+                  <p>模型配置齐全不等于效果已验收。实际生成的颜色、文字和细节仍请核对。</p>
+                </details>
                 <div>
                   <Icon name="back" size={16} />
                   <strong>放心尝试，保留每个版本</strong>

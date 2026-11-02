@@ -26,7 +26,7 @@ from PIL import Image, ImageOps
 
 from .config import Settings
 from .db import Database
-from .imaging import memory_bounded_operation, disk_space_guard, png_space, estimate_render_space, STANDALONE_FREE_MARGIN, MAX_PIXELS, _save_png
+from .imaging import memory_bounded_operation, disk_space_guard, png_space, estimate_render_space, STANDALONE_FREE_MARGIN, MAX_PIXELS, PARAM_DEFAULTS, _save_png
 
 log = logging.getLogger(__name__)
 MODES = {'grid': '整齐平铺', 'stagger': '错位平铺', 'scatter': '随机散点', 'single': '单排重复', 'ends': '两端主图', 'panels': '分区拼接',
@@ -283,11 +283,13 @@ class Service:
             db.execute('DELETE FROM sessions WHERE token_hash=?', (digest((token or '').encode()),))
 
     def config(self):
+        from .providers import workflow_editing
         with self.db.connect() as db:
             profile = json.loads(db.execute('SELECT profile_json FROM output_profiles WHERE active=1').fetchone()[0])
         settings = self.current_settings()
         return dict(provider=settings.provider, ai_ready=settings.ai_ready, auth_mode=self.settings.auth_mode, output_profile={k: profile[k] for k in ('id', 'version', 'name', 'is_demo')}, max_refinements=2,
-                    retention_hours=self.settings.retention_seconds // 3600)
+                    retention_hours=self.settings.retention_seconds // 3600,
+                    editing=workflow_editing(settings.provider, dict(output_profile=profile, template_mode='stagger')))
 
     def asset_public(self, row):
         return {**{k: row[k] for k in ('id', 'name', 'kind', 'source', 'derived_from')}, 'is_demo': bool(row['is_demo']), 'shared': bool(row['shared']), 'url': f"{getattr(self.settings, 'api_prefix', '/api')}/assets/{row['id']}/file"}
@@ -403,8 +405,12 @@ class Service:
         return dict(row)
 
     def version_public(self, row):
+        from .providers import workflow_editing
         prefix = getattr(self.settings, 'api_prefix', '/api')
-        return {**{k: row[k] for k in ('id', 'design_id', 'parent_version_id', 'sequence', 'prompt', 'render_kind', 'provider', 'created_at')}, 'snapshot': json.loads(row['snapshot_json']), 'preview_url': f"{prefix}/versions/{row['id']}/preview", 'view_url': f"{prefix}/versions/{row['id']}/view", 'download_url': f"{prefix}/versions/{row['id']}/download"}
+        snapshot = json.loads(row['snapshot_json'])
+        return {**{k: row[k] for k in ('id', 'design_id', 'parent_version_id', 'sequence', 'prompt', 'render_kind', 'provider', 'created_at')}, 'snapshot': snapshot,
+                'editing': workflow_editing(self.current_settings().provider, snapshot),
+                'preview_url': f"{prefix}/versions/{row['id']}/preview", 'view_url': f"{prefix}/versions/{row['id']}/view", 'download_url': f"{prefix}/versions/{row['id']}/download"}
 
     @staticmethod
     def job_public(row):
@@ -548,7 +554,8 @@ class Service:
             job['attempt'] += 1
             job['recovered'] = row['status'] != 'QUEUED'
             job['lease_until'] = time.time() + self.settings.lease_seconds
-            db.execute("UPDATE jobs SET status='RUNNING',phase='正在恢复任务',attempt=?,lease_until=?,updated_at=? WHERE id=?", (job['attempt'], job['lease_until'], now(), job['id']))
+            phase = '正在恢复任务' if job['recovered'] else '正在准备处理'
+            db.execute("UPDATE jobs SET status='RUNNING',phase=?,attempt=?,lease_until=?,updated_at=? WHERE id=?", (phase, job['attempt'], job['lease_until'], now(), job['id']))
             db.execute('UPDATE outbox_events SET delivered_at=? WHERE job_id=?', (now(), job['id']))
             return job
 
@@ -591,9 +598,100 @@ class Service:
             elif not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value) or not ranges[key][0] <= value <= ranges[key][1]:
                 raise ServiceError(422, '编辑参数超出可用范围')
 
+    def effective_edit_operations(self, provider, snapshot, plan, selection_changed):
+        """Validate the whole plan before executing any paid image edit.
+
+        A planner's output is a proposal, not permission. Filter echoed defaults
+        and reject impossible later operations before an earlier valid image
+        edit could spend money or leave a partially applied modification.
+        """
+        from .providers import ClarificationNeeded, workflow_editing
+        operations = plan.get('operations') if isinstance(plan, dict) else None
+        if not isinstance(operations, list) or len(operations) > 8:
+            raise ClarificationNeeded('请具体说明要调整的图案、参数或内容')
+        editing = workflow_editing(provider, snapshot)
+        initial = {**PARAM_DEFAULTS, **snapshot.get('params', {})}
+        proposed = dict(initial)
+        effective = []
+        targets = set()
+        background_edited = False
+        for original in operations:
+            if not isinstance(original, dict):
+                raise ServiceError(422, '无法执行该编辑计划')
+            operation = copy.deepcopy(original)
+            kind = operation.get('type')
+            if kind not in {'parameters', 'edit_asset', 'edit_background', 'edit_composite'}:
+                raise ServiceError(422, '编辑计划包含不支持的操作')
+            if kind not in editing['allowed_operations']:
+                raise ClarificationNeeded(editing['composite_edit_reason'] or '当前版本不支持这项修改，请补充具体要求')
+            if kind == 'parameters':
+                values = operation.get('values')
+                self.validate_parameters(values, snapshot['output_profile'])
+                changed = {}
+                for key, value in values.items():
+                    current = proposed.get(key)
+                    if key == 'background_color':
+                        value = value.upper() if isinstance(value, str) else value
+                        current = current.upper() if isinstance(current, str) else current
+                    if value == current:
+                        continue
+                    if key not in editing['allowed_parameters']:
+                        if key == 'spacing' and snapshot.get('template_mode') in NON_REPEATING_MODES:
+                            raise ClarificationNeeded('该排版不使用重复间距；可调整大小、位置或旋转，无需调整间距')
+                        raise ClarificationNeeded('当前排版不支持这项参数，请选择其它修改要求')
+                    changed[key] = value
+                    proposed[key] = value
+                if not changed:
+                    continue
+                operation['values'] = changed
+            else:
+                prompt = operation.get('prompt', '')
+                if not isinstance(prompt, str) or not prompt.strip() or not 1 <= len(prompt) <= 4000:
+                    raise ServiceError(422, '内容编辑要求无效')
+                if kind == 'edit_asset':
+                    asset_id = operation.get('asset_id')
+                    if asset_id not in snapshot['asset_refs']:
+                        raise ServiceError(422, '编辑目标必须属于当前作品')
+                    if asset_id in targets:
+                        raise ClarificationNeeded('同一个图案的修改请合并成一条要求，避免重复生成')
+                    targets.add(asset_id)
+                elif kind == 'edit_background':
+                    if background_edited:
+                        raise ClarificationNeeded('同一底图的修改请合并成一条要求，避免重复生成')
+                    background_edited = True
+            effective.append(operation)
+        if any(op['type'] == 'edit_composite' for op in effective) and len(effective) != 1:
+            raise ClarificationNeeded('整幅修改不能与独立图案或参数修改混在同一次，请明确选择一种方式')
+        if effective and all(op['type'] == 'parameters' for op in effective):
+            # Two proposed changes that cancel each other are no net edit.
+            original = dict(initial)
+            if isinstance(original.get('background_color'), str):
+                original['background_color'] = original['background_color'].upper()
+            if proposed == original:
+                effective = []
+        if not effective and not selection_changed:
+            message = '本次没有可执行的修改，请说明需要改变的大小、位置、底图或图案内容'
+            if snapshot.get('template_mode') in NON_REPEATING_MODES:
+                message += '；该排版不使用重复间距'
+            raise ClarificationNeeded(message)
+        return effective
+
+    def refinement_selection_changed(self, job, payload, snapshot):
+        if not payload.get('selection'):
+            return False
+        with self.db.connect() as db:
+            row = db.execute('SELECT snapshot_json FROM versions WHERE id=? AND design_id=?',
+                             (job['base_version_id'], job['design_id'])).fetchone()
+        if row is None:
+            raise ServiceError(409, '原版本已变化，请刷新后再精修')
+        before = json.loads(row['snapshot_json'])
+        fields = ('asset_refs', 'background_ref', 'template_id', 'template_version',
+                  'template_mode', 'template_rules', 'composite_ref')
+        return any(before.get(key) != snapshot.get(key) for key in fields)
+
     def build_artifact(self, job, directory):
         from .imaging import render, validate_image
-        from .providers import get_provider, ClarificationNeeded
+        from .providers import get_provider, ClarificationNeeded, workflow_editing
         payload = json.loads(job['payload_json'])
         needs_provider = job['kind'] == 'background' or (job['kind'] == 'refine' and not (payload.get('selection') and payload.get('prompt', '').strip() in ('应用所选配置', '应用新的素材与排版')))
         if needs_provider and self.settings.auth_mode == 'hsd' and job['provider'] == 'test':
@@ -642,32 +740,42 @@ class Service:
                 plan = {'operations': [], 'summary': '应用所选配置'}
             else:
                 plan = self.call_provider(job, 'plan', lambda: provider.plan(prompt, snapshot, assets))
-            operations = plan.get('operations')
-            if not isinstance(operations, list) or len(operations) > 8 or (not operations and not payload.get('selection')):
-                raise ClarificationNeeded('请具体说明要调整的图案、参数或内容')
-            removed_unused_spacing = False
-            applied_operations = []
+            selection_changed = self.refinement_selection_changed(job, payload, snapshot)
+            operations = self.effective_edit_operations(job['provider'], snapshot, plan, selection_changed)
+            plan = {**plan, 'operations': operations}
+            # Validate every independent image source before the first paid
+            # image request. A later oversized/unsupported input must not waste
+            # an earlier otherwise valid generation and then discard it.
+            prepared_backgrounds = {}
+            visible_params = dict(snapshot['params'])
             for index, operation in enumerate(operations):
-                if not isinstance(operation, dict):
-                    raise ServiceError(422, '无法执行该编辑计划')
-                kind = operation.get('type')
-                if snapshot.get('composite_ref') and kind != 'edit_composite':
-                    raise ClarificationNeeded('当前版本为整幅编辑结果；请描述整体画面修改，或重新选择图案、底图和排版')
+                kind = operation['type']
                 if kind == 'parameters':
-                    self.validate_parameters(operation.get('values'), snapshot['output_profile'])
-                    if snapshot['template_mode'] in NON_REPEATING_MODES and 'spacing' in operation['values']:
-                        if operation['values']['spacing'] != snapshot['params'].get('spacing', 1.0):
-                            raise ClarificationNeeded('该排版不使用重复间距；可调整大小、位置或旋转，无需调整间距')
-                        # Some planners echo an unchanged default alongside a
-                        # real size/position edit. Do not claim it was applied,
-                        # and do not charge a refinement for that default alone.
-                        removed_unused_spacing = True
-                        operation = {**operation, 'values': {key: value for key, value in operation['values'].items() if key != 'spacing'}}
-                        if not operation['values']:
-                            continue
+                    visible_params.update(operation['values'])
+                elif kind == 'edit_asset':
+                    provider.validate_edit_input(resolve(operation['asset_id']), 'asset')
+                elif kind == 'edit_background':
+                    source = resolve(snapshot['background_ref'])
+                    if visible_params.get('background_color'):
+                        # Validate the image that is actually visible, including
+                        # an opaque override of an otherwise transparent asset.
+                        with Image.open(source) as background_image:
+                            visible = Image.new('RGBA', background_image.size, visible_params['background_color'])
+                        source = directory / f'before-background-{index}.png'
+                        try:
+                            _save_png(visible, source)
+                        finally:
+                            visible.close()
+                        prepared_backgrounds[index] = (source, file_digest(source))
+                    provider.validate_edit_input(source, 'background')
+                    visible_params['background_color'] = None
+            for index, operation in enumerate(operations):
+                kind = operation.get('type')
+                if kind == 'parameters':
                     snapshot['params'].update(operation['values'])
                 elif kind in ('edit_asset', 'edit_background', 'edit_composite'):
-                    self.phase(job, '正在编辑图像内容')
+                    self.phase(job, {'edit_asset': '正在修改图案', 'edit_background': '正在修改底图',
+                                     'edit_composite': '正在修改整幅画面'}[kind])
                     edit_prompt = operation.get('prompt', '')
                     if not isinstance(edit_prompt, str) or not 1 <= len(edit_prompt) <= 4000:
                         raise ServiceError(422, '内容编辑要求无效')
@@ -682,14 +790,10 @@ class Service:
                         source = resolve(original)
                         asset_kind = 'background'
                         if snapshot['params'].get('background_color'):
-                            # Edit the visible solid color, rather than the older hidden texture.
-                            with Image.open(source) as background_image:
-                                visible_background = Image.new('RGBA', background_image.size, snapshot['params']['background_color'])
-                            source = directory / f'before-background-{index}.png'
-                            try:
-                                _save_png(visible_background, source)
-                            finally:
-                                visible_background.close()
+                            # Reuse the exact visible image checked before any
+                            # image request, rather than its older hidden texture.
+                            prepared, expected = prepared_backgrounds[index]
+                            source = self.verified_file(prepared, expected, '当前可见底图')
                         snapshot['params']['background_color'] = None
                     else:
                         # Flatten the actual full-resolution current composition, never the preview.
@@ -709,23 +813,6 @@ class Service:
                         render_kind = 'composite'
                 else:
                     raise ServiceError(422, '编辑计划包含不支持的操作')
-                applied_operations.append(operation)
-            if removed_unused_spacing:
-                if not applied_operations:
-                    selection_changed = False
-                    if payload.get('selection'):
-                        with self.db.connect() as db:
-                            base = db.execute('SELECT snapshot_json FROM versions WHERE id=? AND design_id=?',
-                                              (job['base_version_id'], job['design_id'])).fetchone()
-                        if base is None:
-                            raise ServiceError(409, '原版本已变化，请刷新后再精修')
-                        before = json.loads(base['snapshot_json'])
-                        selection_fields = ('asset_refs', 'background_ref', 'template_id', 'template_version',
-                                            'template_mode', 'template_rules', 'composite_ref')
-                        selection_changed = any(before.get(key) != snapshot.get(key) for key in selection_fields)
-                    if not selection_changed:
-                        raise ClarificationNeeded('本次没有可执行的修改：该排版不使用重复间距；可要求调整大小、位置或旋转')
-                plan = {**plan, 'operations': applied_operations}
             snapshot['edit_plan'] = plan
         render_kind = 'composite' if snapshot.get('composite_ref') else 'layered'
         self.phase(job, '正在合成并检查保存文件')
@@ -733,7 +820,10 @@ class Service:
         metadata = render(snapshot, resolve, master, preview)
         snapshot['object_transforms'] = metadata.get('object_transforms', [])
         snapshot['local_patches'] = []
-        snapshot['capabilities'] = ['composite_edit'] if render_kind == 'composite' else ['parameters', 'asset_edit', 'background_edit', 'composite_edit']
+        capabilities = {'parameters': 'parameters', 'edit_asset': 'asset_edit',
+                        'edit_background': 'background_edit', 'edit_composite': 'composite_edit'}
+        snapshot['capabilities'] = [capabilities[operation] for operation in
+                                  workflow_editing(job['provider'], snapshot)['allowed_operations']]
         validate_image(master, snapshot['output_profile'])
         with Image.open(preview) as image:
             image.load()

@@ -15,6 +15,8 @@ let authorized = true, design = null, job = null, owner = "", jobReads = 0;
 const writes = [], errors = [];
 let exampleCatalogReads = 0, failExampleCatalog = 0, exampleVariant = "normal", exampleImageRevision = 0;
 let holdNextCatalog = false, releaseCatalog = null;
+let modelProvider = "test", modelReady = true, modelEditing, modelAuthMode = "demo";
+let backgroundFixture = null, rejectBackground = false;
 const exampleImageReads = [], badExampleImages = new Set();
 const profile = { id: "synthetic-profile", version: 1, name: "合成测试规格", is_demo: true, width: 2400, height: 600, dpi: 150 };
 const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="150"><rect width="600" height="150" fill="#e7eee2"/><circle cx="120" cy="75" r="40" fill="#a4b989"/><text x="210" y="82" font-size="28">SYNTHETIC TEST</text></svg>';
@@ -80,7 +82,7 @@ const server = createServer(async (req, res) => {
       writes.push({ path: pathname, body: JSON.parse(body || "{}") });
     }
     if (pathname.endsWith("/auth/me")) return json(user);
-    if (pathname.endsWith("/config")) return json({ provider: "test", ai_ready: true, auth_mode: "hsd", output_profile: profile, max_refinements: 2 });
+    if (pathname.endsWith("/config")) return json({ provider: modelProvider, ai_ready: modelReady, auth_mode: modelAuthMode, output_profile: profile, max_refinements: 2, editing: modelEditing });
     if (pathname.endsWith("/assets")) return json(assets);
     if (pathname.endsWith("/templates")) return json(templates);
     if (pathname === "/api/ribbon/layout-examples") {
@@ -102,6 +104,11 @@ const server = createServer(async (req, res) => {
       return;
     }
     if (pathname.endsWith("/admin/overview")) return user.role === "admin" ? json({ jobs: [], templates, output_profiles: [profile], users: [user] }) : json({ detail: "仅管理员可维护" }, 403);
+    if (pathname.endsWith("/background-jobs")) {
+      if (rejectBackground) return json({ detail: "合成底图请求失败，请重试。" }, 400);
+      backgroundFixture = { id: "synthetic-background-job", design_id: null, kind: "background", status: "RUNNING", phase: "正在生成底图", provider: modelProvider, attempt: 1, error: null, result_asset_id: null };
+      return json(backgroundFixture);
+    }
     if (pathname.endsWith("/designs")) {
       if (req.method === "POST") {
         owner = user.id;
@@ -111,10 +118,14 @@ const server = createServer(async (req, res) => {
       return json(design && owner === user.id ? [design] : []);
     }
     if (pathname.includes("/versions/")) { res.writeHead(200, { "Content-Type": "image/svg+xml", "Content-Disposition": 'attachment; filename="synthetic.svg"' }); res.end(svg); return; }
-    if (pathname.includes("/jobs/")) { jobReads++; return json(job); }
+    if (pathname.includes("/jobs/")) { jobReads++; return json(pathname.endsWith("/synthetic-background-job") ? backgroundFixture : job); }
     if (!design || owner !== user.id) return json({ detail: "作品不存在" }, 404);
     if (pathname.endsWith("/generate") || pathname.endsWith("/refinements")) {
       const sequence = design.versions.length, v = version(sequence, design.current_version_id);
+      const requested = writes.at(-1).body, selection = pathname.endsWith("/generate") ? requested : requested.selection;
+      if (selection) v.snapshot = { ...v.snapshot, asset_refs: selection.asset_ids, background_ref: selection.background_id,
+        template_id: selection.template_id, template_mode: templates.find(t => t.id === selection.template_id)?.mode };
+      v.editing = modelEditing;
       design.versions.push(v); design.current_version_id = v.id; design.revision++;
       if (sequence) design.successful_refinement_count++;
       job = { id: `job-${sequence}`, design_id: design.id, kind: sequence ? "refinement" : "generate", status: "SUCCEEDED", phase: "completed", attempt: 1, provider: "test", error: null, result_version_id: v.id, result_asset_id: null, created_at: "2026-01-01", updated_at: "2026-01-01", needs_clarification: false };
@@ -428,6 +439,142 @@ try {
   assert.equal(exampleCatalogReads, readsBeforeIdentity + 1, "new identity does not reuse the prior employee catalog");
   assert.match(await page.locator(".layout-examples-source").innerText(), /synthetic-b/, "catalog is fetched under the current identity");
   await closeCase("grid");
+
+  // A configured provider label is synthetic here: no external model request
+  // is ever made. Exercise the employee handoff using the real built UI.
+  modelProvider = "deepseek_seedream";
+  modelAuthMode = "hsd";
+  modelReady = false;
+  modelEditing = { allowed_operations: ["parameters", "edit_asset", "edit_background"],
+    allowed_parameters: ["scale", "spacing", "rotation", "offset_x", "offset_y", "background_color"],
+    composite_edit: false, composite_edit_reason: "合成长条不支持直接整幅修改，请修改图案或底图后重新排版。", planner_sees_images: false };
+  await page.reload();
+  await generateButton.waitFor();
+  assert.equal(await generateButton.isEnabled(), true, "an unconfigured AI does not block deterministic first drafts");
+  let backgroundButton = page.getByRole("button", { name: "AI 生成底图", exact: true });
+  assert.equal(await backgroundButton.isEnabled(), false);
+  assert.equal(await page.getByLabel("底图要求（可不填）", { exact: true }).isEnabled(), false);
+  assert.match(await page.locator("#background-ai-unavailable").innerText(), /仍可/);
+  await generateButton.click();
+  await page.getByRole("link", { name: "下载当前图", exact: true }).waitFor();
+  await text.fill("图案缩小一些");
+  assert.equal(await page.getByRole("button", { name: "开始精修", exact: true }).isEnabled(), false, "unconfigured AI cannot accept a text model request");
+  await selectLayout("single");
+  await text.fill("");
+  assert.equal(await page.getByRole("button", { name: "开始精修", exact: true }).isEnabled(), true, "applying a new selection remains available without AI");
+  await page.getByRole("button", { name: "开始精修", exact: true }).click();
+  await page.waitForFunction(() => document.querySelector("#ribbon-mount").shadowRoot.querySelector('a[download]')?.getAttribute("href") === "/api/ribbon/versions/v1/download");
+  assert.equal(writes.at(-1).body.prompt, "应用所选配置");
+  assert.equal(writes.at(-1).body.selection.template_id, templates.find(t => t.mode === "single").id);
+  modelReady = true;
+  await page.reload();
+  await text.waitFor();
+  await page.locator(".model-edit-boundary").waitFor();
+  assert.match(await page.locator(".model-edit-boundary").innerText(), /修改图案或底图/);
+  assert.equal(await page.getByRole("button", { name: "给画面添加星光", exact: true }).count(), 0, "unsupported whole-strip edits are not encouraged");
+  assert.match(await page.locator(".pattern-tile > span").first().innerText(), /^1\. /, "selected pattern order is visible");
+  await page.locator(".model-workflow-help summary").click();
+  assert.match(await page.locator(".model-workflow-help").innerText(), /不把图片发给它审图/);
+  await page.locator(".model-workflow-help summary").click();
+  const backgroundText = page.getByLabel("底图要求（可不填）", { exact: true });
+  await backgroundText.fill(" 浅蓝色细条纹，不要文字 ");
+  rejectBackground = true;
+  const requestsBeforeFailure = writes.length;
+  await backgroundButton.click();
+  await page.getByRole("alert").getByText("合成底图请求失败，请重试。", { exact: true }).waitFor();
+  assert.equal(writes.length, requestsBeforeFailure + 1);
+  assert.equal(writes.at(-1).body.prompt, "浅蓝色细条纹，不要文字", "employee background instructions reach the existing API");
+  assert.equal(await backgroundText.inputValue(), " 浅蓝色细条纹，不要文字 ", "failure keeps the input draft");
+  assert.equal(await backgroundButton.isEnabled(), true, "definite failure permits a clear retry");
+  rejectBackground = false;
+  await backgroundButton.click();
+  await page.waitForFunction(() => document.querySelector("#ribbon-mount").shadowRoot.querySelector("#background-prompt")?.disabled);
+  assert.equal(await backgroundButton.isEnabled(), false, "an accepted background request cannot be submitted twice");
+  const acceptedBackgroundWrites = writes.filter(w => w.path.endsWith("/background-jobs")).length;
+  assets.push({ id: "synthetic-ai-background", name: "合成AI底图", kind: "background", source: "synthetic", is_demo: true, shared: false, url: imageUrl });
+  backgroundFixture = { ...backgroundFixture, status: "SUCCEEDED", phase: "已保存", result_asset_id: "synthetic-ai-background" };
+  await page.locator(".background-selected strong").filter({ hasText: "合成AI底图" }).waitFor();
+  assert.equal(writes.filter(w => w.path.endsWith("/background-jobs")).length, acceptedBackgroundWrites);
+  assert.equal(await backgroundText.inputValue(), " 浅蓝色细条纹，不要文字 ");
+  await backgroundText.focus();
+  await page.locator('[data-workspace="numbering"]').click();
+  await page.locator('[data-workspace="ribbon"]').click();
+  assert.equal(await backgroundText.inputValue(), " 浅蓝色细条纹，不要文字 ", "same-user feature switching preserves the draft");
+
+  // Existing works retain their own output geometry when inputs are changed;
+  // global profile changes must neither remove nor invent edit capabilities.
+  const savedProfile = { ...profile };
+  const baseVersion = design.versions.find(v => v.id === design.current_version_id);
+  baseVersion.snapshot = { ...baseVersion.snapshot, composite_ref: "synthetic-composite",
+    output_profile: { ...profile, width: 1024, height: 1024 } };
+  baseVersion.editing = { ...modelEditing, allowed_operations: ["edit_composite"], allowed_parameters: [],
+    composite_edit: true, composite_edit_reason: "" };
+  Object.assign(profile, { width: 11811, height: 520 });
+  await page.evaluate(() => localStorage.removeItem("ribbon:synthetic-b:selection"));
+  await page.reload();
+  await page.getByRole("button", { name: "给画面添加星光", exact: true }).waitFor();
+  assert.equal(await page.getByRole("button", { name: "图案缩小一些，间距拉开一点", exact: true }).count(), 0, "a composite has no independent parameter suggestions before reselecting");
+  await setPatterns(["demo-flower"]);
+  await selectLayout("fullwidth");
+  assert.equal(await page.getByRole("button", { name: "给画面添加星光", exact: true }).count(), 1, "old square work keeps its supported geometry despite a new global long strip");
+  assert.equal(await page.getByRole("button", { name: "图案缩小一些", exact: true }).count(), 1, "reselection restores independent layer editing");
+  assert.equal(await page.getByRole("button", { name: "图案缩小一些，间距拉开一点", exact: true }).count(), 0, "the selected non-repeating mode does not offer spacing");
+  await selectLayout("stagger");
+  assert.equal(await page.getByRole("button", { name: "图案缩小一些，间距拉开一点", exact: true }).count(), 1, "the newly selected repeating mode restores spacing");
+
+  baseVersion.snapshot = { ...baseVersion.snapshot, output_profile: { ...profile, width: 11811, height: 520 } };
+  baseVersion.editing = { ...modelEditing, allowed_operations: [], allowed_parameters: [],
+    composite_edit: false, composite_edit_reason: "原长条不可直接整幅编辑，请重新选图后修改独立图案或底图。" };
+  Object.assign(profile, { width: 1024, height: 1024 });
+  modelEditing = { ...modelEditing, allowed_operations: ["parameters", "edit_asset", "edit_background", "edit_composite"],
+    composite_edit: true, composite_edit_reason: "" };
+  await page.evaluate(() => localStorage.removeItem("ribbon:synthetic-b:selection"));
+  await page.reload();
+  await page.locator(".model-edit-boundary").waitFor();
+  await selectLayout("grid");
+  assert.equal(await page.getByRole("button", { name: "给画面添加星光", exact: true }).count(), 0, "old long-strip work does not gain whole-image editing from the new global square profile");
+  assert.equal(await page.getByRole("button", { name: "给第一个图案添加星光", exact: true }).count(), 1, "reselection restores asset editing without inventing unsupported whole-image editing");
+  assert.match(await page.locator(".model-edit-boundary").innerText(), /原长条/);
+  await page.getByRole("button", { name: "新建作品", exact: true }).click();
+  await generateButton.waitFor();
+  assert.equal(await page.getByRole("button", { name: "给画面添加星光", exact: true }).count(), 1, "a genuinely new work uses the current global profile capabilities");
+  Object.assign(profile, savedProfile);
+  modelProvider = "test"; modelReady = false; modelEditing = undefined;
+  modelAuthMode = "local";
+  await page.reload();
+  await generateButton.waitFor();
+  const localBackground = page.getByRole("button", { name: "生成测试底图", exact: true });
+  assert.equal(await localBackground.isEnabled(), true, "local fixtures remain usable without real AI credentials");
+  assert.match(await page.locator(".environment-strip").innerText(), /测试模型 · 演示模式/);
+  assert.match(await page.locator(".test-limit").innerText(), /测试替身/);
+  await generateButton.click();
+  await page.getByRole("link", { name: "下载当前图", exact: true }).waitFor();
+  await text.fill("图案缩小一些");
+  assert.equal(await page.getByRole("button", { name: "开始精修", exact: true }).isEnabled(), true);
+  await page.getByRole("button", { name: "开始精修", exact: true }).click();
+  await page.waitForFunction(() => document.querySelector("#ribbon-mount").shadowRoot.querySelector('a[download]')?.getAttribute("href") === "/api/ribbon/versions/v1/download");
+  await page.getByLabel("底图要求（可不填）", { exact: true }).fill("本地测试蓝色底图");
+  await localBackground.click();
+  await page.waitForFunction(() => document.querySelector("#ribbon-mount").shadowRoot.querySelector("#background-prompt")?.disabled);
+  assert.equal(writes.at(-1).body.prompt, "本地测试蓝色底图");
+  backgroundFixture = { ...backgroundFixture, status: "SUCCEEDED", phase: "已保存", result_asset_id: "synthetic-ai-background" };
+  await page.locator(".background-selected strong").filter({ hasText: "合成AI底图" }).waitFor();
+  modelAuthMode = "demo";
+  await page.reload();
+  await localBackground.waitFor();
+  assert.equal(await localBackground.isEnabled(), true, "demo fixture mode is also available without a real API key");
+  modelAuthMode = "hsd";
+  await page.reload();
+  await localBackground.waitFor();
+  assert.equal(await localBackground.isEnabled(), false, "employee HSD mode never permits the test provider");
+  await text.fill("图案缩小一些");
+  assert.equal(await page.getByRole("button", { name: "开始精修", exact: true }).isEnabled(), false);
+  modelReady = true;
+  await page.reload();
+  await localBackground.waitFor();
+  assert.equal(await localBackground.isEnabled(), false, "an inconsistent ready flag cannot enable test models for employees");
+  modelAuthMode = "demo";
+
   user = { id: "synthetic-admin", username: "测试管理员", role: "admin" };
   await page.goto(`${base}/#ribbon-admin`);
   await page.locator(".admin-tabs").waitFor({ timeout: 5000 }).catch(async error => {
@@ -453,5 +600,5 @@ try {
   assert.ok(writes.some(w => w.path.endsWith("/generate")));
   assert.ok(writes.some(w => w.path.endsWith("/refinements")));
   assert.ok(writes.some(w => w.path.endsWith("/rollback")));
-  console.log("PASS built ShadowRoot workspace: 14 modes in basic/more sections, mode-specific selection guards and restored extended layouts, admin rules help; existing workflow plus lazy read-only examples, custom IDs, cache/abort/identity boundaries, close/ESC/focus trap, busy help access, notes, zoom and failure recovery; 1366/1920/1100 layouts (synthetic HTTP only)");
+  console.log("PASS built ShadowRoot workspace: configured/unconfigured model handoff, original-size edit boundaries, ordered target names, background prompt/failure/retry/duplicate guard and draft retention; 14 modes, read-only examples, cache/identity/focus, generation/refinement/rollback/download and 1366/1920/1100 layouts (synthetic HTTP only)");
 } finally { releaseCatalog?.(); await browser.close(); await new Promise(resolve => server.close(resolve)); }

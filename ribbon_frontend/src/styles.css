@@ -2296,6 +2296,14 @@ small {
 .layout-example-unavailable p { margin: 0; }
 .layout-example-unavailable button { margin-top: 12px; font-size: 13px; }
 .layout-examples-source { border-top: 1px solid #dbe5d7; padding-top: 14px; margin: 20px 0 0; color: #53644d; font-size: 12px; line-height: 1.8; }
+.background-prompt-label { display: block; margin: 12px 0 6px; color: var(--ink); font-size: 13px; font-weight: 600; }
+.background-prompt { display: block; box-sizing: border-box; width: 100%; min-height: 66px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); font: inherit; font-size: 13px; line-height: 1.65; resize: vertical; }
+.background-prompt:focus { outline: 2px solid #91a88a; outline-offset: 2px; }
+.model-help, .model-edit-boundary { color: #4c634f; font-size: 13px; line-height: 1.7; }
+.refinement-body .model-edit-boundary { margin: 0 0 12px; padding-left: 9px; border-left: 2px solid #b4c6ab; }
+.model-workflow-help { margin-bottom: 16px; color: #4c634f; font-size: 13px; line-height: 1.7; }
+.model-workflow-help summary { cursor: pointer; font-weight: 600; }
+.model-workflow-help p { margin: 8px 0 0; }
 @media (max-width: 600px) {
   .layout-examples-modal .modal-heading { top: -20px; }
   .layout-examples-modal .modal-heading h2 { font-size: 20px; }

@@ -67,10 +67,14 @@ def test_first_draft_parent_versions_quota_and_exact_download(employee_app):
     first = wait_job(client, first)
     assert first['status'] == 'SUCCEEDED', first
     v0 = first['result_version_id']
+    # Applying identical selections is a no-op, not a billable refinement.
+    # Exercise real layout changes on both branches from the original V0.
+    modified = {**selected, 'template_id': next(t['id'] for t in read(call(client, '/templates'))
+                    if t['mode'] in ('grid', 'single') and t['id'] != selected['template_id'])}
     for n in (1, 2):
         job = read(call(client, f'/designs/{design["id"]}/refinements', {
             'base_version_id': v0, 'idempotency_key': f'change-selection-{n}',
-            'prompt': '应用所选配置', 'selection': selected}))
+            'prompt': '应用所选配置', 'selection': modified}))
         completed = wait_job(client, job)
         assert completed['status'] == 'SUCCEEDED', completed
         current = read(call(client, '/designs/' + design['id']))

@@ -236,17 +236,22 @@ def test_seedream_background_and_edit_use_distinct_ribbon_prompt(tmp_path,monkey
     image.putpixel((0,0),(0,0,0,0))
     source=tmp_path/'motif.png'
     image.save(source)
-    encoded=base64.b64encode(source.read_bytes()).decode()
     requests=[]
     def submit(payload,cancel):
         requests.append(payload)
-        return {'data':[{'b64_json':encoded,'size':'512x512','output_format':'png'}]}, {'generated_images':1},'synthetic-image'
+        size=tuple(map(int,payload['size'].split('x')))
+        output=Image.new('RGBA',size,(255,0,0,255))
+        if payload.get('background')=='transparent':output.putpixel((0,0),(0,0,0,0))
+        buffer=io.BytesIO();output.save(buffer,format='PNG');output.close()
+        encoded=base64.b64encode(buffer.getvalue()).decode()
+        return {'data':[{'b64_json':encoded,'size':payload['size'],'output_format':'png'}]}, {'generated_images':1},'synthetic-image'
     monkeypatch.setattr(provider.ark,'_submit',submit)
     meta=provider.generate_background('浅蓝底纹',tmp_path/'background.png')
     assert meta['is_demo'] is False and requests[-1]['size']=='2048x2048'
     assert 'image' not in requests[-1]
     before=source.read_bytes()
     provider.edit_image('加星光',source,tmp_path/'edited.png','asset')
+    assert requests[-1]['size']=='2048x2048'
     assert requests[-1]['background']=='transparent'
     assert '清理整张图片' not in requests[-1]['prompt']
     assert source.read_bytes()==before

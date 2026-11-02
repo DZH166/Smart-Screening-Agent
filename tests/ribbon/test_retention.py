@@ -109,8 +109,9 @@ def test_successful_edit_refreshes_retention_without_resetting_quota(service):
     owner = user(service)['id']
     design = generate(service, owner)
     expire(service, owner)
+    changed = {**selection(service, owner), 'template_id': 'single'}
     job = service.submit(owner, 'refine', dict(idempotency_key=str(uuid4()), base_version_id=design['current_version_id'],
-        prompt='应用所选配置', selection=selection(service, owner)), design['id'])
+        prompt='应用所选配置', selection=changed), design['id'])
     service.run_once()
     assert service.job(owner, job['id'])['status'] == 'SUCCEEDED'
     assert service.cleanup_expired()['designs'] == 0
@@ -128,8 +129,9 @@ def test_successful_rollback_renews_retention_without_refunding_quota(service):
     owner = user(service)['id']
     design = generate(service, owner)
     v0 = design['current_version_id']
+    changed = {**selection(service, owner), 'template_id': 'single'}
     job = service.submit(owner, 'refine', dict(idempotency_key=str(uuid4()), base_version_id=v0,
-        prompt='应用所选配置', selection=selection(service, owner)), design['id'])
+        prompt='应用所选配置', selection=changed), design['id'])
     service.run_once()
     assert service.job(owner, job['id'])['status'] == 'SUCCEEDED'
     v1 = service.design(owner, design['id'])['current_version_id']

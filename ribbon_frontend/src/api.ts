@@ -30,10 +30,18 @@ export type Profile = {
 export type Config = {
   provider: string;
   ai_ready: boolean;
-  auth_mode: string;
+  auth_mode?: string;
   output_profile: Profile;
   max_refinements: number;
   retention_hours?: number;
+  editing?: Editing;
+};
+export type Editing = {
+  allowed_operations: string[];
+  allowed_parameters: string[];
+  composite_edit: boolean;
+  composite_edit_reason: string;
+  planner_sees_images: boolean;
 };
 export type Selection = {
   asset_ids: string[];
@@ -63,6 +71,7 @@ export type Version = {
   download_url: string;
   created_at: string;
   provider: string;
+  editing?: Editing;
 };
 export type Job = {
   id: string;
