@@ -29,8 +29,8 @@ class Database:
         with self.transaction() as conn:
             # Unknown legacy timestamps remain NULL: do not expire old work by guesswork.
             for table, columns in {
-                'designs': {'retained_at': 'REAL'},
-                'assets': {'retained_at': 'REAL', 'thumbnail_path': 'TEXT', 'thumbnail_sha256': 'TEXT'},
+                'designs': {'retained_at': 'REAL', 'deleted_at': 'REAL'},
+                'assets': {'retained_at': 'REAL', 'thumbnail_path': 'TEXT', 'thumbnail_sha256': 'TEXT', 'pixel_sha256': 'TEXT', 'thumbnail_pixel_sha256': 'TEXT'},
                 'jobs': {'settled_at': 'REAL'},
                 'versions': {'preview_sha256': 'TEXT'},
                 'templates': {'thumbnail_sha256': 'TEXT'},
@@ -39,6 +39,10 @@ class Database:
                 for name, kind in columns.items():
                     if name not in existing:
                         conn.execute(f'ALTER TABLE {table} ADD COLUMN {name} {kind}')
+            # Existing duplicate rows and all referenced files remain intact.
+            # BEGIN IMMEDIATE serializes new upload lookup/insert decisions.
+            conn.execute("CREATE INDEX IF NOT EXISTS assets_upload_pixels ON assets(owner_id,shared,kind,pixel_sha256) WHERE source='upload'")
+            conn.execute('CREATE INDEX IF NOT EXISTS designs_owner_deleted ON designs(owner_id,deleted_at,created_at)')
 
     @contextmanager
     def connect(self):

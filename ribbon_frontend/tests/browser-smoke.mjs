@@ -16,6 +16,7 @@ const writes = [], errors = [];
 let exampleCatalogReads = 0, failExampleCatalog = 0, exampleVariant = "normal", exampleImageRevision = 0;
 let holdNextCatalog = false, releaseCatalog = null;
 let modelProvider = "test", modelReady = true, modelEditing, modelAuthMode = "demo";
+let aiDraftAvailable, aiDraftFixtures = null, aiDraftSequence = 0;
 let backgroundFixture = null, rejectBackground = false;
 let assetReads = 0, uploadAttempts = 0, uploadFailureAt = 0, uploadHoldAt = 0, releaseUpload = null;
 const exampleImageReads = [], badExampleImages = new Set();
@@ -97,7 +98,7 @@ const server = createServer(async (req, res) => {
       writes.push({ path: pathname, body: JSON.parse(body || "{}") });
     }
     if (pathname.endsWith("/auth/me")) return json(user);
-    if (pathname.endsWith("/config")) return json({ provider: modelProvider, ai_ready: modelReady, auth_mode: modelAuthMode, output_profile: profile, max_refinements: 2, editing: modelEditing });
+    if (pathname.endsWith("/config")) return json({ provider: modelProvider, ai_ready: modelReady, ai_draft_available: aiDraftAvailable, auth_mode: modelAuthMode, output_profile: profile, max_refinements: 2, editing: modelEditing });
     if (pathname.endsWith("/assets")) { assetReads++; return json(assets); }
     if (pathname.endsWith("/templates")) return json(templates);
     if (pathname === "/api/ribbon/layout-examples") {
@@ -127,13 +128,19 @@ const server = createServer(async (req, res) => {
     if (pathname.endsWith("/designs")) {
       if (req.method === "POST") {
         owner = user.id;
-        design = { id: "synthetic-design", name: "合成验收作品", current_version_id: null, successful_refinement_count: 0, active_job_id: null, revision: 0, versions: [], active_job: null };
+        design = { id: aiDraftFixtures ? `synthetic-ai-work-${++aiDraftSequence}` : "synthetic-design", name: aiDraftFixtures ? writes.at(-1).body.name : "合成验收作品", current_version_id: null, successful_refinement_count: 0, active_job_id: null, revision: 0, versions: [], active_job: null };
+        if (aiDraftFixtures) aiDraftFixtures.push(design);
         return json(design);
       }
+      if (aiDraftFixtures) return json(owner === user.id ? aiDraftFixtures : []);
       return json(design && owner === user.id ? [design] : []);
     }
     if (pathname.includes("/versions/")) { res.writeHead(200, { "Content-Type": "image/svg+xml", "Content-Disposition": 'attachment; filename="synthetic.svg"' }); res.end(svg); return; }
     if (pathname.includes("/jobs/")) { jobReads++; return json(pathname.endsWith("/synthetic-background-job") ? backgroundFixture : job); }
+    if (aiDraftFixtures) {
+      const workId = /^\/api\/ribbon\/designs\/([^/]+)/.exec(pathname)?.[1];
+      if (workId) design = aiDraftFixtures.find(item => item.id === workId) || null;
+    }
     if (!design || owner !== user.id) return json({ detail: "作品不存在" }, 404);
     if (pathname.endsWith("/generate") || pathname.endsWith("/refinements")) {
       const sequence = design.versions.length, v = version(sequence, design.current_version_id);
@@ -226,6 +233,163 @@ async function restorationSmoke(page) {
   assert.equal("design_density" in restoredRefine.body.selection, false, "legacy selection never sends a density setting");
 
 }
+async function aiDraftSmoke(page) {
+  // All images, examples, provider labels and results in this function are
+  // synthetic HTTP fixtures. No image is sent to an external model.
+  await page.goto("about:blank");
+  user = { id: "synthetic-ai-draft", username: "AI首稿合成员工", role: "employee" };
+  owner = user.id; design = null; job = null; backgroundFixture = null;
+  aiDraftFixtures = []; aiDraftSequence = 0;
+  modelProvider = "deepseek_seedream"; modelAuthMode = "hsd"; modelReady = true;
+  modelEditing = { allowed_operations: ["parameters", "edit_asset", "edit_background"],
+    allowed_parameters: ["scale", "spacing", "rotation", "offset_x", "offset_y", "background_color"],
+    composite_edit: false, composite_edit_reason: "合成母版不支持整幅编辑", planner_sees_images: false };
+  aiDraftAvailable = undefined;
+  const aiChoice = page.getByRole("checkbox", { name: "AI搭配底纹与装饰", exact: true });
+  const generate = page.getByRole("button", { name: "生成首稿", exact: true });
+  const cancelReference = page.getByRole("button", { name: "取消案例参考", exact: true });
+  const externalRequests = [];
+  const observeExternal = request => { if (!request.url().startsWith(base + "/") && /^https?:/.test(request.url())) externalRequests.push(request.url()); };
+  page.on("request", observeExternal);
+  const assertNotEnabledByDefault = async description => {
+    await generate.waitFor();
+    assert.ok(!await aiChoice.count() || !await aiChoice.isChecked(), description);
+  };
+  await page.goto(`${base}/#ribbon`);
+  await assertNotEnabledByDefault("a missing capability field never enables assisted generation");
+  aiDraftAvailable = true; modelReady = false;
+  await page.reload();
+  await assertNotEnabledByDefault("the capability flag cannot bypass unavailable AI credentials");
+  modelReady = true; modelProvider = "test";
+  await page.reload();
+  await assertNotEnabledByDefault("the test provider cannot opt into the real assisted first-draft path");
+  modelProvider = "deepseek_seedream";
+  await page.reload();
+  await aiChoice.waitFor();
+  assert.equal(await aiChoice.isChecked(), true, "ready DeepSeek + Seedream enables the new-work default");
+  assert.match(await page.locator(".generate-area").innerText(), /原人物文字不重画/);
+
+  const openAll = async () => {
+    await page.getByRole("button", { name: "查看全部案例", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "全部排版案例", exact: true });
+    await dialog.locator(".layout-example").last().waitFor();
+    return dialog;
+  };
+  const code = exampleCode("stagger");
+  const originalSelection = await page.locator(".source-panel").innerText();
+  const writesBeforeView = writes.length;
+  let dialog = await openAll();
+  assert.equal(await dialog.getByRole("button", { name: "用于AI首稿参考", exact: true }).count(), 1, "only an available case matching the currently selected mode is eligible");
+  assert.equal(await dialog.locator(".layout-example").filter({ hasText: exampleCode("grid") }).getByRole("button", { name: "用于AI首稿参考", exact: true }).count(), 0, "viewing another mode never offers its mismatched case as the current-mode reference");
+  await dialog.getByRole("button", { name: "关闭弹窗", exact: true }).click();
+  assert.equal(writes.length, writesBeforeView, "ordinary case viewing issues no mutation or model request");
+  assert.equal(await page.locator(".source-panel").innerText(), originalSelection, "ordinary case viewing preserves the selected materials and layout");
+  assert.equal(await cancelReference.count(), 0, "viewing alone never selects a reference");
+
+  // Missing files remain readable help, but cannot be selected for external use.
+  await page.locator(".template-card").filter({ hasText: "整齐平铺" }).click();
+  exampleVariant = "missing";
+  dialog = await openAll();
+  await dialog.getByRole("button", { name: "重新加载", exact: true }).click();
+  await dialog.getByText("这张案例图暂未加载，排版说明仍可查看。", { exact: true }).waitFor();
+  assert.equal(await dialog.getByRole("button", { name: "用于AI首稿参考", exact: true }).count(), 0, "an unavailable matching case cannot be selected");
+  await dialog.getByRole("button", { name: "关闭弹窗", exact: true }).click();
+  exampleVariant = "unsafe";
+  dialog = await openAll();
+  await dialog.getByRole("button", { name: "重新加载", exact: true }).click();
+  await dialog.getByText("这张案例图暂未加载，排版说明仍可查看。", { exact: true }).waitFor();
+  assert.equal(await dialog.getByRole("button", { name: "用于AI首稿参考", exact: true }).count(), 0, "an external image URL cannot become an assisted-draft reference");
+  await dialog.getByRole("button", { name: "关闭弹窗", exact: true }).click();
+  exampleVariant = "normal";
+  await page.locator(".template-card").filter({ hasText: "错位平铺" }).click();
+  dialog = await openAll();
+  await dialog.getByRole("button", { name: "重新加载", exact: true }).click();
+  await dialog.getByRole("button", { name: "用于AI首稿参考", exact: true }).waitFor();
+  const writesBeforeChoice = writes.length;
+  await dialog.getByRole("button", { name: "用于AI首稿参考", exact: true }).click();
+  await cancelReference.waitFor();
+  assert.match(await page.locator(".generate-area").innerText(), new RegExp(code));
+  assert.match(await page.locator(".generate-area").innerText(), /所选案例会发送给Seedream/);
+  assert.equal(writes.length, writesBeforeChoice, "choosing a case only changes a local first-draft option");
+  for (const viewport of [{ width: 1366, height: 768 }, { width: 1920, height: 1080 }, { width: 1093, height: 614 }]) {
+    await page.setViewportSize(viewport);
+    await page.evaluate(() => window.scrollTo(0, 0));
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2), false, `AI first-draft controls do not overflow at ${viewport.width}`);
+    const bounds = await generate.boundingBox();
+    assert.ok(bounds && bounds.y >= 0 && bounds.y + bounds.height <= viewport.height, `AI first-draft action stays in the first screen at ${viewport.width}x${viewport.height}: ${JSON.stringify(bounds)}`);
+    await page.screenshot({ path: path.join(output, `ribbon-ai-draft-${viewport.width}.png`) });
+  }
+  await cancelReference.click();
+  assert.equal(await cancelReference.count(), 0);
+  dialog = await openAll();
+  await dialog.getByRole("button", { name: "用于AI首稿参考", exact: true }).click();
+  await cancelReference.waitFor();
+  await page.locator(".template-card").filter({ hasText: "整齐平铺" }).click();
+  assert.equal(await cancelReference.count(), 0, "changing layout clears a reference for the previous mode");
+  await page.locator(".template-card").filter({ hasText: "错位平铺" }).click();
+  dialog = await openAll();
+  await dialog.getByRole("button", { name: "用于AI首稿参考", exact: true }).click();
+  await cancelReference.waitFor();
+  await aiChoice.uncheck();
+  await generate.click();
+  await page.getByRole("link", { name: "下载当前图", exact: true }).waitFor();
+  let request = writes.findLast(write => write.path.endsWith("/generate"));
+  assert.equal(request.body.ai_assisted, false, "turning off assistance retains the original-material generation path");
+  assert.equal(request.body.reference_code, null, "a disabled first draft never sends a previously selected reference");
+  assert.equal(await aiChoice.count(), 0, "saved versions do not receive a new automatic-AI control");
+
+  await page.getByRole("button", { name: "新建作品", exact: true }).click();
+  await aiChoice.waitFor();
+  assert.equal(await aiChoice.isChecked(), true, "a new work resets the default independently of the prior work");
+  assert.equal(await cancelReference.count(), 0, "a new work cannot inherit the previous case");
+  const firstEmptyWork = design;
+  dialog = await openAll();
+  await dialog.getByRole("button", { name: "用于AI首稿参考", exact: true }).click();
+  await cancelReference.waitFor();
+  await page.getByRole("button", { name: "新建作品", exact: true }).click();
+  await aiChoice.waitFor();
+  assert.equal(await cancelReference.count(), 0);
+  dialog = await openAll();
+  await dialog.getByRole("button", { name: "用于AI首稿参考", exact: true }).click();
+  await cancelReference.waitFor();
+  await page.getByRole("button", { name: "我的作品", exact: false }).click();
+  await page.locator(".design-list-item").filter({ has: page.getByText(firstEmptyWork.name, { exact: true }) }).click();
+  await page.getByRole("heading", { name: firstEmptyWork.name, exact: true }).waitFor();
+  assert.equal(await cancelReference.count(), 0, "switching work discards the old work's reference choice");
+  assert.equal(await aiChoice.isChecked(), true);
+
+  // Without an explicit reference, the enabled AI path sends no company case.
+  await page.getByRole("button", { name: "新建作品", exact: true }).click();
+  await aiChoice.waitFor();
+  await generate.click();
+  await page.getByRole("link", { name: "下载当前图", exact: true }).waitFor();
+  request = writes.findLast(write => write.path.endsWith("/generate"));
+  assert.equal(request.body.ai_assisted, true);
+  assert.equal(request.body.reference_code, null, "assistance without an explicitly selected case sends no reference");
+
+  await page.getByRole("button", { name: "新建作品", exact: true }).click();
+  await aiChoice.waitFor();
+  dialog = await openAll();
+  await dialog.getByRole("button", { name: "用于AI首稿参考", exact: true }).click();
+  await cancelReference.waitFor();
+  await generate.click();
+  await page.getByRole("link", { name: "下载当前图", exact: true }).waitFor();
+  request = writes.findLast(write => write.path.endsWith("/generate"));
+  assert.equal(request.body.ai_assisted, true);
+  assert.equal(request.body.reference_code, code, "only generation submits the explicitly chosen matching case code");
+  await page.locator(".refinement-body textarea").fill("图案缩小一些");
+  await page.getByRole("button", { name: "开始精修", exact: true }).click();
+  await page.waitForFunction(() => document.querySelector("#ribbon-mount").shadowRoot.querySelector('a[download]')?.getAttribute("href") === "/api/ribbon/versions/v1/download");
+  const refined = writes.findLast(write => write.path.endsWith("/refinements"));
+  assert.equal("ai_assisted" in refined.body, false, "refinement never receives first-draft-only options");
+  assert.equal("reference_code" in refined.body, false);
+  assert.equal("ai_assisted" in (refined.body.selection || {}), false);
+  assert.equal("reference_code" in (refined.body.selection || {}), false);
+  assert.deepEqual(externalRequests, [], "browser reference selection never sends images or requests to a provider");
+  page.off("request", observeExternal);
+  aiDraftFixtures = null; aiDraftAvailable = undefined;
+  modelProvider = "test"; modelAuthMode = "demo"; modelReady = true; modelEditing = undefined;
+}
 const browser = await chromium.launch({ channel: process.env.HSD_BROWSER_CHANNEL || "chrome", headless: true });
 try {
   const context = await browser.newContext({ viewport: { width: 1366, height: 768 } });
@@ -234,7 +398,11 @@ try {
   await context.route("https://example.invalid/**", route => route.abort());
   page.on("request", request => { if (request.url().startsWith("https://example.invalid/")) unsafeRequests.push(request.url()); });
   page.on("pageerror", error => errors.push(String(error)));
-  if (process.argv.includes("--restoration-only")) {
+  if (process.argv.includes("--ai-draft-only")) {
+    await aiDraftSmoke(page);
+    assert.deepEqual(errors, []);
+    console.log("PASS built AI first-draft UI: explicit capability/default, off path, matching available case choice, work isolation, generate-only payloads and refinement separation (synthetic HTTP only)");
+  } else if (process.argv.includes("--restoration-only")) {
     await restorationSmoke(page);
     assert.deepEqual(errors, []);
     console.log("PASS built workspace draft recovery: new draft, saved unversioned work, modern saved/default settings, legacy settings and matching mutation payloads (synthetic HTTP only)");
@@ -265,9 +433,11 @@ try {
   async function selectLayout(mode) {
     if (modes.indexOf(mode) >= 6 && await moreLayouts.getAttribute("aria-expanded") !== "true") await moreLayouts.click();
     const template = templates.find(item => item.mode === mode);
-    const button = page.locator(".template-card").filter({ hasText: template.name });
+    const picker = page.getByRole("dialog", { name: "选择排版模式", exact: true });
+    const button = (await picker.count() ? picker : page.locator(".source-panel")).locator(".template-card").filter({ hasText: template.name });
     await button.click();
     assert.equal(await button.getAttribute("aria-pressed"), "true");
+    if (await picker.count()) await picker.getByRole("button", { name: "完成选择", exact: true }).click();
   }
   async function setPatterns(ids) {
     await page.getByRole("button", { name: "素材库", exact: true }).click();
@@ -283,7 +453,8 @@ try {
     await dialog.waitFor({ state: "hidden" });
   }
   await moreLayouts.click();
-  assert.equal(await page.locator(".template-card").count(), 14, "all eight new algorithms can be selected");
+  assert.equal(await page.getByRole("dialog", { name: "选择排版模式", exact: true }).locator(".template-card").count(), 14, "all fourteen algorithms can be selected in the bounded picker");
+  await page.getByRole("button", { name: "完成选择", exact: true }).click();
   const generateButton = page.getByRole("button", { name: "生成首稿", exact: true });
   await selectLayout("fullwidth");
   assert.match(await page.locator(".layout-selection-issue").innerText(), /只使用 1 个/);
@@ -310,14 +481,12 @@ try {
     assert.equal(await generateButton.isEnabled(), true, `${mode} accepts the selected three patterns`);
   }
   await selectLayout("stagger");
-  await moreLayouts.click();
   assert.equal(await page.locator(".template-card").count(), 6);
   assert.equal(writes.length, 0, "choosing layouts and correcting selection only edits the local draft");
   await page.getByRole("button", { name: "生成首稿", exact: true }).click();
   await page.getByRole("link", { name: "下载当前图", exact: true }).waitFor();
   const text = page.locator(".refinement-body textarea");
   await text.fill("图案缩小一些");
-  await moreLayouts.click();
 
   // The custom template IDs intentionally differ from their modes: employee
   // case viewing must use mode, remain read-only, and preserve the workspace.
@@ -344,7 +513,10 @@ try {
   }
   async function openCase(mode) {
     const template = templates.find(item => item.mode === mode);
-    await page.getByRole("button", { name: `查看${template.name}案例`, exact: true }).click();
+    let caseButton = page.getByRole("button", { name: `查看${template.name}案例`, exact: true });
+    if (!await caseButton.count()) { await moreLayouts.click(); caseButton = page.getByRole("dialog", { name: "选择排版模式", exact: true }).getByRole("button", { name: `查看${template.name}案例`, exact: true }); }
+    await caseButton.focus();
+    await caseButton.click();
     const dialog = page.getByRole("dialog", { name: `${template.name} · 案例`, exact: true });
     await dialog.waitFor();
     return dialog;
@@ -354,7 +526,7 @@ try {
     if (escape) await page.keyboard.press("Escape");
     else await page.getByRole("dialog").getByRole("button", { name: "关闭弹窗", exact: true }).click();
     await page.locator(".layout-examples-modal").waitFor({ state: "hidden" });
-    await page.waitForFunction(label => document.querySelector("#ribbon-mount")?.shadowRoot?.activeElement?.getAttribute("aria-label") === label, `查看${template.name}案例`);
+    if (modes.indexOf(mode) < 6) await page.waitForFunction(label => document.querySelector("#ribbon-mount")?.shadowRoot?.activeElement?.getAttribute("aria-label") === label, `查看${template.name}案例`);
   }
   async function refreshWorkspace() {
     await page.locator('[data-workspace="numbering"]').click();
@@ -516,14 +688,14 @@ try {
   currentVersion.snapshot = { ...currentVersion.snapshot, asset_refs: ["demo-flower"], template_id: templates.find(t => t.mode === "fullwidth").id, template_mode: "fullwidth" };
   await page.evaluate(() => localStorage.removeItem("ribbon:synthetic-a:selection"));
   await page.reload();
-  await page.locator('.template-card[aria-pressed="true"]').filter({ hasText: "整幅定位" }).waitFor();
-  assert.equal(await moreLayouts.getAttribute("aria-expanded"), "true", "restoring a new mode automatically expands its section");
+  await page.locator('.chosen-layout').filter({ hasText: "整幅定位" }).waitFor();
+  assert.equal(await moreLayouts.getAttribute("aria-expanded"), "false", "restoring an extended mode keeps the compact summary and leaves the picker closed");
   assert.equal(await page.locator(".pattern-tile").count(), 1);
   assert.equal(await page.locator(".layout-selection-issue").count(), 0, "valid restored whole design is not incorrectly blocked");
   await openCase("fullwidth");
   await page.getByRole("dialog").getByText(exampleCode("fullwidth"), { exact: true }).waitFor();
   await closeCase("fullwidth", true);
-  assert.equal(await moreLayouts.getAttribute("aria-expanded"), "true", "case viewing preserves the expanded new mode section");
+  assert.equal(await moreLayouts.getAttribute("aria-expanded"), "false", "case viewing preserves the compact selected mode");
   user = { id: "synthetic-b", username: "另一测试员工", role: "employee" };
   await page.locator('[data-workspace="numbering"]').click();
   await page.locator('[data-workspace="ribbon"]').click();
@@ -723,6 +895,7 @@ try {
   assert.equal(await localBackground.isEnabled(), true, "demo fixture mode is also available without a real API key");
 
   await restorationSmoke(page);
+  await aiDraftSmoke(page);
 
   user = { id: "synthetic-admin", username: "测试管理员", role: "admin" };
   await page.goto(`${base}/#ribbon-admin`);
@@ -749,6 +922,6 @@ try {
   assert.ok(writes.some(w => w.path.endsWith("/generate")));
   assert.ok(writes.some(w => w.path.endsWith("/refinements")));
   assert.ok(writes.some(w => w.path.endsWith("/rollback")));
-  console.log("PASS built ShadowRoot workspace: serial upload progress and partial-success retention, thumbnail/lazy image paths, identity-bound upload cancellation; configured/unconfigured model handoff, original-size edit boundaries, 14 modes and examples, generation/refinement/rollback/download and 1366/1920/1100 layouts (synthetic HTTP only)");
+  console.log("PASS built ShadowRoot workspace: serial upload progress and partial-success retention, thumbnail/lazy image paths, identity-bound upload cancellation; configured/unconfigured model handoff, original-size edit boundaries, 14 modes and examples, generation/refinement/rollback/download, explicit AI first-draft reference handoff and 1366/1920/1100 layouts (synthetic HTTP only)");
   }
 } finally { releaseCatalog?.(); releaseUpload?.(); await browser.close(); await new Promise(resolve => server.close(resolve)); }

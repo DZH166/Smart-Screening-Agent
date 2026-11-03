@@ -37,7 +37,8 @@ EXTENDED_MODES = frozenset({'bordered', 'scene', 'fullwidth', 'alternating', 'en
 NON_REPEATING_MODES = frozenset({'fullwidth', 'ends_open'})
 ASSET_PREVIEW_VERSION = 'asset-preview-v1'
 ASSET_PREVIEW_SIZE = (640, 640)
-LAYOUT_ENGINE = 'design-rhythm-v1'
+LAYOUT_ENGINE = 'design-rhythm-v2'
+QUALITY_LAYOUT_ENGINES = frozenset({'design-rhythm-v1', LAYOUT_ENGINE})
 BACKGROUND_TONES = frozenset({'soft', 'original'})
 DESIGN_DENSITIES = frozenset({'airy', 'balanced', 'rich'})
 TERMINAL = ('SUCCEEDED', 'FAILED')
@@ -126,10 +127,11 @@ class ServiceError(Exception):
 
 
 class Service:
-    def __init__(self, settings: Settings, runtime_settings_supplier=None, provider_factory=None):
+    def __init__(self, settings: Settings, runtime_settings_supplier=None, provider_factory=None, example_resolver=None):
         self.settings = settings
         self.runtime_settings_supplier = runtime_settings_supplier
         self.provider_factory = provider_factory
+        self.example_resolver = example_resolver
         self.root = settings.data_dir
         if self.root.resolve() == Path(self.root.anchor):
             raise ServiceError(507, '请为丝带功能设置专用数据目录，不能使用磁盘根目录')
@@ -324,6 +326,7 @@ class Service:
             profile = json.loads(db.execute('SELECT profile_json FROM output_profiles WHERE active=1').fetchone()[0])
         settings = self.current_settings()
         return dict(provider=settings.provider, ai_ready=settings.ai_ready, auth_mode=self.settings.auth_mode, output_profile={k: profile[k] for k in ('id', 'version', 'name', 'is_demo')}, max_refinements=2,
+                    ai_draft_available=settings.provider == 'deepseek_seedream' and settings.ai_ready,
                     retention_hours=self.settings.retention_seconds // 3600,
                     editing=workflow_editing(settings.provider, dict(output_profile=profile, template_mode='stagger')))
 
@@ -341,11 +344,13 @@ class Service:
         return self.root / 'assets' / ('preview-' + digest(identity.encode()) + '.png')
 
     @memory_bounded_operation
-    def write_asset_preview(self, image, path):
+    def write_asset_preview(self, image, path, fingerprints=None):
         # Keep the complete canvas and alpha; this is a screen derivative only.
         preview = image.copy()
         try:
             preview.thumbnail(ASSET_PREVIEW_SIZE, Image.Resampling.LANCZOS)
+            if fingerprints is not None:
+                fingerprints['thumbnail_pixel_sha256'] = self.image_pixel_digest(preview)
             self.check_space(path.parent, png_space(*preview.size))
             if path.is_symlink() or (hasattr(path, 'is_junction') and path.is_junction()):
                 raise ServiceError(409, '素材缩略图不支持链接')
@@ -412,14 +417,15 @@ class Service:
                     raise ServiceError(409, '素材缩略图记录校验失败')
                 return self.verified_file(expected_path, current['thumbnail_sha256'], '素材缩略图'), current['thumbnail_sha256']
             try:
-                preview_sha = self.create_asset_preview(source, asset['sha256'], expected_path)
+                fingerprints = {}
+                preview_sha = self.create_asset_preview(source, asset['sha256'], expected_path, fingerprints)
                 self.verified_file(source, asset['sha256'], '素材文件')
                 with self.db.transaction() as db:
                     current = self.accessible_asset(db, asset_id, owner)
                     if current['sha256'] != asset['sha256'] or current['path'] != str(source):
                         raise ServiceError(409, '素材文件已变化，请刷新')
-                    db.execute('UPDATE assets SET thumbnail_path=?,thumbnail_sha256=? WHERE id=?',
-                               (str(expected_path), preview_sha, asset_id))
+                    db.execute("UPDATE assets SET thumbnail_path=?,thumbnail_sha256=?,thumbnail_pixel_sha256=?,pixel_sha256=CASE WHEN source='upload' THEN COALESCE(pixel_sha256,?) ELSE pixel_sha256 END WHERE id=?",
+                               (str(expected_path), preview_sha, fingerprints['thumbnail_pixel_sha256'], fingerprints['pixel_sha256'], asset_id))
                     db.execute('DELETE FROM cleanup_paths WHERE path=?', (str(expected_path),))
             except BaseException:
                 self.cleanup_uncommitted_asset_files([expected_path])
@@ -427,7 +433,7 @@ class Service:
         return self.verified_file(expected_path, preview_sha, '素材缩略图'), preview_sha
 
     @memory_bounded_operation
-    def create_asset_preview(self, source, expected_source_sha, target):
+    def create_asset_preview(self, source, expected_source_sha, target, fingerprints=None):
         from .imaging import read_image
         self.verified_file(source, expected_source_sha, '素材文件')
         with Image.open(source) as original:
@@ -437,7 +443,9 @@ class Service:
                 raise ServiceError(409, '素材文件不是单帧图片')
         image = read_image(source)
         try:
-            return self.write_asset_preview(image, target)
+            if fingerprints is not None:
+                fingerprints['pixel_sha256'] = self.image_pixel_digest(image)
+            return self.write_asset_preview(image, target, fingerprints)
         finally:
             image.close()
 
@@ -478,6 +486,96 @@ class Service:
             snapshot[key] for key in ('background_ref', 'composite_ref') if snapshot.get(key)
         }
 
+    @staticmethod
+    def image_pixel_digest(image):
+        """Exact normalized RGBA identity, including canvas and invisible pixels."""
+        value = hashlib.sha256(f'rgba-v1:{image.width}:{image.height}:'.encode())
+        for top in range(0, image.height, 64):
+            with image.crop((0, top, image.width, min(image.height, top + 64))) as band:
+                value.update(band.tobytes())
+        return value.hexdigest()
+
+    @memory_bounded_operation
+    def legacy_upload_pixel_digest(self, asset):
+        source = self.verified_file(asset['path'], asset['sha256'], '素材文件')
+        with Image.open(source) as original:
+            if original.width * original.height > MAX_PIXELS or getattr(original, 'n_frames', 1) != 1:
+                raise ServiceError(409, '已有上传素材无法确认完整像素')
+            with original.convert('RGBA') as image:
+                value = self.image_pixel_digest(image)
+        self.verified_file(source, asset['sha256'], '素材文件')
+        return value
+
+    @memory_bounded_operation
+    def legacy_preview_pixel_digest(self, asset):
+        # Only derivatives produced by the current immutable preview contract
+        # qualify as a shortlist. Encoding metadata (e.g. ICC) is not identity.
+        if not asset['thumbnail_path'] or not asset['thumbnail_sha256']:
+            return None
+        if asset['thumbnail_path'] != str(self.asset_preview_path(Path(asset['path']), asset['sha256'])):
+            return None
+        path = self.verified_file(asset['thumbnail_path'], asset['thumbnail_sha256'], '素材缩略图')
+        with Image.open(path) as original:
+            if original.format != 'PNG' or max(original.size) > ASSET_PREVIEW_SIZE[0] or getattr(original, 'n_frames', 1) != 1:
+                return None
+            with original.convert('RGBA') as image:
+                return self.image_pixel_digest(image)
+
+    def index_legacy_uploads(self, owner, kind, shared, stored):
+        # Never decode the whole original gallery on an upload. Cached 640px
+        # pixel fingerprints shortlist originals; a match still needs exact
+        # full RGBA identity. Unknown no-preview rows are indexed when their
+        # preview is first derived, or immediately if PNG bytes match exactly.
+        with self.db.connect() as db:
+            pending = db.execute("SELECT * FROM assets WHERE owner_id=? AND kind=? AND shared=? AND source='upload' AND pixel_sha256 IS NULL AND (sha256=? OR thumbnail_pixel_sha256=? OR thumbnail_pixel_sha256 IS NULL) ORDER BY created_at,id",
+                                 (owner, kind, int(shared), stored['sha256'], stored['thumbnail_pixel_sha256'])).fetchall()
+        for row in pending:
+            asset = dict(row)
+            try:
+                if asset['sha256'] == stored['sha256']:
+                    # Equal verified normalized file bytes imply equal pixels;
+                    # the incoming image has already been fully decoded.
+                    self.verified_file(asset['path'], asset['sha256'], '素材文件')
+                    pixel_sha = stored['pixel_sha256']
+                else:
+                    preview_sha = asset['thumbnail_pixel_sha256']
+                    if preview_sha is None:
+                        preview_sha = self.legacy_preview_pixel_digest(asset)
+                        if preview_sha is not None:
+                            with self.db.transaction() as db:
+                                db.execute('UPDATE assets SET thumbnail_pixel_sha256=? WHERE id=? AND thumbnail_path=? AND thumbnail_sha256=? AND thumbnail_pixel_sha256 IS NULL',
+                                           (preview_sha, asset['id'], asset['thumbnail_path'], asset['thumbnail_sha256']))
+                    if preview_sha != stored['thumbnail_pixel_sha256']:
+                        continue
+                    pixel_sha = self.legacy_upload_pixel_digest(asset)
+            except (ServiceError, OSError, ValueError):
+                continue  # An unverifiable legacy file is never reused.
+            # Keep the write transaction outside the image allocation lock.
+            with self.db.transaction() as db:
+                db.execute('UPDATE assets SET pixel_sha256=? WHERE id=? AND path=? AND sha256=? AND pixel_sha256 IS NULL',
+                           (pixel_sha, asset['id'], asset['path'], asset['sha256']))
+            if pixel_sha == stored['pixel_sha256']:
+                with self.db.connect() as db:
+                    if self.matching_upload(db, owner, kind, shared, pixel_sha):
+                        break
+
+    def matching_upload(self, db, owner, kind, shared, pixel_sha):
+        candidates = db.execute("SELECT * FROM assets WHERE owner_id=? AND kind=? AND shared=? AND source='upload' AND pixel_sha256=? ORDER BY created_at,id",
+                                (owner, kind, int(shared), pixel_sha))
+        for row in candidates:
+            try:
+                source = self.verified_file(row['path'], row['sha256'], '素材文件')
+                if row['thumbnail_path'] or row['thumbnail_sha256']:
+                    if row['thumbnail_path'] != str(self.asset_preview_path(source, row['sha256'])) or not row['thumbnail_sha256']:
+                        continue
+                    self.verified_file(row['thumbnail_path'], row['thumbnail_sha256'], '素材缩略图')
+            except (ServiceError, OSError, ValueError):
+                # A damaged historical candidate remains immutable and keeps
+                # its old references. It cannot block a valid fresh upload.
+                continue
+            return row
+        return None
+
     @leased_operation
     @guarded_file_operations
     def upload(self, user, data, name, kind, shared=False):
@@ -491,20 +589,40 @@ class Service:
         path = self.root / 'assets' / f'{asset_id}.png'
         created = [path]
         try:
-            stored = self.store_uploaded_image(data, path, created)
-            asset = dict(id=asset_id, owner_id=user['id'], name=(name or '上传素材')[:80], kind=kind, path=str(path), sha256=stored['sha256'], source='upload', is_demo=False, shared=shared, derived_from=None)
-            with self.db.transaction() as db:
-                self.insert_asset(db, asset)
-                db.execute('UPDATE assets SET thumbnail_path=?,thumbnail_sha256=? WHERE id=?',
-                           (str(stored['thumbnail_path']), stored['thumbnail_sha256'], asset_id))
-                db.execute('DELETE FROM cleanup_paths WHERE path IN (?,?)', (str(path), str(stored['thumbnail_path'])))
+            stored = self.store_uploaded_image(data, path, created, scope=(user['id'], kind, shared))
+            while True:
+                if 'thumbnail_path' in stored:
+                    self.index_legacy_uploads(user['id'], kind, shared, stored)
+                with self.db.transaction() as db:
+                    existing = self.matching_upload(db, user['id'], kind, shared, stored['pixel_sha256'])
+                    if existing:
+                        asset = dict(existing)
+                        db.execute('UPDATE assets SET enabled=1,retained_at=? WHERE id=?', (time.time(), asset['id']))
+                        if 'thumbnail_path' in stored:
+                            # A racing upload may already have encoded its pair.
+                            # Persist cleanup before commit for restart recovery.
+                            db.executemany('INSERT OR IGNORE INTO cleanup_paths VALUES(?,0)', [(str(p),) for p in created])
+                        break
+                    if 'thumbnail_path' in stored:
+                        asset = dict(id=asset_id, owner_id=user['id'], name=(name or '上传素材')[:80], kind=kind, path=str(path), sha256=stored['sha256'], source='upload', is_demo=False, shared=shared, derived_from=None)
+                        self.insert_asset(db, asset)
+                        db.execute('UPDATE assets SET thumbnail_path=?,thumbnail_sha256=?,pixel_sha256=?,thumbnail_pixel_sha256=? WHERE id=?',
+                                   (str(stored['thumbnail_path']), stored['thumbnail_sha256'], stored['pixel_sha256'], stored['thumbnail_pixel_sha256'], asset_id))
+                        db.execute('DELETE FROM cleanup_paths WHERE path IN (?,?)', (str(path), str(stored['thumbnail_path'])))
+                        break
+                # A fast-path candidate became unusable before the transaction.
+                # Encode outside the database write lock, then recheck the scope.
+                stored = self.store_uploaded_image(data, path, created)
         except BaseException:
             self.cleanup_uncommitted_asset_files(created)
             raise
-        return self.asset_public(asset)
+        reused = asset['id'] != asset_id
+        if reused and 'thumbnail_path' in stored:
+            self.cleanup_uncommitted_asset_files(created)
+        return {**self.asset_public(asset), 'deduplicated': reused}
 
     @memory_bounded_operation
-    def store_uploaded_image(self, data, path, created=None):
+    def store_uploaded_image(self, data, path, created=None, scope=None):
         # Never take the database write lock while holding this allocation lock:
         # template generation and retention have their own transaction ordering.
         try:
@@ -513,7 +631,6 @@ class Service:
                     raise ValueError('Unsupported image')
                 if getattr(original, 'n_frames', 1) != 1:
                     raise ServiceError(422, '暂不支持动态图像，请上传单帧 PNG、JPEG 或 WebP')
-                self.check_space(path.parent, png_space(*original.size))
                 original.load()
                 if original.getexif().get(274, 1) == 1:
                     img = original.convert('RGBA')
@@ -529,13 +646,22 @@ class Service:
             raise ServiceError(422, '图片无法解码，或像素数量超过 4000 万') from None
         path.parent.mkdir(parents=True, exist_ok=True)
         try:
+            pixel_sha = self.image_pixel_digest(img)
+            if scope is not None:
+                with self.db.connect() as db:
+                    existing = self.matching_upload(db, *scope, pixel_sha)
+                if existing:
+                    return dict(sha256=existing['sha256'], pixel_sha256=pixel_sha)
+            self.check_space(path.parent, png_space(*img.size))
             _save_png(img, path, dpi=None, compress_level=3)
             source_sha = file_digest(path)
             preview = self.asset_preview_path(path, source_sha)
             if created is not None:
                 created.append(preview)
-            preview_sha = self.write_asset_preview(img, preview)
-            return dict(sha256=source_sha, thumbnail_path=preview, thumbnail_sha256=preview_sha)
+            fingerprints = {}
+            preview_sha = self.write_asset_preview(img, preview, fingerprints)
+            return dict(sha256=source_sha, thumbnail_path=preview, thumbnail_sha256=preview_sha, pixel_sha256=pixel_sha,
+                        thumbnail_pixel_sha256=fingerprints['thumbnail_pixel_sha256'])
         finally:
             img.close()
 
@@ -561,11 +687,40 @@ class Service:
             db.execute('INSERT INTO designs(id,owner_id,name,created_at,retained_at) VALUES(?,?,?,?,?)', (design_id, owner, (name or '未命名设计')[:80], now(), time.time()))
         return self.design(owner, design_id)
 
-    def owned_design(self, db, owner, design_id):
+    def owned_design(self, db, owner, design_id, *, include_deleted=False):
         row = db.execute('SELECT * FROM designs WHERE id=? AND owner_id=?', (design_id, owner)).fetchone()
-        if not row:
+        if not row or (row['deleted_at'] is not None and not include_deleted):
             raise ServiceError(404, '作品不存在或无权访问')
         return dict(row)
+
+    @staticmethod
+    def require_idle_design(db, design):
+        if design['active_job_id'] or db.execute("SELECT 1 FROM jobs WHERE design_id=? AND status NOT IN ('SUCCEEDED','FAILED') LIMIT 1", (design['id'],)).fetchone():
+            raise ServiceError(409, '作品正在处理，请等待当前任务结束')
+
+    @leased_operation
+    def delete_design(self, owner, design_id):
+        with self.db.transaction() as db:
+            design = self.owned_design(db, owner, design_id, include_deleted=True)
+            self.require_idle_design(db, design)
+            deleted_at = design['deleted_at']
+            if deleted_at is None:
+                deleted_at = time.time()
+                # Soft deletion starts a normal retention window; it does not
+                # erase any version, quota event, request or underlying file.
+                db.execute('UPDATE designs SET deleted_at=?,retained_at=?,revision=revision+1 WHERE id=?',
+                           (deleted_at, deleted_at, design_id))
+        return dict(ok=True, id=design_id, deleted_at=deleted_at)
+
+    @leased_operation
+    def restore_design(self, owner, design_id):
+        with self.db.transaction() as db:
+            design = self.owned_design(db, owner, design_id, include_deleted=True)
+            self.require_idle_design(db, design)
+            if design['deleted_at'] is not None:
+                db.execute('UPDATE designs SET deleted_at=NULL,retained_at=?,revision=revision+1 WHERE id=?',
+                           (time.time(), design_id))
+        return self.design(owner, design_id)
 
     def version_public(self, row):
         from .providers import workflow_editing
@@ -580,9 +735,9 @@ class Service:
         return {**{k: row[k] for k in ('id', 'design_id', 'kind', 'status', 'phase', 'attempt', 'provider', 'error', 'result_version_id', 'result_asset_id', 'created_at', 'updated_at')}, 'needs_clarification': bool(row['needs_clarification'])}
 
     @leased_operation
-    def design(self, owner, design_id):
+    def design(self, owner, design_id, *, include_deleted=False):
         with self.db.connect() as db:
-            result = self.owned_design(db, owner, design_id)
+            result = self.owned_design(db, owner, design_id, include_deleted=include_deleted)
             versions = db.execute('SELECT * FROM versions WHERE design_id=? ORDER BY sequence', (design_id,)).fetchall()
             active = db.execute('SELECT * FROM jobs WHERE id=?', (result['active_job_id'],)).fetchone()
         result.pop('owner_id')
@@ -591,10 +746,21 @@ class Service:
         return result
 
     @leased_operation
-    def designs(self, owner):
+    def designs(self, owner, deleted=False):
         with self.db.connect() as db:
-            ids = [r[0] for r in db.execute('SELECT id FROM designs WHERE owner_id=? ORDER BY created_at DESC', (owner,))]
-        return [self.design(owner, i) for i in ids]
+            # Resolve the list and versions in one read snapshot, so a delete
+            # or restore racing this request cannot turn the whole list into 404.
+            db.execute('BEGIN')
+            rows = db.execute('SELECT * FROM designs WHERE owner_id=? AND (deleted_at IS NOT NULL)=? ORDER BY created_at DESC', (owner, int(deleted))).fetchall()
+            result = []
+            for row in rows:
+                item = dict(row)
+                item.pop('owner_id')
+                item['versions'] = [self.version_public(v) for v in db.execute('SELECT * FROM versions WHERE design_id=? ORDER BY sequence', (row['id'],))]
+                active = db.execute('SELECT * FROM jobs WHERE id=?', (row['active_job_id'],)).fetchone()
+                item['active_job'] = self.job_public(active) if active else None
+                result.append(item)
+        return result
 
     @leased_operation
     def job(self, owner, job_id):
@@ -618,7 +784,7 @@ class Service:
         profile = profile or json.loads(db.execute('SELECT profile_json FROM output_profiles WHERE active=1').fetchone()[0])
         result = copy.deepcopy(base) if base else dict(schema_version=1, layout_engine=LAYOUT_ENGINE,
                     seed=secrets.randbelow(2**31), params=dict(scale=1.0, spacing=1.0, rotation=0.0, offset_x=0.0, offset_y=0.0, background_color=None))
-        default_tone = 'soft' if result.get('layout_engine') == LAYOUT_ENGINE else 'original'
+        default_tone = 'soft' if result.get('layout_engine') in QUALITY_LAYOUT_ENGINES else 'original'
         tone = selection.get('background_tone', result.get('background_tone', default_tone))
         if not isinstance(tone, str) or tone not in BACKGROUND_TONES:
             raise ServiceError(422, '底纹显示方式请选择柔和或原色')
@@ -626,13 +792,65 @@ class Service:
         density = selection.get('design_density', result.get('design_density', 'balanced'))
         if not isinstance(density, str) or density not in DESIGN_DENSITIES:
             raise ServiceError(422, '排列疏密请选择疏朗、均衡或丰富')
-        if result.get('layout_engine') == LAYOUT_ENGINE:
+        if result.get('layout_engine') in QUALITY_LAYOUT_ENGINES:
             result['design_density'] = density
         elif density != 'balanced':
             raise ServiceError(422, '旧版作品保留原排版方式；如需选择疏密，请新建作品')
         result.update(asset_refs=ids, background_ref=selection['background_id'], template_id=template['id'], template_version=template['version'], template_mode=template['mode'], template_rules=json.loads(template['rules_json']), output_profile=profile)
         result.pop('composite_ref', None)
         return result
+
+    def verified_draft_reference(self, code, mode, expected_sha=None):
+        """Only an explicitly chosen, matching installed example may leave the host."""
+        from hsd_tool.ribbon_examples import IMAGE_SPECS, MODE_GUIDES
+        if not isinstance(code, str) or code not in IMAGE_SPECS or not any(
+                guide['mode'] == mode and code in guide['example_ids'] for guide in MODE_GUIDES):
+            raise ServiceError(422, '参考案例与当前排版不匹配，请重新选择')
+        fixed_sha = IMAGE_SPECS[code][3]
+        if expected_sha is not None and expected_sha != fixed_sha:
+            raise ServiceError(409, '参考案例版本已变化，请重新选择后提交')
+        try:
+            value = self.example_resolver(code) if self.example_resolver else None
+        except Exception:
+            value = None
+        if not isinstance(value, bytes) or len(value) != IMAGE_SPECS[code][2] or digest(value) != fixed_sha:
+            raise ServiceError(422, '参考案例暂不可用或校验失败，请重新选择')
+        return value
+
+    def prepare_ai_draft(self, db, owner, payload, settings):
+        assisted = payload.get('ai_assisted', False)
+        code = payload.get('reference_code')
+        if type(assisted) is not bool or (code is not None and not isinstance(code, str)):
+            raise ServiceError(422, 'AI 搭配及参考案例选项格式无效')
+        if code is not None and not assisted:
+            raise ServiceError(422, '选择参考案例前请启用 AI 搭配')
+        if not assisted:
+            return
+        available = settings.provider == 'deepseek_seedream' and settings.ai_ready
+        fixture = settings.provider == 'test' and self.settings.auth_mode == 'demo' and settings.enabled
+        if not (available or fixture):
+            raise ServiceError(503, 'AI 搭配尚未启用或真实服务未就绪，请联系管理员')
+        snapshot = payload['snapshot']
+        if code is not None:
+            payload['reference_sha256'] = digest(self.verified_draft_reference(code, snapshot['template_mode']))
+        def identity(asset_id):
+            row = self.accessible_asset(db, asset_id, owner)
+            return dict(id=asset_id, sha256=row['sha256'])
+        payload['ai_draft_inputs'] = dict(patterns=[identity(a) for a in snapshot['asset_refs']],
+                                        background=identity(snapshot['background_ref']))
+
+    def verified_ai_draft_sources(self, owner, snapshot, inputs):
+        patterns, background = inputs.get('patterns'), inputs.get('background')
+        if not isinstance(patterns, list) or [item.get('id') for item in patterns if isinstance(item, dict)] != snapshot['asset_refs'] or not isinstance(background, dict) or background.get('id') != snapshot['background_ref']:
+            raise ServiceError(409, 'AI 首稿的素材绑定无效，未调用模型')
+        paths = {}
+        with self.db.connect() as db:
+            for expected in [*patterns, background]:
+                actual = self.accessible_asset(db, expected['id'], owner)
+                if not expected.get('sha256') or actual['sha256'] != expected['sha256']:
+                    raise ServiceError(409, 'AI 首稿的原素材已变化，未保存新版本')
+                paths[expected['id']] = self.verified_file(actual['path'], expected['sha256'], 'AI 首稿原素材')
+        return [paths[item['id']] for item in patterns], paths[background['id']]
 
     @leased_operation
     def submit(self, owner, kind, payload, design_id=None):
@@ -663,6 +881,7 @@ class Service:
                     if design['current_version_id']:
                         raise ServiceError(409, '已有首稿，更改配置请使用精修')
                     payload['snapshot'] = self.selection_snapshot(db, owner, payload)
+                    self.prepare_ai_draft(db, owner, payload, settings)
                 else:
                     base_id = payload.get('base_version_id')
                     if not base_id or base_id != design['current_version_id']:
@@ -871,7 +1090,7 @@ class Service:
         from .imaging import render, validate_image
         from .providers import get_provider, ClarificationNeeded, workflow_editing
         payload = json.loads(job['payload_json'])
-        needs_provider = job['kind'] == 'background' or (job['kind'] == 'refine' and not (payload.get('selection') and payload.get('prompt', '').strip() in ('应用所选配置', '应用新的素材与排版')))
+        needs_provider = job['kind'] == 'background' or (job['kind'] == 'generate' and payload.get('ai_assisted') is True) or (job['kind'] == 'refine' and not (payload.get('selection') and payload.get('prompt', '').strip() in ('应用所选配置', '应用新的素材与排版')))
         if needs_provider and self.settings.auth_mode == 'hsd' and job['provider'] == 'test':
             raise ServiceError(503, '尚未配置真实 AI 服务，请联系管理员')
         provider = None
@@ -906,9 +1125,42 @@ class Service:
         # Check immutable inputs before a paid planner/editor sees them. Recheck
         # when each input is opened and at commit; an old ID cannot silently
         # acquire different pixels while retaining its version provenance.
-        for asset_id in self.snapshot_asset_ids(snapshot):
-            resolve(asset_id)
+        if not (job['kind'] == 'generate' and payload.get('ai_assisted') is True):
+            for asset_id in self.snapshot_asset_ids(snapshot):
+                resolve(asset_id)
         prompt, render_kind = '', 'layered'
+        if job['kind'] == 'generate' and payload.get('ai_assisted') is True:
+            inputs = payload.get('ai_draft_inputs') or {}
+            # Every source and its immutable digest must pass before the first
+            # image request; a bad later input cannot waste an earlier call.
+            pattern_paths, background_path = self.verified_ai_draft_sources(job['owner_id'], snapshot, inputs)
+            patterns, background = inputs['patterns'], inputs['background']
+            original_bg = background['id']
+            code = payload.get('reference_code')
+            reference_bytes = None
+            if code is not None:
+                if not isinstance(payload.get('reference_sha256'), str):
+                    raise ServiceError(409, 'AI 首稿的参考案例绑定无效，未调用模型')
+                reference_bytes = self.verified_draft_reference(code, snapshot['template_mode'], payload['reference_sha256'])
+            self.phase(job, '正在生成搭配底纹与辅助装饰，原图案保持不变')
+            output = directory / 'draft-background.png'
+            self.call_provider(job, 'design_background', lambda: provider.generate_draft_background(
+                pattern_paths, background_path, reference_bytes, output,
+                mode=snapshot['template_mode'], density=snapshot.get('design_density', 'balanced'), prompt=''))
+            with Image.open(output) as native:
+                if native.size != (2048, 2048) or native.format != 'PNG' or native.mode not in ('RGB', 'RGBA'):
+                    raise ServiceError(422, '首稿搭配底纹未达到原生 2048×2048 要求，未保存新版本')
+                native.load()
+                if native.mode == 'RGBA':
+                    with native.getchannel('A') as alpha:
+                        if alpha.getbbox() is None:
+                            raise ServiceError(422, '首稿搭配底纹没有可见内容，未保存新版本')
+            snapshot['background_ref'] = derived(output, 'background',
+                'AI 首稿搭配底纹' if provider.name != 'test' else '测试替身首稿搭配底纹', original_bg)
+            snapshot['ai_draft'] = dict(operation='design_background', provider=provider.name,
+                original_background_ref=original_bg, reference_code=code,
+                reference_sha256=payload.get('reference_sha256'), input_assets=[*patterns, background],
+                full_canvas_redraw=False, redraws_original_patterns=False, is_demo=provider.name == 'test')
         if job['kind'] == 'refine':
             prompt = payload['prompt']
             self.phase(job, '正在理解修改要求')
@@ -1021,6 +1273,11 @@ class Service:
 
     def complete_job(self, job, artifact):
         from .imaging import validate_image
+        payload = json.loads(job['payload_json'])
+        if job['kind'] == 'generate' and payload.get('ai_assisted') is True:
+            # The original background was replaced in the rendered snapshot,
+            # so retain and recheck its provenance explicitly at commit too.
+            self.verified_ai_draft_sources(job['owner_id'], payload['snapshot'], payload['ai_draft_inputs'])
         if job['kind'] != 'background':
             master = self.safe_path(artifact['master_path'])
             if digest(master.read_bytes()) != artifact['master_sha256']:
@@ -1089,7 +1346,7 @@ class Service:
                 manifests.sort(key=lambda p: int(p.parent.name), reverse=True)
                 if manifests:
                     artifact = json.loads(manifests[0].read_text(encoding='utf-8'))
-                elif job['provider'] != 'test' and job['kind'] != 'generate':
+                elif (job['provider'] != 'test' and job['kind'] != 'generate') or (job['kind'] == 'generate' and json.loads(job['payload_json']).get('ai_assisted') is True):
                     raise ProviderError('上次模型调用因进程中断结果未知，未自动重复调用；原版本与额度保留，请核对后重新提交')
             if artifact is None:
                 artifact = self.build_artifact(job, directory)

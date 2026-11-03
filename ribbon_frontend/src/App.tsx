@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -15,6 +16,7 @@ import {
   type Asset,
   type Config,
   type Design,
+  type GenerateRequest,
   type Job,
   type Selection,
   type Template,
@@ -257,7 +259,7 @@ function recommendedSelection(
 
 function restoreSelection(value: Selection, version?: Version): Selection {
   const snapshot = version?.snapshot;
-  const modern = !version || snapshot?.layout_engine === "design-rhythm-v1";
+  const modern = !version || ["design-rhythm-v1", "design-rhythm-v2"].includes(snapshot?.layout_engine || "");
   const next: Selection = {
     ...value,
     background_tone: value.background_tone ?? snapshot?.background_tone ?? (modern ? "soft" : "original"),
@@ -339,7 +341,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
       type: "error" | "success" | "info";
     } | null>(null),
     [modal, setModal] = useState<
-      "pattern" | "background" | "designs" | "admin" | null
+      "pattern" | "background" | "designs" | "layouts" | "admin" | null
     >(null),
     [pending, setPending] = useState<Pending | null>(() =>
       loadLocal(prefix + "pending", null),
@@ -349,7 +351,16 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
     [uploadProgress, setUploadProgress] = useState<{ completed: number; total: number } | null>(null),
     [sharedUpload, setSharedUpload] = useState(false);
   const [examplesView, setExamplesView] = useState<{ mode: string | null; name: string } | null>(null);
-  const [moreLayoutsOpen, setMoreLayoutsOpen] = useState(false);
+  const [libraryPage, setLibraryPage] = useState(0);
+  const [designTarget, setDesignTarget] = useState<{ id: string; name: string; loading: boolean } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Design | null>(null);
+  const [deletedDesigns, setDeletedDesigns] = useState<Design[]>([]);
+  const [showDeleted, setShowDeleted] = useState(false);
+  const [deletedLoading, setDeletedLoading] = useState(false);
+  // The default follows the server capability. An explicit opt-out lasts for
+  // this draft only; switching works clears both the choice and its reference.
+  const [aiDraftChoice, setAiDraftChoice] = useState<boolean | null>(null);
+  const [aiDraftReference, setAiDraftReference] = useState<{ code: string; mode: string } | null>(null);
   const examplesCache = useRef<LayoutExamplesCatalog | null>(null);
   useEffect(() => {
     if (!active || view !== "ribbon") {
@@ -364,12 +375,17 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
     uploadAbort = useRef<AbortController | null>(null),
     mounted = useRef(true),
     lastVersion = useRef<string | null>(null),
-    designRef = useRef<Design | null>(null);
+    designRef = useRef<Design | null>(null),
+    designLoadSequence = useRef(0),
+    designAbort = useRef<AbortController | null>(null),
+    deletedAbort = useRef<AbortController | null>(null);
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
       uploadAbort.current?.abort();
+      designAbort.current?.abort();
+      deletedAbort.current?.abort();
     };
   }, []);
   const isAdmin = user.role === "admin",
@@ -379,7 +395,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
   const remaining = Math.max(0, 2 - (design?.successful_refinement_count || 0));
   const processing = !!design?.active_job_id || running(job),
     backgroundProcessing = running(backgroundJob),
-    locked = busy || processing || !!pending || uploading;
+    locked = busy || processing || !!pending || uploading || !!designTarget;
   const isHistory = !!selected && selected.id !== design?.current_version_id;
   const shownProfile = selected?.snapshot?.output_profile;
   const sizeLabel =
@@ -388,6 +404,12 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
         `${((shownProfile.width / shownProfile.dpi) * 2.54).toFixed(1)}×` +
         `${((shownProfile.height / shownProfile.dpi) * 2.54).toFixed(1)} cm`
       : "";
+  const assetIndex = useMemo(() => new Map(assets.map(a => [a.id, a])), [assets]);
+  const catalog = useMemo(() => {
+    const result: Record<Asset["kind"], { asset: Asset; query: string }[]> = { pattern: [], background: [] };
+    for (const asset of assets) result[asset.kind].push({ asset, query: asset.name.toLocaleLowerCase() });
+    return result;
+  }, [assets]);
   const template = templates.find((t) => t.id === selection.template_id);
   const layoutIssue = layoutSelectionIssue(template?.mode, selection.asset_ids.length);
   const ready =
@@ -404,9 +426,9 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
       (current.snapshot.background_tone || "original") !== (selection.background_tone || "original") ||
       (current.snapshot.design_density || "balanced") !== (selection.design_density || "balanced"));
   const selectedPatterns = selection.asset_ids
-    .map((id) => assets.find((a) => a.id === id))
+    .map((id) => assetIndex.get(id))
     .filter(Boolean) as Asset[];
-  const background = assets.find((a) => a.id === selection.background_id);
+  const background = assetIndex.get(selection.background_id);
   const visibleTemplates = templates.filter((t) => t.enabled || t.id === selection.template_id);
   const basicTemplates = visibleTemplates.filter((t) => basicLayoutModes.has(t.mode));
   const moreTemplates = visibleTemplates.filter((t) => !basicLayoutModes.has(t.mode));
@@ -414,6 +436,10 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
   // Local/demo fixtures do not hold real model credentials. They remain
   // explicitly marked test operations; employee services must never use them.
   const aiAvailable = testMode ? config?.auth_mode !== "hsd" : config?.ai_ready === true;
+  const aiDraftAvailable = config?.provider === "deepseek_seedream" && config?.ai_ready === true && config?.ai_draft_available === true;
+  const isFirstDraft = !current && !design?.versions?.length;
+  const aiDraftEnabled = isFirstDraft && aiDraftAvailable && aiDraftChoice !== false;
+  const draftReference = aiDraftEnabled && aiDraftReference?.mode === template?.mode ? aiDraftReference : null;
   // A changed selection can be applied by the compositor without a model.
   // Keep this path available when an administrator has disabled AI.
   const selectionOnly = changed && (!prompt.trim() || ["应用所选配置", "应用新的素材与排版"].includes(prompt.trim()));
@@ -437,10 +463,6 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
     ...(canPlanOperation("edit_asset") ? ["给第一个图案添加星光"] : []),
     ...(canPlanOperation("edit_composite") ? ["给画面添加星光"] : []),
   ];
-  useEffect(() => {
-    if (template && !basicLayoutModes.has(template.mode)) setMoreLayoutsOpen(true);
-  }, [template?.id, template?.mode]);
-
   function templateOption(t: Template) {
     return (
       <div key={t.id} className="template-option">
@@ -450,20 +472,21 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
           aria-pressed={selection.template_id === t.id}
           onClick={() => updateSelection({ ...selection, template_id: t.id })}
         >
-          <img src={t.thumbnail_url} alt={`${t.name}样式图`} />
+          <img src={t.thumbnail_url} alt={`${t.name}样式图`} loading="lazy" decoding="async" />
           <span>{t.name}{selection.template_id === t.id && <Icon name="check" size={14} />}</span>
         </button>
         <button
           type="button"
           className="template-example-button"
           aria-label={`查看${t.name}案例`}
-          onClick={() => setExamplesView({ mode: t.mode, name: t.name })}
+          onClick={() => { setModal(null); setExamplesView({ mode: t.mode, name: t.name }); }}
         >查看案例</button>
       </div>
     );
   }
 
   function updateSelection(value: Selection) {
+    if (value.template_id !== selection.template_id) setAiDraftReference(null);
     setSelection(value);
     saveLocal(prefix + "selection", {
       design_id: designRef.current?.id || null,
@@ -479,6 +502,9 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
     setDesigns((prev) => [d, ...prev.filter((p) => p.id !== d.id)]);
     if (force || changedVersion) {
       const v = d.versions?.find((x) => x.id === d.current_version_id);
+      // Show both ends on the first view of a work or newly saved version.
+      // Same-version polling must preserve the employee's zoom choice.
+      setPreviewZoom(v && ["ends", "ends_open"].includes(v.snapshot.template_mode) ? "fit" : "detail");
       const saved = loadLocal<{
         design_id: string;
         base_version_id: string | null;
@@ -495,7 +521,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                 background_id: v.snapshot.background_ref,
                 template_id: v.snapshot.template_id,
                 background_tone: v.snapshot.background_tone || "original",
-                ...(v.snapshot.layout_engine === "design-rhythm-v1" ? {design_density: v.snapshot.design_density || "balanced"} : {}),
+                ...(["design-rhythm-v1", "design-rhythm-v2"].includes(v.snapshot.layout_engine || "") ? {design_density: v.snapshot.design_density || "balanced"} : {}),
               }
             : emptySelection;
       setSelection(restoreSelection(next, v));
@@ -571,6 +597,11 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
 
   useEffect(() => {
     if (!active || (!design?.id && !backgroundJob?.id)) return;
+    const controller = new AbortController();
+    const sequence = designLoadSequence.current;
+    const targetId = design?.id;
+    const stale = () => cancelled || !mounted.current || sequence !== designLoadSequence.current ||
+      (targetId !== undefined && designRef.current?.id !== targetId);
     let cancelled = false,
       inflight = false;
     const tick = async () => {
@@ -578,14 +609,14 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
       inflight = true;
       try {
         if (design?.id) {
-          const d = await api<Design>(`/designs/${design.id}`);
-          if (cancelled) return;
+          const d = await api<Design>(`/designs/${design.id}`, { signal: controller.signal });
+          if (stale()) return;
           const previous = designRef.current;
           applyDesign(d);
           const id = d.active_job_id || previous?.active_job_id || job?.id;
           if (id) {
-            const updated = await api<Job>(`/jobs/${id}`);
-            if (cancelled) return;
+            const updated = await api<Job>(`/jobs/${id}`, { signal: controller.signal });
+            if (stale()) return;
             setJob(updated);
             if (updated.status === "FAILED" && job?.status !== "FAILED")
               setNotice({
@@ -597,12 +628,12 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
           }
         }
         if (backgroundJob && running(backgroundJob)) {
-          const updated = await api<Job>(`/jobs/${backgroundJob.id}`);
-          if (cancelled) return;
+          const updated = await api<Job>(`/jobs/${backgroundJob.id}`, { signal: controller.signal });
+          if (stale()) return;
           setBackgroundJob(updated);
           if (updated.status === "SUCCEEDED" && updated.result_asset_id) {
-            const a = await api<Asset[]>("/assets");
-            if (cancelled) return;
+            const a = await api<Asset[]>("/assets", { signal: controller.signal });
+            if (stale()) return;
             setAssets(a);
             const target = loadLocal<{ design_id: string | null } | null>(
               prefix + "backgroundTarget",
@@ -639,7 +670,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
         }
         setOffline(false);
       } catch (e) {
-        if (!cancelled) {
+        if (!stale()) {
           setOffline(true);
           if (e instanceof ApiError && e.status === 401) onLogout();
         }
@@ -655,6 +686,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
     window.addEventListener("focus", tick);
     return () => {
       cancelled = true;
+      controller.abort();
       clearInterval(timer);
       document.removeEventListener("visibilitychange", tick);
       window.removeEventListener("focus", tick);
@@ -672,9 +704,12 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
   // Refresh derived assets after a content edit; the version snapshot owns the selection.
   useEffect(() => {
     if (!design?.current_version_id) return;
-    void api<Asset[]>("/assets")
-      .then(setAssets)
-      .catch(() => setOffline(true));
+    const controller = new AbortController();
+    const sequence = designLoadSequence.current;
+    void api<Asset[]>("/assets", { signal: controller.signal })
+      .then(a => { if (!controller.signal.aborted && mounted.current && sequence === designLoadSequence.current) setAssets(a); })
+      .catch(() => { if (!controller.signal.aborted && sequence === designLoadSequence.current) setOffline(true); });
+    return () => controller.abort();
   }, [design?.current_version_id]);
 
   // A completed background job can be recovered even after the browser was closed.
@@ -785,7 +820,9 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
       }
       await executePending({
         path: `/designs/${d.id}/generate`,
-        body: { idempotency_key: crypto.randomUUID(), ...selection },
+        body: { idempotency_key: crypto.randomUUID(), ...selection,
+          ai_assisted: aiDraftEnabled, reference_code: draftReference?.code || null,
+        } satisfies GenerateRequest,
         kind: "design",
         designId: d.id,
       });
@@ -832,6 +869,11 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
   }
   async function newDesign() {
     if (busy || pending || backgroundProcessing || uploading) return;
+    ++designLoadSequence.current;
+    designAbort.current?.abort();
+    setDesignTarget(null);
+    setAiDraftChoice(null);
+    setAiDraftReference(null);
     await action(async () => {
       const d = await post<Design>("/designs", {
         name: `丝带设计 ${designs.length + 1}`,
@@ -847,13 +889,91 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
   }
   async function switchDesign(id: string) {
     if (busy || pending || backgroundProcessing || uploading) return;
-    await action(async () => {
-      const d = await api<Design>(`/designs/${id}`);
+    const sequence = ++designLoadSequence.current;
+    designAbort.current?.abort();
+    const controller = new AbortController();
+    designAbort.current = controller;
+    // Clear both the render and synchronous references before requesting the
+    // target. A previous preview, polling response or download is never its UI.
+    const name = designs.find(d => d.id === id)?.name || "所选作品";
+    setDesignTarget({ id, name, loading: true });
+    designRef.current = null;
+    setDesign(null);
+    setSelectedVersionId(null);
+    setSelection(emptySelection);
+    lastVersion.current = null;
+    setJob(null);
+    setPrompt("");
+    setAiDraftChoice(null);
+    setAiDraftReference(null);
+    setNotice(null);
+    setModal(null);
+    try {
+      const d = await api<Design>(`/designs/${id}`, { signal: controller.signal });
+      if (!mounted.current || sequence !== designLoadSequence.current || controller.signal.aborted) return;
       applyDesign(d, true);
+      setDesignTarget(null);
       setJob(d.active_job || null);
-      setPrompt("");
-      setNotice(null);
-      setModal(null);
+      setOffline(false);
+    } catch (e) {
+      if (!mounted.current || sequence !== designLoadSequence.current || controller.signal.aborted) return;
+      setDesignTarget({ id, name, loading: false });
+      setNotice({ text: message(e), type: "error" });
+      if (e instanceof ApiError && e.status === 401) onLogout();
+    }
+  }
+  async function loadDeletedDesigns() {
+    deletedAbort.current?.abort();
+    const controller = new AbortController();
+    deletedAbort.current = controller;
+    setDeletedLoading(true);
+    try {
+      const list = await api<Design[]>("/designs?deleted=true", { signal: controller.signal });
+      if (!controller.signal.aborted && mounted.current) setDeletedDesigns(list);
+    } catch (e) {
+      if (!controller.signal.aborted && mounted.current) setNotice({ text: message(e), type: "error" });
+    } finally {
+      if (!controller.signal.aborted && mounted.current) setDeletedLoading(false);
+    }
+  }
+  async function deleteDesign(d: Design) {
+    if (busy || pending || uploading || backgroundProcessing || designTarget?.loading || d.active_job_id) return;
+    await action(async () => {
+      await api(`/designs/${d.id}`, { method: "DELETE" });
+      if (!mounted.current) return;
+      deletedAbort.current?.abort();
+      setDeletedLoading(false);
+      setDesigns(previous => previous.filter(item => item.id !== d.id));
+      setDeletedDesigns(previous => [d, ...previous.filter(item => item.id !== d.id)]);
+      if (designRef.current?.id === d.id || designTarget?.id === d.id) {
+        ++designLoadSequence.current;
+        designAbort.current?.abort();
+        designRef.current = null;
+        setDesign(null);
+        setDesignTarget(null);
+        setSelectedVersionId(null);
+        lastVersion.current = null;
+        setJob(null);
+        setPrompt("");
+        setAiDraftChoice(null);
+        setAiDraftReference(null);
+        setSelection(recommendedSelection(assets, templates));
+        saveLocal(prefix + "design", null);
+        saveLocal(prefix + "selection", null);
+      }
+      setDeleteTarget(null);
+      setNotice({ text: `作品已删除，可在“已删除作品”中恢复；保留 ${config?.retention_hours ?? 50} 小时，累计精修次数不变。`, type: "success" });
+    });
+  }
+  async function restoreDesign(d: Design) {
+    deletedAbort.current?.abort();
+    setDeletedLoading(false);
+    await action(async () => {
+      const restored = await post<Design>(`/designs/${d.id}/restore`, {});
+      if (!mounted.current) return;
+      setDesigns(previous => [restored, ...previous.filter(item => item.id !== d.id)]);
+      setDeletedDesigns(previous => previous.filter(item => item.id !== d.id));
+      setNotice({ text: "作品已恢复，版本与累计精修次数保持不变。", type: "success" });
     });
   }
   async function generateBackground() {
@@ -970,7 +1090,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
       });
     });
   }
-  const status = processing
+  const status = designTarget ? designTarget.loading ? "正在打开作品" : "作品打开失败" : processing
     ? phaseNames[job?.phase || ""] ||
       job?.phase ||
       phaseNames[job?.status || ""] ||
@@ -982,11 +1102,16 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
       : ready
         ? "可以生成首稿"
         : "等待选择素材";
-  const library = assets.filter(
-    (a) =>
-      a.kind === modal &&
-      a.name.toLocaleLowerCase().includes(search.toLocaleLowerCase()),
-  );
+  const library = useMemo(() => {
+    if (modal !== "pattern" && modal !== "background") return [];
+    const query = search.toLocaleLowerCase().trim();
+    return query ? catalog[modal].filter(item => item.query.includes(query)).map(item => item.asset)
+      : catalog[modal].map(item => item.asset);
+  }, [catalog, modal, search]);
+  const pageCount = Math.max(1, Math.ceil(library.length / 36));
+  const shownPage = Math.min(libraryPage, pageCount - 1);
+  const libraryItems = library.slice(shownPage * 36, (shownPage + 1) * 36);
+  useEffect(() => { setLibraryPage(0); }, [modal, search]);
 
   return (
     <div className="app-shell">
@@ -1173,19 +1298,22 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                 {moreTemplates.length > 0 && (
                   <div className="more-layouts">
                     <button type="button" className="more-layouts-toggle"
-                      aria-expanded={moreLayoutsOpen} aria-controls="ribbon-more-layouts"
-                      onClick={() => setMoreLayoutsOpen((open) => !open)}>
+                      aria-expanded={modal === "layouts"} aria-haspopup="dialog"
+                      onClick={() => setModal("layouts")}>
                       <span>更多排法（{moreTemplates.length}）</span>
-                      <span aria-hidden="true">{moreLayoutsOpen ? "▾" : "▸"}</span>
+                      <span aria-hidden="true">›</span>
                     </button>
-                    {moreLayoutsOpen && <div className="template-grid" id="ribbon-more-layouts">{moreTemplates.map(templateOption)}</div>}
                   </div>
                 )}
+                {template && !basicLayoutModes.has(template.mode) && <div className="chosen-layout">
+                  <strong>已选：{template.name}</strong>
+                  <button type="button" className="template-example-button" onClick={() => setExamplesView({ mode: template.mode, name: template.name })}>查看{template.name}案例</button>
+                </div>}
                 {template && layoutHints[template.mode] && (
                   <p className="layout-selection-help">{layoutHints[template.mode]}</p>
                 )}
                 {layoutIssue && <p className="layout-selection-issue" id="ribbon-layout-issue" role="alert">{layoutIssue}</p>}
-                {(!current || current.snapshot.layout_engine === "design-rhythm-v1") && (
+                {(!current || ["design-rhythm-v1", "design-rhythm-v2"].includes(current.snapshot.layout_engine || "")) && (
                   <label className="density-control">画面密度
                     <select aria-label="画面密度" value={selection.design_density || "balanced"} disabled={locked}
                       onChange={(event) => updateSelection({ ...selection, design_density: event.target.value as Selection["design_density"] })}>
@@ -1283,13 +1411,71 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                 <div className="panel-heading">
                   <div>
                     <span className="step-label">02 / PREVIEW</span>
-                    <h2>{design?.name || "设计预览"}</h2>
+                    <h2>{designTarget?.name || design?.name || "设计预览"}</h2>
                   </div>
                   <span className={`state-pill ${processing ? "working" : ""}`}>
                     <span className="status-dot" />
                     {status}
                   </span>
                 </div>
+                {selected ? (
+                    <div className="result-actions">
+                      <button
+                        className="secondary"
+                        disabled={locked || !current?.parent_version_id}
+                        onClick={() => void rollback()}
+                      >
+                        <Icon name="back" size={17} />
+                        回退上一版
+                      </button>
+                      <a
+                        className="primary"
+                        href={selected.download_url}
+                        download
+                      >
+                        <Icon name="download" size={17} />
+                        {isHistory ? "下载所选版本" : "下载当前图"}
+                      </a>
+                    </div>
+                ) : (
+                  <div className="generate-area">
+                    <button
+                      className="primary full"
+                      disabled={!ready || locked || backgroundProcessing}
+                      aria-describedby={layoutIssue ? "ribbon-layout-issue" : undefined}
+                      onClick={() => void generate()}
+                    >
+                      {processing ? (
+                        <span className="spinner tiny" />
+                      ) : (
+                        <Icon name="spark" />
+                      )}
+                      {processing ? "正在生成首稿…" : "生成首稿"}
+                      <Icon name="arrow" size={16} />
+                    </button>
+                    {isFirstDraft && !designTarget && aiDraftAvailable && <div className="ai-draft-options">
+                      <label>
+                        <input type="checkbox" checked={aiDraftEnabled} disabled={locked || backgroundProcessing}
+                          onChange={event => { setAiDraftChoice(event.target.checked); if (!event.target.checked) setAiDraftReference(null); }} />
+                        AI搭配底纹与装饰
+                      </label>
+                      {aiDraftEnabled ? <>
+                        <p>原人物文字不重画；所选案例会发送给Seedream。未选案例则不发送案例图。</p>
+                        {draftReference ? <div className="ai-draft-reference"><span>参考案例：<strong>{draftReference.code}</strong></span><button type="button" disabled={locked} onClick={() => setAiDraftReference(null)}>取消案例参考</button></div> :
+                          <button type="button" className="ai-reference-picker" disabled={locked || !template} onClick={() => setExamplesView({ mode: template?.mode || null, name: template?.name || "全部排版案例" })}>选择案例参考</button>}
+                      </> : <p>按原素材直接排版，首稿不调用AI搭配。</p>}
+                    </div>}
+                    <small>
+                      {!selection.asset_ids.length
+                        ? "请先选择至少一个图案"
+                        : !selection.template_id
+                          ? "请选择一种排版模式"
+                          : !selection.background_id
+                            ? "请选择或生成底图"
+                            : layoutIssue || "素材已就绪 · 首稿不占用精修次数"}
+                    </small>
+                  </div>
+                )}
                 <div className={`preview-stage ${!selected ? "is-empty" : "is-filled"}`}>
                   <div className="stage-topline">
                     <span>
@@ -1305,10 +1491,16 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                       </span>
                     )}
                   </div>
-                  {selected ? (
+                  {designTarget ? (
+                    <div className="empty-canvas design-loading" role="status" aria-live="polite">
+                      {designTarget.loading ? <><span className="spinner" /><h3>正在打开作品…</h3><p>正在读取所选作品的版本和素材。</p></> : <><h3>作品打开失败</h3><p>请重试，或从“我的作品”选择其他作品。</p><button className="secondary" onClick={() => void switchDesign(designTarget.id)}>重试打开作品</button></>}
+                    </div>
+                  ) : selected ? (
                     <>
                       <div className={`ribbon-display ${previewZoom}`}>
                         <img
+                          key={`${design?.id}:${selected.id}:${previewZoom}`}
+                          decoding="async"
                           src={
                             previewZoom === "detail"
                               ? selected.view_url || selected.preview_url
@@ -1397,24 +1589,6 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                         {selected.provider === "test" ? "测试模式结果" : ""}
                       </span>
                     </div>
-                    <div className="result-actions">
-                      <button
-                        className="secondary"
-                        disabled={locked || !current?.parent_version_id}
-                        onClick={() => void rollback()}
-                      >
-                        <Icon name="back" size={17} />
-                        回退上一版
-                      </button>
-                      <a
-                        className="primary"
-                        href={selected.download_url}
-                        download
-                      >
-                        <Icon name="download" size={17} />
-                        {isHistory ? "下载所选版本" : "下载当前图"}
-                      </a>
-                    </div>
                     {isHistory && (
                       <div className="history-hint">
                         历史预览不改变当前版本。
@@ -1429,31 +1603,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                     )}
                   </>
                 ) : (
-                  <div className="generate-area">
-                    <button
-                      className="primary full"
-                      disabled={!ready || locked || backgroundProcessing}
-                      aria-describedby={layoutIssue ? "ribbon-layout-issue" : undefined}
-                      onClick={() => void generate()}
-                    >
-                      {processing ? (
-                        <span className="spinner tiny" />
-                      ) : (
-                        <Icon name="spark" />
-                      )}
-                      {processing ? "正在生成首稿…" : "生成首稿"}
-                      <Icon name="arrow" size={16} />
-                    </button>
-                    <small>
-                      {!selection.asset_ids.length
-                        ? "请先选择至少一个图案"
-                        : !selection.template_id
-                          ? "请选择一种排版模式"
-                          : !selection.background_id
-                            ? "请选择或生成底图"
-                            : layoutIssue || "素材已就绪 · 首稿不占用精修次数"}
-                    </small>
-                  </div>
+                  null
                 )}
               </div>
               <div className="panel history-panel">
@@ -1639,6 +1789,16 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
           <span>个人作品与素材保留 {config?.retention_hours ?? 50} 小时，请及时下载。</span>
         </footer>
       </main>
+      {modal === "layouts" && (
+        <Modal title="选择排版模式" onClose={() => setModal(null)} wide className="layout-picker-modal">
+          <p className="muted library-note">选择排法后点击完成。案例只作排版参考，正式规格由内部配置决定。</p>
+          <div className="layout-picker-grid template-grid">{visibleTemplates.map(templateOption)}</div>
+          <div className="modal-footer">
+            <span>已选：{template?.name || "尚未选择排版"}</span>
+            <button className="primary" onClick={() => setModal(null)}>完成选择<Icon name="check" size={16} /></button>
+          </div>
+        </Modal>
+      )}
       {examplesView && active && view === "ribbon" && (
         <Modal
           title={examplesView.mode ? `${examplesView.name} · 案例` : "全部排版案例"}
@@ -1651,6 +1811,12 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
             cache={examplesCache}
             onUnauthorized={onLogout}
             onViewAll={() => setExamplesView({ mode: null, name: "全部排版案例" })}
+            referenceMode={template?.mode}
+            onChooseReference={aiDraftEnabled && !locked && !backgroundProcessing ? example => {
+              if (!template || !example.available || example.reference_only || !example.mode_tags.includes(template.mode)) return;
+              setAiDraftReference({ code: example.code, mode: template.mode });
+              setExamplesView(null);
+            } : undefined}
           />
         </Modal>
       )}
@@ -1659,6 +1825,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
           title={modal === "pattern" ? "图案素材库" : "底图素材库"}
           onClose={() => setModal(null)}
           wide
+          className="asset-library-modal"
         >
           <div className="library-toolbar">
             <input
@@ -1701,7 +1868,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
             标记“演示”的素材仅供联调。
           </p>
           <div className="library-grid">
-            {library.map((a) => {
+            {libraryItems.map((a) => {
               const picked =
                 modal === "pattern"
                   ? selection.asset_ids.includes(a.id)
@@ -1752,6 +1919,11 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
               没有找到素材，可上传新的图案或底图。
             </div>
           )}
+          {library.length > 36 && <nav className="library-pagination" aria-label="素材分页">
+            <button className="secondary small" disabled={shownPage === 0} onClick={() => setLibraryPage(shownPage - 1)}>上一页</button>
+            <span role="status">第 {shownPage + 1} / {pageCount} 页 · 共 {library.length} 项</span>
+            <button className="secondary small" disabled={shownPage + 1 >= pageCount} onClick={() => setLibraryPage(shownPage + 1)}>下一页</button>
+          </nav>}
           <div className="modal-footer">
             <span>
               {modal === "pattern"
@@ -1768,16 +1940,25 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
         </Modal>
       )}
       {modal === "designs" && (
-        <Modal title="我的作品" onClose={() => setModal(null)} wide>
+        <Modal title="我的作品" onClose={() => { setModal(null); setDeleteTarget(null); }} wide className="design-library-modal">
+          <div className="design-list-tabs" role="group" aria-label="作品列表">
+            <button className={!showDeleted ? "selected" : ""} onClick={() => { setShowDeleted(false); setDeleteTarget(null); }}>我的作品</button>
+            <button className={showDeleted ? "selected" : ""} onClick={() => { setShowDeleted(true); setDeleteTarget(null); void loadDeletedDesigns(); }}>已删除作品</button>
+          </div>
+          {deleteTarget && <div className="delete-design-confirm" role="alert">
+            <p>删除“{deleteTarget.name}”？删除后保留 {config?.retention_hours ?? 50} 小时，可恢复；已有下载仍绑定原版本。</p>
+            <div><button className="secondary small" disabled={busy} onClick={() => setDeleteTarget(null)}>取消</button><button className="danger-button" disabled={busy} onClick={() => void deleteDesign(deleteTarget)}>确认删除</button></div>
+          </div>}
+          {deletedLoading && showDeleted && <p role="status">正在读取已删除作品…</p>}
           <div className="design-library">
-            {designs.map((d) => (
-              <button
-                key={d.id}
+            {(showDeleted ? deletedDesigns : designs).map((d) => (
+              <div key={d.id} className="design-list-row"><button
                 disabled={
                   busy || !!pending || backgroundProcessing || uploading
                 }
                 className={`design-list-item ${d.id === design?.id ? "selected" : ""}`}
-                onClick={() => void switchDesign(d.id)}
+                onClick={() => showDeleted ? void restoreDesign(d) : void switchDesign(d.id)}
+                aria-label={showDeleted ? `恢复${d.name}` : undefined}
               >
                 <span className="design-list-icon">
                   <Icon name="folder" size={23} />
@@ -1790,17 +1971,17 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                   </small>
                 </div>
                 {d.active_job_id && <span className="tiny-pill">处理中</span>}
-                <Icon name="arrow" />
-              </button>
+                {showDeleted ? <span>恢复</span> : <Icon name="arrow" />}
+              </button>{!showDeleted && <button type="button" className="delete-design-button" aria-label={`删除${d.name}`} title={d.active_job_id ? "作品正在处理，完成后可删除" : `删除${d.name}`} disabled={busy || !!pending || uploading || backgroundProcessing || !!designTarget?.loading || !!d.active_job_id} onClick={() => setDeleteTarget(d)}>删除</button>}</div>
             ))}
           </div>
-          {!designs.length && (
+          {!(showDeleted ? deletedDesigns : designs).length && !deletedLoading && (
             <div className="empty-library">
-              你的第一份作品，即将从这里开始。
+              {showDeleted ? "没有可恢复的已删除作品。" : "你的第一份作品，即将从这里开始。"}
             </div>
           )}
           <div className="modal-footer">
-            <span>作品、额度和版本均保存在服务端</span>
+            <span>{showDeleted ? `删除后保留 ${config?.retention_hours ?? 50} 小时，可恢复` : "作品、额度和版本均保存在服务端"}</span>
             <button
               className="primary"
               disabled={busy || !!pending || backgroundProcessing || uploading}

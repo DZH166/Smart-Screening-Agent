@@ -40,7 +40,8 @@ JSON_FILES = frozenset({'ribbon_frontend/package.json', 'ribbon_frontend/tsconfi
 FRONTEND_CONFIG_FILES = JSON_FILES | frozenset({'ribbon_frontend/pnpm-lock.yaml',
     'ribbon_frontend/vite.config.ts', 'ribbon_frontend/.gitignore',
     'ribbon_frontend/index.html', 'ribbon_frontend/README.md',
-    'ribbon_frontend/tests/api.test.mjs', 'ribbon_frontend/tests/browser-smoke.mjs'})
+    'ribbon_frontend/tests/api.test.mjs', 'ribbon_frontend/tests/browser-smoke.mjs',
+    'ribbon_frontend/tests/workspace-performance.mjs'})
 PRIVATE_NAMES = frozenset({'instance.json', 'access_codes.json', 'material_settings.json',
     'material_volcengine_settings.json', 'ribbon_settings.json', 'ribbon_model_settings.json',
     'ai_settings.json', 'ai_usage.json', 'ai_usage.lock', 'ai_validation.json',

@@ -46,6 +46,7 @@ class RibbonGateway:
                 from ribbon_backend.app import create_app
                 from ribbon_backend.config import Settings
                 from ribbon_backend.service import Service
+                from .ribbon_examples import RibbonExamples
                 base = Settings(data_dir=Path(self.manager.data_dir) / 'ribbon',
                                 auth_mode='hsd', provider='openai',
                                 openai_api_key='', language_model='', image_model='',
@@ -53,7 +54,8 @@ class RibbonGateway:
                                 space_reserver=reserve_space)
                 service = Service(base,
                     runtime_settings_supplier=lambda: self.settings.runtime_settings(base),
-                    provider_factory=lambda provider, config: self.settings.provider_for_job(provider, config, base=base))
+                    provider_factory=lambda provider, config: self.settings.provider_for_job(provider, config, base=base),
+                    example_resolver=RibbonExamples(self.manager.ai_settings.path.parent / 'ribbon_layout_examples').image)
                 api = create_app(base, service=service)
                 loop = asyncio.new_event_loop()
                 thread = threading.Thread(target=loop.run_forever, name='hsd-ribbon-api', daemon=True)

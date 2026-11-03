@@ -23,7 +23,7 @@ import urllib.request
 import httpx
 from PIL import Image, ImageDraw
 
-from .imaging import MAX_PIXELS, PARAM_DEFAULTS, _save_png, _star_points, read_image
+from .imaging import MAX_PIXELS, PARAM_DEFAULTS, _save_png, _star_points, read_image, memory_bounded_operation
 
 
 class ProviderError(RuntimeError):
@@ -191,6 +191,108 @@ def _edit_image_from_bytes(value):
         raise ProviderError('图片无法读取，或像素数量过大，未调用图片模型。') from None
 
 
+_DRAFT_MODES = {
+    'grid': '完整主体整齐多排重复', 'stagger': '完整主体上下错位重复',
+    'scatter': '完整主体分散重复', 'single': '完整主体沿中线单排重复',
+    'ends': '左右两端各放完整大主体，中间单排小主体重复',
+    'panels': '左中右三个固定区段分别排完整主体',
+    'bordered': '中间完整主图重复，上下细小边饰',
+    'scene': '第一张为主要完整主体，其余完整主体依次循环',
+    'fullwidth': '一张完整设计居中定位', 'alternating': '完整主体大小交替重复',
+    'ends_open': '完整主体只在左右两端，中间留白',
+    'split': '完整主体分左右两个区段', 'stacked': '完整主体分上下两个区段',
+    'opposed': '完整主体正向与180度交替重复',
+}
+
+
+@memory_bounded_operation
+def _draft_background_inputs(pattern_paths, background_path, reference_bytes, *, mode, density, prompt):
+    """Capture local references before dispatch; never modify production assets.
+
+    Only the service may resolve an authorized company reference into bytes.
+    The provider accepts no company path, identifier, URL or arbitrary fetch.
+    Every model input is a bounded square reference canvas, not a production
+    replacement for the complete originals composited by the ribbon renderer.
+    """
+    from hsd_tool.material_ark import ArkProviderError, MAX_INPUT_BYTES, _decode
+    if not isinstance(mode, str) or mode not in _DRAFT_MODES:
+        raise ClarificationNeeded('首稿排版模式无效，未调用图片模型。')
+    if not isinstance(density, str) or density not in ('airy', 'balanced', 'rich'):
+        raise ClarificationNeeded('首稿排版疏密无效，未调用图片模型。')
+    if not isinstance(prompt, str) or len(prompt) > 4000:
+        raise ClarificationNeeded('首稿搭配要求不超过4000字。')
+    if not isinstance(pattern_paths, (list, tuple)) or not 1 <= len(pattern_paths) <= 12:
+        raise ClarificationNeeded('首稿请选择1至12张完整图案，未调用图片模型。')
+    if reference_bytes is not None and (not isinstance(reference_bytes, bytes)
+                                         or not 0 < len(reference_bytes) <= MAX_INPUT_BYTES):
+        raise ProviderError('案例参考为空或超过图片大小限制，未调用图片模型。')
+
+    def source_bytes(path):
+        if not isinstance(path, (str, Path)):
+            raise ProviderError('图片输入无效，未调用图片模型。')
+        return _bounded_edit_bytes(path, MAX_INPUT_BYTES,
+                                   '参考图片超过模型的30MB大小限制，未调用图片模型。')
+
+    def decoded(value):
+        try:
+            image = _decode(value)
+        except ArkProviderError:
+            raise ProviderError('参考图片无法读取，或像素数量超限，未调用图片模型。') from None
+        with closing(image.getchannel('A')) as alpha:
+            visible = alpha.getbbox() is not None
+        if not visible:
+            image.close()
+            raise ProviderError('参考图片没有可见内容，未调用图片模型。')
+        return image
+
+    def place(canvas, source, box):
+        left, top, right, bottom = box
+        ratio = min((right - left) / source.width, (bottom - top) / source.height)
+        size = max(1, round(source.width * ratio)), max(1, round(source.height * ratio))
+        with closing(source.resize(size, Image.Resampling.LANCZOS)) as fitted:
+            canvas.alpha_composite(fitted, (left + (right - left - size[0]) // 2,
+                                           top + (bottom - top - size[1]) // 2))
+
+    def data_uri(canvas):
+        buffer = io.BytesIO()
+        # Strip EXIF, filenames and other source metadata from model references.
+        canvas.save(buffer, format='PNG')
+        if buffer.tell() > MAX_INPUT_BYTES:
+            raise ProviderError('派生参考超过模型图片大小限制，未调用图片模型。')
+        return 'data:image/png;base64,' + base64.b64encode(buffer.getvalue()).decode('ascii')
+
+    columns = math.ceil(math.sqrt(len(pattern_paths)))
+    rows = math.ceil(len(pattern_paths) / columns)
+    images = []
+    with closing(Image.new('RGBA', (2048, 2048), '#FFFFFF')) as sheet:
+        for index, path in enumerate(pattern_paths):
+            column, row = index % columns, index // columns
+            box = (column * 2048 // columns + 16, row * 2048 // rows + 16,
+                   (column + 1) * 2048 // columns - 16, (row + 1) * 2048 // rows - 16)
+            with closing(decoded(source_bytes(path))) as image:
+                place(sheet, image, box)
+        images.append(data_uri(sheet))
+    roles = ['参考图1是所选原图案的等比联系表，仅用于理解配色和风格；这些人物、文字和完整主体稍后由程序原样叠放。']
+    for value, label in ((source_bytes(background_path) if background_path is not None else None,
+                          '员工所选底图，仅参考其底色和纹理'),
+                         (reference_bytes, '员工选择的公司案例，只学习空间、色彩与辅助装饰，不复制其中人物、文字、水印或标志')):
+        if value is not None:
+            with closing(decoded(value)) as source, closing(Image.new('RGBA', (2048, 2048), '#FFFFFF')) as canvas:
+                place(canvas, source, (16, 16, 2032, 2032))
+                images.append(data_uri(canvas))
+            roles.append(f'参考图{len(images)}是{label}。')
+    density_text = {'airy': '疏朗', 'balanced': '均衡', 'rich': '饱满'}[density]
+    instruction = (
+        '只生成一张正方形丝带搭配底纹和细小辅助装饰，输出不是最终丝带成稿。'
+        '上传的完整人物、文字和主体将由程序保持原样、完整等比叠放；本次不要重绘、复制或新增这些主体与文字。'
+        + ''.join(roles) + f'最终排版为：{_DRAFT_MODES[mode]}；疏密：{density_text}。'
+        '底纹低对比、铺满，四边尽量连续；按该布局给后续主体区域留出安静空间，'
+        '可用细小花、点、线等辅助装饰丰富空隙，不能放抢眼的大焦点。'
+        '不新增文字、水印、logo或标志。遵守用户明确配色；用户补充只用于底纹、配色和辅助装饰：'
+        + (prompt.strip() or '按所选图案与参考的色彩和风格协调搭配。'))
+    return images, instruction
+
+
 class TestProvider:
     """Visible, bounded fixture provider. It is not an AI or a general language parser."""
     name = "test"
@@ -301,6 +403,24 @@ class TestProvider:
         _save_png(im, output_path)
         return {**_meta("test-background-v1"), "is_demo": True, "seed": seed,
                 "description": "测试替身生成的随机色彩/圆点底图，不是真实 AI"}
+
+    def generate_draft_background(self, pattern_paths, background_path, reference_bytes, output_path,
+                                  *, mode, density, prompt=''):
+        _draft_background_inputs(pattern_paths, background_path, reference_bytes,
+                                 mode=mode, density=density, prompt=prompt)
+        seed = random.SystemRandom().randrange(2**32)
+        rng = random.Random(seed)
+        with closing(Image.new('RGBA', (2048, 2048), '#E6EFE3')) as image:
+            draw = ImageDraw.Draw(image, 'RGBA')
+            for y in range(0, 2048, 96):
+                for x in range(0, 2048, 96):
+                    radius = rng.randint(2, 5)
+                    draw.ellipse((x - radius, y - radius, x + radius, y + radius),
+                                 fill=(255, 255, 255, 100))
+            _save_png(image, output_path)
+        return {**_meta('test-draft-background-v1'), 'is_demo': True, 'seed': seed,
+                'width': 2048, 'height': 2048,
+                'description': '测试替身首稿底纹：仅为随机圆点合成，不是真实AI或案例模仿结果。'}
 
     def validate_edit_input(self, source_path, target):
         # Visible fixture validation only, never a paid service qualification.
@@ -708,6 +828,15 @@ class DeepSeekSeedreamProvider:
             '不新增人物、独立主体、文字、水印或标志，不做抢眼的大图案。遵守用户明确指定的配色，不擅自换色；未指定时用柔和协调的配色。用户要求：' + (prompt or '随机柔和配色'),
             'size': '2048x2048', 'output_format': 'png', 'response_format': 'b64_json', 'watermark': False}, output_path,
             expected_size=(2048, 2048))
+
+    def generate_draft_background(self, pattern_paths, background_path, reference_bytes, output_path,
+                                  *, mode, density, prompt=''):
+        images, instruction = _draft_background_inputs(
+            pattern_paths, background_path, reference_bytes, mode=mode, density=density, prompt=prompt)
+        return self._image({'model': self.image_model, 'image': images, 'prompt': instruction,
+                            'size': '2048x2048', 'background': 'opaque', 'output_format': 'png',
+                            'response_format': 'b64_json', 'watermark': False}, output_path,
+                           expected_size=(2048, 2048))
 
     def validate_edit_input(self, source_path, target):
         if target not in ('asset', 'pattern', 'background', 'composite'):

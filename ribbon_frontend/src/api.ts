@@ -9,6 +9,7 @@ export type Asset = {
   url: string;
   thumbnail_url?: string;
   derived_from?: string;
+  deduplicated?: boolean;
 };
 export type Template = {
   id: string;
@@ -31,6 +32,7 @@ export type Profile = {
 export type Config = {
   provider: string;
   ai_ready: boolean;
+  ai_draft_available?: boolean;
   auth_mode?: string;
   output_profile: Profile;
   max_refinements: number;
@@ -50,6 +52,11 @@ export type Selection = {
   template_id: string;
   background_tone?: "soft" | "original";
   design_density?: "airy" | "balanced" | "rich";
+};
+export type GenerateRequest = Selection & {
+  idempotency_key: string;
+  ai_assisted: boolean;
+  reference_code: string | null;
 };
 export type Snapshot = {
   asset_refs: string[];
@@ -103,6 +110,7 @@ export type Design = {
   revision: number;
   versions: Version[];
   active_job: Job | null;
+  deleted_at?: number | null;
 };
 export type Overview = {
   jobs: Job[];

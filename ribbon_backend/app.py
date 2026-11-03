@@ -7,7 +7,7 @@ import time
 from fastapi import Depends, FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from starlette.concurrency import run_in_threadpool
 
 from .config import ROOT, Settings
@@ -39,6 +39,8 @@ class Selection(StrictModel):
 
 class Generate(Selection):
     idempotency_key: str = Field(min_length=8, max_length=160)
+    ai_assisted: StrictBool = False
+    reference_code: str | None = Field(default=None, strict=True, min_length=1, max_length=32)
 
 
 class Refinement(StrictModel):
@@ -211,8 +213,8 @@ def create_app(settings: Settings | None = None, *, service: Service | None = No
         return FileResponse(service.verified_template_path(template_id, version), media_type='image/png')
 
     @app.get('/api/designs')
-    def designs(current=Depends(user)):
-        return service.designs(current['id'])
+    def designs(deleted: bool = False, current=Depends(user)):
+        return service.designs(current['id'], deleted=deleted)
 
     @app.post('/api/designs', status_code=201)
     def create_design(body: DesignCreate, current=Depends(user)):
@@ -221,6 +223,14 @@ def create_app(settings: Settings | None = None, *, service: Service | None = No
     @app.get('/api/designs/{design_id}')
     def design(design_id: str, current=Depends(user)):
         return service.design(current['id'], design_id)
+
+    @app.delete('/api/designs/{design_id}')
+    def delete_design(design_id: str, current=Depends(user)):
+        return service.delete_design(current['id'], design_id)
+
+    @app.post('/api/designs/{design_id}/restore')
+    def restore_design(design_id: str, current=Depends(user)):
+        return service.restore_design(current['id'], design_id)
 
     @app.post('/api/designs/{design_id}/generate', status_code=202)
     def generate(design_id: str, body: Generate, current=Depends(user)):

@@ -33,6 +33,8 @@ type Props = {
   cache: { current: LayoutExamplesCatalog | null };
   onUnauthorized: () => void;
   onViewAll: () => void;
+  referenceMode?: string;
+  onChooseReference?: (example: LayoutExample) => void;
 };
 
 // Case images stay behind the host's employee session. Never load a gallery URL
@@ -115,7 +117,7 @@ function ExampleImage({ example }: { example: LayoutExample }) {
   );
 }
 
-export default function LayoutExamples({ mode, cache, onUnauthorized, onViewAll }: Props) {
+export default function LayoutExamples({ mode, cache, onUnauthorized, onViewAll, referenceMode, onChooseReference }: Props) {
   const [catalog, setCatalog] = useState<LayoutExamplesCatalog | null>(() => cache.current);
   const [loading, setLoading] = useState(!cache.current);
   const [error, setError] = useState("");
@@ -178,7 +180,8 @@ export default function LayoutExamples({ mode, cache, onUnauthorized, onViewAll 
       <div className="layout-examples-intro">
         {currentMode && <p className="layout-mode-summary">{currentMode.summary}</p>}
         {currentMode?.note && <p className="layout-mode-note">{currentMode.note}</p>}
-        {!mode && <p className="layout-mode-summary">先看排列方式，再选择适合的排版。案例只说明结构，生成时使用你自己选择的素材。</p>}
+        {!mode && <p className="layout-mode-summary">{onChooseReference ? "案例可查看，也可明确选择为 AI 首稿参考。只有与当前排法匹配的可用案例可以选中。" : "先看排列方式，再选择适合的排版。案例只说明结构，生成时使用你自己选择的素材。"}</p>}
+        {onChooseReference && <p className="layout-reference-help">查看不会发送案例。只有明确选为参考后，生成 AI 首稿时才把所选案例发送给 Seedream。</p>}
         {mode && !currentMode && <p>当前排版暂无对应的公司案例，可先查看其他排法。</p>}
         <div className="layout-examples-tools">
           {mode && <button type="button" className="secondary" onClick={onViewAll}>查看全部案例</button>}
@@ -206,6 +209,10 @@ export default function LayoutExamples({ mode, cache, onUnauthorized, onViewAll 
             <ExampleImage example={example} />
             <p className="layout-example-look"><strong>看点：</strong>{Array.isArray(example.look_for) ? example.look_for.join("；") : example.look_for}</p>
             {example.reference_only && <p className="layout-example-reference">当前没有单独的对应排版选项，不会因查看案例自动生成这种效果。</p>}
+            {onChooseReference && referenceMode && example.available && !example.reference_only &&
+              example.mode_tags.includes(referenceMode) && exampleImageUrl(example.image_url) && (
+              <button type="button" className="secondary choose-ai-reference" onClick={() => onChooseReference(example)}>用于AI首稿参考</button>
+            )}
           </article>
         ))}
       </div>

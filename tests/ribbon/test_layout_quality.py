@@ -279,3 +279,102 @@ def test_two_row_nominal_size_and_shrink_are_preserved(artwork, tmp_path, mode):
     assert next(r for r in rows if r['asset_ref'] == '0')['height'] < 172 * .65
     assert_safe(rows)
     first.close(); smaller.close()
+
+
+@pytest.mark.parametrize('density', quality.DENSITIES)
+@pytest.mark.parametrize('count', (1, 2, 5))
+@pytest.mark.parametrize('main_ref', ('0', '1'))
+def test_new_ends_keep_main_hierarchy_for_complete_portrait_and_landscape_art(
+        artwork, tmp_path, density, count, main_ref):
+    snapshot, refs = artwork
+    snapshot.update(layout_engine=quality.END_HIERARCHY_ENGINE, template_mode='ends',
+                    design_density=density)
+    snapshot['output_profile']['width'] = 11811
+    snapshot['asset_refs'] = [main_ref] + [r for r in refs if r != main_ref][:count - 1]
+    canvas, rows = render(snapshot, refs, tmp_path)
+    ends = [r for r in rows if r['role'] in ('left-end', 'right-end')]
+    inner = [r for r in rows if r['role'] == 'inner']
+    assert [r['role'] for r in ends] == ['left-end', 'right-end']
+    assert {r['asset_ref'] for r in ends} == {main_ref}
+    assert {r['asset_ref'] for r in inner} == set(snapshot['asset_refs'][1:] or [main_ref])
+    assert ends[0]['width'] == ends[1]['width']
+    assert ends[0]['height'] == ends[1]['height']
+    assert ends[0]['height'] > max(r['height'] for r in inner) * 1.45
+    assert all(not r['horizontal_wrap'] for r in rows)
+    assert_safe(rows)
+    expected_ratio = .5 if main_ref == '0' else 260 / 70
+    assert ends[0]['width'] / ends[0]['height'] == pytest.approx(expected_ratio, rel=.02)
+    # End treatments are anchored near the actual strip ends, not in large
+    # fixed boxes whose width ignores the selected design's aspect ratio.
+    assert ends[0]['x'] - ends[0]['width'] / 2 < 520 * .10
+    assert 11811 - ends[1]['x'] - ends[1]['width'] / 2 < 520 * .10
+    canvas.close()
+
+
+@pytest.mark.parametrize('angle', (0, 37, 90))
+@pytest.mark.parametrize('offset', (-30000, 0, 30000))
+def test_new_ends_offset_rotation_and_layer_order_never_cover_end_art(
+        artwork, tmp_path, monkeypatch, angle, offset):
+    snapshot, refs = artwork
+    snapshot.update(layout_engine=quality.END_HIERARCHY_ENGINE, template_mode='ends',
+                    design_density='rich')
+    snapshot['asset_refs'] = ['1', '0', '2', '3', '4']
+    snapshot['output_profile']['width'] = 11811
+    snapshot['params'] = dict(rotation=angle, offset_x=offset, offset_y=offset, scale=1.4)
+    canvas, rows = render(snapshot, refs, tmp_path)
+    assert_safe(rows)
+    end = next(r for r in rows if r['role'] == 'left-end')
+    inner = [r for r in rows if r['role'] == 'inner']
+    assert end['height'] > max(r['height'] for r in inner) * 1.4
+    assert end['x'] + end['width'] / 2 <= min(r['x'] - r['width'] / 2 for r in inner)
+    right = next(r for r in rows if r['role'] == 'right-end')
+    assert max(r['x'] + r['width'] / 2 for r in inner) <= right['x'] - right['width'] / 2
+    assert canvas.getchannel('A').crop((0, 0, 1, 520)).getbbox() is None
+    assert canvas.getchannel('A').crop((11810, 0, 11811, 520)).getbbox() is None
+    original_plan = quality.plan
+    monkeypatch.setattr(quality, 'plan', lambda s, specs: original_plan(s, specs)[::-1])
+    reversed_canvas, _ = render(snapshot, refs, tmp_path, 'reverse-layers')
+    assert reversed_canvas.tobytes() == canvas.tobytes()
+    canvas.close(); reversed_canvas.close()
+
+
+def test_extremely_wide_ends_cap_both_regions_and_keep_smaller_middle(artwork, tmp_path):
+    snapshot, refs = artwork
+    with Image.new('RGBA', (1500, 60), (30, 70, 210, 255)) as image:
+        image.save(refs['0'])
+    snapshot.update(layout_engine=quality.END_HIERARCHY_ENGINE, template_mode='ends',
+                    design_density='rich', asset_refs=['0'])
+    snapshot['output_profile']['width'] = 11811
+    canvas, rows = render(snapshot, refs, tmp_path)
+    end, inner = rows[0], rows[2]
+    assert end['safe_region'][2] == pytest.approx(11811 * .44)
+    assert end['height'] > inner['height'] * 1.45
+    assert end['width'] / end['height'] == pytest.approx(25, rel=.02)
+    assert inner['width'] / inner['height'] == pytest.approx(25, rel=.04)
+    assert_safe(rows)
+    canvas.close()
+
+
+def test_v1_ends_and_unrelated_mode_pixels_remain_unchanged(artwork, tmp_path):
+    snapshot, refs = artwork
+    snapshot.update(template_mode='ends', design_density='rich', asset_refs=['1'])
+    snapshot['output_profile']['width'] = 11811
+    old_canvas, old_rows = render(snapshot, refs, tmp_path)
+    # Preserve the original v1 sizing even though its landscape hierarchy is
+    # weak; saved versions must never silently acquire a new composition.
+    assert old_rows[0]['width'] == 599
+    assert old_rows[0]['height'] < old_rows[2]['height']
+    snapshot.pop('layout_engine')
+    legacy_canvas, _ = render(snapshot, refs, tmp_path, 'missing-engine')
+    assert legacy_canvas.tobytes() == old_canvas.tobytes()
+    old_canvas.close(); legacy_canvas.close()
+    for mode in quality.MODES:
+        if mode == 'ends':
+            continue
+        before = dict(snapshot, layout_engine=quality.ENGINE, template_mode=mode)
+        before['asset_refs'] = ['0', '1'] if mode in ('bordered', 'split', 'stacked') else ['0']
+        after = dict(before, layout_engine=quality.END_HIERARCHY_ENGINE)
+        first, _ = render(before, refs, tmp_path, mode + '-v1')
+        second, _ = render(after, refs, tmp_path, mode + '-v2')
+        assert first.tobytes() == second.tobytes(), mode
+        first.close(); second.close()

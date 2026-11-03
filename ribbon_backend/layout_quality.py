@@ -16,6 +16,7 @@ import tempfile
 from PIL import Image
 
 ENGINE = 'design-rhythm-v1'
+END_HIERARCHY_ENGINE = 'design-rhythm-v2'
 DENSITIES = ('airy', 'balanced', 'rich')
 MODES = ('grid', 'stagger', 'scatter', 'single', 'ends', 'panels', 'bordered',
          'scene', 'fullwidth', 'alternating', 'ends_open', 'split', 'stacked', 'opposed')
@@ -230,6 +231,30 @@ def plan(snapshot, specs):
         factors = [1.] + [(.76, .84, .72)[(i - 1) % 3] for i in range(1, n)]
         row(all_ids, full_safe, .76 / .84, 'scene', wrap=True, baseline=True,
             variants=[(i, factors[i], 0.) for i in all_ids])
+    elif mode == 'ends' and snapshot.get('layout_engine') == END_HIERARCHY_ENGINE:
+        # A fixed h*1.2 end box reverses the hierarchy for wide artwork: the
+        # main design shrinks to that width while its middle copies can grow
+        # across the much wider centre. Reserve the width needed by the actual
+        # complete, rotated main design instead, with a hard cap at each end.
+        side_margin = min(h * .04, w * .02)
+        main = _size(specs[0], h * .84 * .92 * scale,
+                     w * .44 - side_margin, h * .84, angle)
+        zone = min(w * .44, main[2] + side_margin * 2)
+        fixed(0, (side_margin, h * .08, zone, h * .92), .92, 'left-end')
+        fixed(0, (w - zone, h * .08, w - side_margin, h * .92), .92, 'right-end')
+        inner_ids = all_ids[1:] or [0]
+        if w - 2 * zone > 10:
+            # The middle lane derives from the *fitted* main height. This also
+            # protects hierarchy when an exceptionally wide original still
+            # reaches the 44%-width cap. Density/scale have already fitted main;
+            # applying them again here would make rich centres overtake it.
+            main_height = max(1., main[3] - 2.)
+            inner_height = min(h * .60, main_height * .64 + 4.)
+            occupancy = main_height * .60 / (inner_height * scale)
+            row(inner_ids, (zone, (h - inner_height) / 2,
+                            w - zone, (h + inner_height) / 2), occupancy, 'inner')
+        elif n > 1:
+            raise ValueError('当前区域容不下整组完整图案，请减少图案或更换排版')
     elif mode in ('ends', 'ends_open'):
         zone = min(w * .44, h * 1.20)
         side_margin = min(h * .04, w * .02)
@@ -308,7 +333,8 @@ def compose(canvas, snapshot, resolve_asset, master_path):
                 row = dict(asset_ref=refs[i], x=x, y=y, width=motif.width, height=motif.height,
                            size=max(motif.size), rotation=p['rotation'], layer=layer, role=p['role'],
                            group=p['group'], content_bbox=list(specs[i]['bbox']),
-                           source_size=list(specs[i]['source_size']), layout_engine=ENGINE,
+                           source_size=list(specs[i]['source_size']),
+                           layout_engine=snapshot.get('layout_engine', ENGINE),
                            design_density=snapshot.get('design_density', 'balanced'),
                            safe_region=list(p['region']), horizontal_wrap=p['wrap'],
                            repetition=p['repetition'])

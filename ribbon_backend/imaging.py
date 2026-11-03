@@ -237,7 +237,7 @@ def estimate_render_space(snapshot):
     free-space preflight, not a user quota or a change to production dimensions.
     """
     width, height, _ = _profile(snapshot['output_profile'])
-    if snapshot.get('layout_engine') == 'design-rhythm-v1' and not snapshot.get('composite_ref'):
+    if snapshot.get('layout_engine') in ('design-rhythm-v1', 'design-rhythm-v2') and not snapshot.get('composite_ref'):
         from .layout_quality import estimate
         return estimate(snapshot)
     required = png_space(width, height) + png_space(min(width, 1800), min(height, 600))
@@ -542,7 +542,7 @@ def _quality_background(background, width, height):
 @memory_bounded_operation
 def render(snapshot: dict, resolve_asset: Callable[[str], Path], master_path: Path,
            preview_path: Path) -> dict:
-    if snapshot.get('layout_engine') not in (None, 'design-rhythm-v1'):
+    if snapshot.get('layout_engine') not in (None, 'design-rhythm-v1', 'design-rhythm-v2'):
         raise ValueError('该作品的排版引擎不受当前版本支持，请保留原版本并联系管理员')
     require_space(Path(master_path).parent, estimate_render_space(snapshot))
     width, height, dpi = _profile(snapshot["output_profile"])
@@ -560,7 +560,7 @@ def render(snapshot: dict, resolve_asset: Callable[[str], Path], master_path: Pa
         if len(snapshot["asset_refs"]) > 12:
             raise ValueError("一次最多使用十二个图案")
         background = read_image(resolve_asset(snapshot["background_ref"]))
-        if snapshot.get('layout_engine') == 'design-rhythm-v1':
+        if snapshot.get('layout_engine') in ('design-rhythm-v1', 'design-rhythm-v2'):
             try:
                 if params['background_color']:
                     canvas = Image.new('RGBA', (width, height), ImageColor.getrgb(params['background_color']))
@@ -590,14 +590,14 @@ def render(snapshot: dict, resolve_asset: Callable[[str], Path], master_path: Pa
         if snapshot.get('background_tone', 'original') == 'soft' and not params['background_color']:
             with Image.new('RGBA', (width, height), (255, 255, 255, 140)) as veil:
                 canvas.alpha_composite(veil)
-        if params["background_color"] and snapshot.get('layout_engine') != 'design-rhythm-v1':
+        if params["background_color"] and snapshot.get('layout_engine') not in ('design-rhythm-v1', 'design-rhythm-v2'):
             canvas.close()
             canvas = Image.new("RGBA", (width, height), ImageColor.getrgb(params["background_color"]))
         refs = snapshot['asset_refs']
         rules = snapshot.get("template_rules", {})
         mode = snapshot.get("template_mode", "stagger")
         object_transforms = []
-        if snapshot.get('layout_engine') == 'design-rhythm-v1':
+        if snapshot.get('layout_engine') in ('design-rhythm-v1', 'design-rhythm-v2'):
             from .layout_quality import compose
             try:
                 object_transforms = compose(canvas, snapshot, resolve_asset, master_path)

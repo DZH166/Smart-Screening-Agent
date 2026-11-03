@@ -57,7 +57,7 @@ def test_new_controls_pass_actual_http_schema_and_persist_through_refinement(api
     service, client, choice = api
     work, _ = generate(api, dict(choice, background_tone='original', design_density='rich'))
     original = current(work)
-    assert original['snapshot']['layout_engine'] == 'design-rhythm-v1'
+    assert original['snapshot']['layout_engine'] == 'design-rhythm-v2'
     assert original['snapshot']['background_tone'] == 'original'
     assert original['snapshot']['design_density'] == 'rich'
     response = client.post('/api/designs/' + work['id'] + '/refinements', json={
