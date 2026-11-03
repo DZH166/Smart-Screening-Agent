@@ -141,12 +141,14 @@ def test_echoed_parameter_defaults_do_not_create_versions_or_charge(service, mon
 def test_echoed_defaults_are_filtered_but_mixed_real_changes_succeed(service, monkeypatch):
     identity, original = generate(service)
     content = service.version_file(identity, original['current_version_id']).read_bytes()
-    plan(monkeypatch, [{'type': 'parameters', 'values': {'scale': 1.0, 'spacing': 1.4, 'rotation': 0}}])
+    # Complete repeat groups quantise spacing; use a change that crosses a
+    # visible group boundary. The dedicated quality test covers no-op spacing.
+    plan(monkeypatch, [{'type': 'parameters', 'values': {'scale': 1.0, 'spacing': 2.0, 'rotation': 0}}])
     job, latest = refine(service, identity, original)
     assert job['status'] == 'SUCCEEDED' and latest['successful_refinement_count'] == 1
     version = next(v for v in latest['versions'] if v['id'] == latest['current_version_id'])
     assert version['snapshot']['edit_plan']['operations'] == [
-        {'type': 'parameters', 'values': {'spacing': 1.4}}]
+        {'type': 'parameters', 'values': {'spacing': 2.0}}]
     assert service.version_file(identity, latest['current_version_id']).read_bytes() != content
     assert service.version_file(identity, original['current_version_id']).read_bytes() == content
 

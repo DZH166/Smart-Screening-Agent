@@ -31,6 +31,10 @@ class Selection(StrictModel):
     asset_ids: list[str] = Field(min_length=1, max_length=12)
     background_id: str
     template_id: str
+    # Absence uses the saved/new-work defaults. An explicit null is retained
+    # in the payload and rejected by the service instead of being discarded.
+    background_tone: Literal['soft', 'original'] | None = None
+    design_density: Literal['airy', 'balanced', 'rich'] | None = None
 
 
 class Generate(Selection):
@@ -220,11 +224,11 @@ def create_app(settings: Settings | None = None, *, service: Service | None = No
 
     @app.post('/api/designs/{design_id}/generate', status_code=202)
     def generate(design_id: str, body: Generate, current=Depends(user)):
-        return service.submit(current['id'], 'generate', body.model_dump(), design_id)
+        return service.submit(current['id'], 'generate', body.model_dump(exclude_unset=True), design_id)
 
     @app.post('/api/designs/{design_id}/refinements', status_code=202)
     def refine(design_id: str, body: Refinement, current=Depends(user)):
-        return service.submit(current['id'], 'refine', body.model_dump(exclude_none=True), design_id)
+        return service.submit(current['id'], 'refine', body.model_dump(exclude_unset=True), design_id)
 
     @app.post('/api/designs/{design_id}/rollback')
     def rollback(design_id: str, body: Rollback, current=Depends(user)):

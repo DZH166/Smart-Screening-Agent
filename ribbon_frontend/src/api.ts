@@ -48,6 +48,8 @@ export type Selection = {
   asset_ids: string[];
   background_id: string;
   template_id: string;
+  background_tone?: "soft" | "original";
+  design_density?: "airy" | "balanced" | "rich";
 };
 export type Snapshot = {
   asset_refs: string[];
@@ -57,6 +59,9 @@ export type Snapshot = {
   template_version: number;
   output_profile: Profile;
   params: Record<string, unknown>;
+  layout_engine?: string;
+  background_tone?: "soft" | "original";
+  design_density?: "airy" | "balanced" | "rich";
   composite_ref?: string;
 };
 export type Version = {

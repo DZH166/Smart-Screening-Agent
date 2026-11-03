@@ -75,16 +75,40 @@ def test_added_mode_real_generate_branch_refine_and_pinned_download(service, mod
     assert one['successful_refinement_count'] == 1
     back = service.rollback(owner, original['id'], v1)
     assert back['current_version_id'] == v0 and back['successful_refinement_count'] == 1
-    job, two = refine(service, owner, back, '图案放大一些')
+    # Some modes intentionally fill their safe box at the default size. A
+    # visible background change tests the second branch/transaction for every
+    # mode without requiring clipping or a chargeable no-op enlargement.
+    job, two = refine(service, owner, back, '背景改为浅蓝色')
     assert job['status'] == 'SUCCEEDED' and two['successful_refinement_count'] == 2
     versions = {item['id']: item for item in two['versions']}
     assert versions[v1]['parent_version_id'] == versions[two['current_version_id']]['parent_version_id'] == v0
     assert service.version_file(owner, v0).read_bytes() == bytes0
     assert service.version_file(owner, v1).read_bytes() == bytes1
+    assert service.version_file(owner, two['current_version_id']).read_bytes() != bytes0
     with service.db.connect() as db:
         assert db.execute('SELECT COUNT(*) FROM quota_events WHERE design_id=?', (original['id'],)).fetchone()[0] == 2
     with pytest.raises(ServiceError, match='两次精修已用完'):
         refine(service, owner, two)
+
+
+def test_fullwidth_at_safe_box_limit_cannot_fake_enlargement_or_charge(service):
+    owner = actor(service)['id']
+    original = generate(service, owner, 'fullwidth')
+    version = original['versions'][0]
+    placement = version['snapshot']['object_transforms'][0]
+    left, top, right, bottom = placement['safe_region']
+    # The exact fitting path reserves four sampling pixels, then rounds the
+    # native proportional size down. This is its usable safe-box limit.
+    assert placement['width'] >= right - left - 6 or placement['height'] >= bottom - top - 6
+    content = service.version_file(owner, original['current_version_id']).read_bytes()
+    job, latest = refine(service, owner, original, '图案放大一些')
+    assert job['status'] == 'FAILED' and job['needs_clarification']
+    assert '像素相同' in job['error']
+    assert latest['current_version_id'] == original['current_version_id']
+    assert latest['successful_refinement_count'] == 0 and len(latest['versions']) == 1
+    assert service.version_file(owner, latest['current_version_id']).read_bytes() == content
+    with service.db.connect() as db:
+        assert db.execute('SELECT COUNT(*) FROM quota_events WHERE design_id=?', (original['id'],)).fetchone()[0] == 0
 
 
 @pytest.mark.parametrize('mode,count,message', [

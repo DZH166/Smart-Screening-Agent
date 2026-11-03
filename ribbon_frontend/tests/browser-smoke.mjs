@@ -139,7 +139,8 @@ const server = createServer(async (req, res) => {
       const sequence = design.versions.length, v = version(sequence, design.current_version_id);
       const requested = writes.at(-1).body, selection = pathname.endsWith("/generate") ? requested : requested.selection;
       if (selection) v.snapshot = { ...v.snapshot, asset_refs: selection.asset_ids, background_ref: selection.background_id,
-        template_id: selection.template_id, template_mode: templates.find(t => t.id === selection.template_id)?.mode };
+        template_id: selection.template_id, template_mode: templates.find(t => t.id === selection.template_id)?.mode,
+        layout_engine: "design-rhythm-v1", background_tone: selection.background_tone || "soft", design_density: selection.design_density || "balanced" };
       v.editing = modelEditing;
       design.versions.push(v); design.current_version_id = v.id; design.revision++;
       if (sequence) design.successful_refinement_count++;
@@ -160,6 +161,71 @@ if (process.argv.includes("--serve")) {
   console.log(`SYNTHETIC UI ONLY: ${base}/#ribbon`);
   await new Promise(() => {});
 }
+async function restorationSmoke(page) {
+  const generateButton = page.getByRole("button", { name: "生成首稿", exact: true });
+  const densityChoice = page.getByLabel("画面密度", { exact: true });
+  const gentleBackground = page.getByRole("checkbox", { name: "柔和底纹，突出主图", exact: true });
+  const text = page.locator(".refinement-body textarea");
+  // Old local drafts predate tone/density fields. Restore their effective
+  // settings before rendering controls or submitting, including legacy works.
+  await page.goto("about:blank");
+  user = { id: "synthetic-restored-draft", username: "恢复草稿合成员工", role: "employee" };
+  owner = user.id; design = null; job = null;
+  modelProvider = "test"; modelAuthMode = "demo"; modelReady = true; modelEditing = undefined;
+  const recoveryPrefix = `ribbon:${user.id}:`;
+  const oldSelection = { asset_ids: ["demo-flower", "demo-star"], background_id: "demo-bg-sage", template_id: "t1" };
+  const seedOldDraft = async baseVersion => {
+    await page.evaluate(({ prefix, value, workId, baseVersion }) => {
+      if (workId) localStorage.setItem(prefix + "design", JSON.stringify(workId));
+      else localStorage.removeItem(prefix + "design");
+      localStorage.setItem(prefix + "selection", JSON.stringify({ design_id: workId, base_version_id: baseVersion, value }));
+    }, { prefix: recoveryPrefix, value: oldSelection, workId: design?.id || null, baseVersion });
+    await page.reload();
+  };
+  await page.goto(`${base}/#ribbon`);
+  await generateButton.waitFor();
+  await seedOldDraft(null);
+  await generateButton.waitFor();
+  assert.equal(await gentleBackground.isChecked(), true, "unsaved old draft displays the effective new-work soft default");
+  assert.equal(await densityChoice.inputValue(), "balanced");
+  design = { id: "synthetic-recovered-work", name: "无版本草稿", current_version_id: null,
+    successful_refinement_count: 0, active_job_id: null, revision: 0, versions: [], active_job: null };
+  await seedOldDraft(null);
+  await generateButton.waitFor();
+  assert.equal(await gentleBackground.isChecked(), true, "saved work without a first version uses the new-work default");
+  await generateButton.click();
+  await page.getByRole("link", { name: "下载当前图", exact: true }).waitFor();
+  const restoredGenerate = writes.findLast(write => write.path.endsWith("/generate"));
+  assert.equal(restoredGenerate.body.background_tone, "soft", "generate payload matches the displayed switch");
+  assert.equal(restoredGenerate.body.design_density, "balanced");
+  const restoredVersion = design.versions.find(value => value.id === design.current_version_id);
+  restoredVersion.snapshot = { ...restoredVersion.snapshot, layout_engine: "design-rhythm-v1", background_tone: "original", design_density: "rich" };
+  await seedOldDraft(restoredVersion.id);
+  await page.getByRole("button", { name: "开始精修", exact: true }).waitFor();
+  assert.equal(await gentleBackground.isChecked(), false, "cached missing fields inherit the saved modern version tone");
+  assert.equal(await densityChoice.inputValue(), "rich", "cached missing fields inherit the saved modern density");
+  delete restoredVersion.snapshot.background_tone;
+  delete restoredVersion.snapshot.design_density;
+  await seedOldDraft(restoredVersion.id);
+  await page.getByRole("button", { name: "开始精修", exact: true }).waitFor();
+  assert.equal(await gentleBackground.isChecked(), true, "modern snapshot with omitted fields uses the same soft default as the service");
+  assert.equal(await densityChoice.inputValue(), "balanced");
+  delete restoredVersion.snapshot.layout_engine;
+  delete restoredVersion.snapshot.background_tone;
+  delete restoredVersion.snapshot.design_density;
+  await seedOldDraft(restoredVersion.id);
+  await page.getByRole("button", { name: "开始精修", exact: true }).waitFor();
+  assert.equal(await gentleBackground.isChecked(), false, "legacy cached draft defaults to original color");
+  assert.equal(await densityChoice.count(), 0, "legacy cached draft cannot acquire density controls");
+  await page.locator(".template-card").filter({ hasText: "单排重复" }).click();
+  await text.fill("");
+  await page.getByRole("button", { name: "开始精修", exact: true }).click();
+  await page.waitForFunction(() => document.querySelector("#ribbon-mount").shadowRoot.querySelector('a[download]')?.getAttribute("href") === "/api/ribbon/versions/v1/download");
+  const restoredRefine = writes.findLast(write => write.path.endsWith("/refinements"));
+  assert.equal(restoredRefine.body.selection.background_tone, "original", "legacy submission matches the displayed original tone");
+  assert.equal("design_density" in restoredRefine.body.selection, false, "legacy selection never sends a density setting");
+
+}
 const browser = await chromium.launch({ channel: process.env.HSD_BROWSER_CHANNEL || "chrome", headless: true });
 try {
   const context = await browser.newContext({ viewport: { width: 1366, height: 768 } });
@@ -168,11 +234,26 @@ try {
   await context.route("https://example.invalid/**", route => route.abort());
   page.on("request", request => { if (request.url().startsWith("https://example.invalid/")) unsafeRequests.push(request.url()); });
   page.on("pageerror", error => errors.push(String(error)));
+  if (process.argv.includes("--restoration-only")) {
+    await restorationSmoke(page);
+    assert.deepEqual(errors, []);
+    console.log("PASS built workspace draft recovery: new draft, saved unversioned work, modern saved/default settings, legacy settings and matching mutation payloads (synthetic HTTP only)");
+  } else {
   await page.goto(base);
   assert.equal(await page.locator("#ribbon-mount").evaluate(el => !!el.shadowRoot), false, "bundle remains lazy");
   await page.locator('[data-workspace="ribbon"]').click();
   await page.getByRole("button", { name: "生成首稿", exact: true }).waitFor();
   assert.equal(await page.locator(".template-card").count(), 6);
+  const densityChoice = page.getByLabel("画面密度", { exact: true });
+  const gentleBackground = page.getByRole("checkbox", { name: "柔和底纹，突出主图", exact: true });
+  assert.equal(await densityChoice.inputValue(), "balanced");
+  assert.equal(await gentleBackground.isChecked(), true);
+  await densityChoice.selectOption("airy");
+  await gentleBackground.uncheck();
+  assert.equal(await densityChoice.inputValue(), "airy");
+  assert.equal(await gentleBackground.isChecked(), false);
+  await densityChoice.selectOption("balanced");
+  await gentleBackground.check();
   const moreLayouts = page.getByRole("button", { name: "更多排法（8）", exact: true });
   assert.equal(await moreLayouts.getAttribute("aria-expanded"), "false", "extra modes stay collapsed initially");
   assert.equal(await page.getByRole("button", { name: "排版与规格", exact: true }).count(), 0);
@@ -641,6 +722,8 @@ try {
   await localBackground.waitFor();
   assert.equal(await localBackground.isEnabled(), true, "demo fixture mode is also available without a real API key");
 
+  await restorationSmoke(page);
+
   user = { id: "synthetic-admin", username: "测试管理员", role: "admin" };
   await page.goto(`${base}/#ribbon-admin`);
   await page.locator(".admin-tabs").waitFor({ timeout: 5000 }).catch(async error => {
@@ -667,4 +750,5 @@ try {
   assert.ok(writes.some(w => w.path.endsWith("/refinements")));
   assert.ok(writes.some(w => w.path.endsWith("/rollback")));
   console.log("PASS built ShadowRoot workspace: serial upload progress and partial-success retention, thumbnail/lazy image paths, identity-bound upload cancellation; configured/unconfigured model handoff, original-size edit boundaries, 14 modes and examples, generation/refinement/rollback/download and 1366/1920/1100 layouts (synthetic HTTP only)");
+  }
 } finally { releaseCatalog?.(); releaseUpload?.(); await browser.close(); await new Promise(resolve => server.close(resolve)); }

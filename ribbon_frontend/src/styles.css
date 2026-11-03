@@ -2311,3 +2311,7 @@ small {
   .layout-example-heading h3 { font-size: 17px; }
   .layout-example-heading { gap: 4px; }
 }
+.background-tone-control { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 13px; color: #42584b; }
+.background-tone-control input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: #386b43; }
+.density-control { display: flex; align-items: center; gap: 12px; margin-top: 12px; font-size: 13px; }
+.density-control select { flex: 1; min-width: 0; padding: 6px 10px; border-radius: 6px; border: 1px solid #d7dfd6; background: white; color: #203c2a; }

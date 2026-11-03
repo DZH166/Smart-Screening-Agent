@@ -237,6 +237,9 @@ def estimate_render_space(snapshot):
     free-space preflight, not a user quota or a change to production dimensions.
     """
     width, height, _ = _profile(snapshot['output_profile'])
+    if snapshot.get('layout_engine') == 'design-rhythm-v1' and not snapshot.get('composite_ref'):
+        from .layout_quality import estimate
+        return estimate(snapshot)
     required = png_space(width, height) + png_space(min(width, 1800), min(height, 600))
     if snapshot.get('composite_ref'):
         return required
@@ -505,9 +508,42 @@ def _finish_render(canvas, snapshot, master_path, preview_path, object_transform
             'render_kind': 'composite' if snapshot.get('composite_ref') else 'layered'}
 
 
+def _quality_background(background, width, height):
+    """Fit a texture to the strip height and complete horizontal repeats.
+
+    Resize uniformly, then take a centred strip of the texture. An input texture
+    with unmatched edges still has seams; no mirroring or inpainting is implied.
+    Backgrounds are textures, while foreground design pixels are fitted intact.
+    """
+    natural_width = height * background.width / background.height
+    repeats = max(1, min(240, math.floor(width / max(1, natural_width))))
+    tile_width = math.ceil(width / repeats)
+    ratio = max(tile_width / background.width, height / background.height)
+    target = (max(tile_width, round(background.width * ratio)),
+              max(height, round(background.height * ratio)))
+    if target[0] * target[1] > MAX_PIXELS:
+        raise ValueError('底纹比例过于狭长，等比适配后的图像过大，请使用较接近方形的底纹')
+    resized = background.resize(target, Image.Resampling.LANCZOS)
+    try:
+        top = (resized.height - height) // 2
+        # Integer partition edges distribute rounding without stretching pixels.
+        tile = resized.crop((0, top, tile_width, top + height))
+        try:
+            canvas = Image.new('RGBA', (width, height), 'white')
+            for index in range(repeats):
+                canvas.alpha_composite(tile, (round(index * width / repeats), 0))
+            return canvas
+        finally:
+            tile.close()
+    finally:
+        resized.close()
+
+
 @memory_bounded_operation
 def render(snapshot: dict, resolve_asset: Callable[[str], Path], master_path: Path,
            preview_path: Path) -> dict:
+    if snapshot.get('layout_engine') not in (None, 'design-rhythm-v1'):
+        raise ValueError('该作品的排版引擎不受当前版本支持，请保留原版本并联系管理员')
     require_space(Path(master_path).parent, estimate_render_space(snapshot))
     width, height, dpi = _profile(snapshot["output_profile"])
     params = {**PARAM_DEFAULTS, **snapshot.get("params", {})}
@@ -524,31 +560,51 @@ def render(snapshot: dict, resolve_asset: Callable[[str], Path], master_path: Pa
         if len(snapshot["asset_refs"]) > 12:
             raise ValueError("一次最多使用十二个图案")
         background = read_image(resolve_asset(snapshot["background_ref"]))
-        # Repeated doubling preserves native pixels without millions of calls for tiny uploaded tiles.
-        tile = background.crop((0, 0, min(width, background.width), min(height, background.height)))
-        background.close()
-        while tile.width < width:
-            expanded = Image.new("RGBA", (min(width, tile.width*2), tile.height))
-            expanded.paste(tile, (0, 0))
-            expanded.paste(tile, (tile.width, 0))
+        if snapshot.get('layout_engine') == 'design-rhythm-v1':
+            try:
+                if params['background_color']:
+                    canvas = Image.new('RGBA', (width, height), ImageColor.getrgb(params['background_color']))
+                else:
+                    canvas = _quality_background(background, width, height)
+            finally:
+                background.close()
+        else:
+            # Legacy saved versions retain their original texture positioning.
+            tile = background.crop((0, 0, min(width, background.width), min(height, background.height)))
+            background.close()
+            while tile.width < width:
+                expanded = Image.new("RGBA", (min(width, tile.width*2), tile.height))
+                expanded.paste(tile, (0, 0))
+                expanded.paste(tile, (tile.width, 0))
+                tile.close()
+                tile = expanded
+            while tile.height < height:
+                expanded = Image.new("RGBA", (tile.width, min(height, tile.height*2)))
+                expanded.paste(tile, (0, 0))
+                expanded.paste(tile, (0, tile.height))
+                tile.close()
+                tile = expanded
+            canvas = Image.new("RGBA", (width, height), "white")
+            canvas.alpha_composite(tile)
             tile.close()
-            tile = expanded
-        while tile.height < height:
-            expanded = Image.new("RGBA", (tile.width, min(height, tile.height*2)))
-            expanded.paste(tile, (0, 0))
-            expanded.paste(tile, (0, tile.height))
-            tile.close()
-            tile = expanded
-        canvas = Image.new("RGBA", (width, height), "white")
-        canvas.alpha_composite(tile)
-        tile.close()
-        if params["background_color"]:
+        if snapshot.get('background_tone', 'original') == 'soft' and not params['background_color']:
+            with Image.new('RGBA', (width, height), (255, 255, 255, 140)) as veil:
+                canvas.alpha_composite(veil)
+        if params["background_color"] and snapshot.get('layout_engine') != 'design-rhythm-v1':
             canvas.close()
             canvas = Image.new("RGBA", (width, height), ImageColor.getrgb(params["background_color"]))
         refs = snapshot['asset_refs']
         rules = snapshot.get("template_rules", {})
         mode = snapshot.get("template_mode", "stagger")
         object_transforms = []
+        if snapshot.get('layout_engine') == 'design-rhythm-v1':
+            from .layout_quality import compose
+            try:
+                object_transforms = compose(canvas, snapshot, resolve_asset, master_path)
+                return _finish_render(canvas, snapshot, master_path, preview_path, object_transforms)
+            except BaseException:
+                canvas.close()
+                raise
         if mode in EXTENSION_MODES:
             try:
                 object_transforms = _compose_extensions(canvas, snapshot, resolve_asset, master_path)

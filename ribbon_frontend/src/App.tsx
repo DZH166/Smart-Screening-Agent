@@ -209,11 +209,17 @@ const emptySelection: Selection = {
   asset_ids: [],
   background_id: "",
   template_id: "",
+  background_tone: "soft",
+  design_density: "balanced",
 };
 const basicLayoutModes = new Set(["grid", "stagger", "scatter", "single", "ends", "panels"]);
 const layoutHints: Record<string, string> = {
+  grid: "完整图案按行排列，保持比例；可用画面密度选择疏朗或饱满。",
+  stagger: "相邻行错开，整组图案连续重复；文字和装饰作为一个整体保留。",
+  scatter: "轻微错落排列，默认保持图案朝向；不会自动拆出小装饰。",
+  single: "适合文字或较大的主体，多个图案按选择顺序整组重复。",
   bordered: "第一个图案放中间，其余图案做上下边饰；至少选择 2 个图案。",
-  scene: "所选图案先组成一组，再整组循环；不会自动补画或拼接无缝场景。",
+  scene: "第一个图案作主图，其余稍小、底部对齐，再整组循环；辅助装饰需自行选入。",
   fullwidth: "只选 1 张完整设计，保持比例放置一次；重复间距不适用。",
   alternating: "图案一大一小依次重复，可选择 1–12 个图案。",
   ends_open: "选 1–2 个图案放在两端，中间留白；重复间距不适用。",
@@ -240,11 +246,29 @@ function recommendedSelection(
       assets.some((a) => a.id === id),
     ),
     background_id: assets.find((a) => a.id === "demo-bg-sage")?.id || "",
+    background_tone: "soft",
+    design_density: "balanced",
     template_id:
       templates.find((t) => t.mode === "stagger" && t.enabled)?.id ||
       templates.find((t) => t.enabled)?.id ||
       "",
   };
+}
+
+function restoreSelection(value: Selection, version?: Version): Selection {
+  const snapshot = version?.snapshot;
+  const modern = !version || snapshot?.layout_engine === "design-rhythm-v1";
+  const next: Selection = {
+    ...value,
+    background_tone: value.background_tone ?? snapshot?.background_tone ?? (modern ? "soft" : "original"),
+  };
+  if (modern) {
+    next.design_density = value.design_density ?? snapshot?.design_density ?? "balanced";
+  } else {
+    // A cached draft cannot grant a legacy version the new layout controls.
+    delete next.design_density;
+  }
+  return next;
 }
 type Pending = {
   path: string;
@@ -376,7 +400,9 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
     (JSON.stringify(current.snapshot.asset_refs) !==
       JSON.stringify(selection.asset_ids) ||
       current.snapshot.background_ref !== selection.background_id ||
-      current.snapshot.template_id !== selection.template_id);
+      current.snapshot.template_id !== selection.template_id ||
+      (current.snapshot.background_tone || "original") !== (selection.background_tone || "original") ||
+      (current.snapshot.design_density || "balanced") !== (selection.design_density || "balanced"));
   const selectedPatterns = selection.asset_ids
     .map((id) => assets.find((a) => a.id === id))
     .filter(Boolean) as Asset[];
@@ -468,9 +494,11 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                 asset_ids: v.snapshot.asset_refs,
                 background_id: v.snapshot.background_ref,
                 template_id: v.snapshot.template_id,
+                background_tone: v.snapshot.background_tone || "original",
+                ...(v.snapshot.layout_engine === "design-rhythm-v1" ? {design_density: v.snapshot.design_density || "balanced"} : {}),
               }
             : emptySelection;
-      setSelection(next);
+      setSelection(restoreSelection(next, v));
       setSelectedVersionId(d.current_version_id);
       lastVersion.current = d.current_version_id;
       if (changedVersion) setPrompt("");
@@ -519,7 +547,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
             prefix + "selection",
             null,
           );
-          setSelection(saved?.value || recommendedSelection(a, t));
+          setSelection(restoreSelection(saved?.value || recommendedSelection(a, t)));
         }
         const bgId = loadLocal<string | null>(prefix + "backgroundJob", null);
         if (bgId) {
@@ -1157,6 +1185,16 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                   <p className="layout-selection-help">{layoutHints[template.mode]}</p>
                 )}
                 {layoutIssue && <p className="layout-selection-issue" id="ribbon-layout-issue" role="alert">{layoutIssue}</p>}
+                {(!current || current.snapshot.layout_engine === "design-rhythm-v1") && (
+                  <label className="density-control">画面密度
+                    <select aria-label="画面密度" value={selection.design_density || "balanced"} disabled={locked}
+                      onChange={(event) => updateSelection({ ...selection, design_density: event.target.value as Selection["design_density"] })}>
+                      <option value="airy">疏朗</option>
+                      <option value="balanced">均衡</option>
+                      <option value="rich">饱满</option>
+                    </select>
+                  </label>
+                )}
               </section>
               <section className="source-section background-section">
                 <div className="section-label">
@@ -1225,6 +1263,14 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                     可离开后恢复。
                   </p>
                 )}
+                <label className="background-tone-control">
+                  <input type="checkbox"
+                    checked={selection.background_tone === "soft"}
+                    disabled={locked || backgroundProcessing}
+                    onChange={(event) => updateSelection({ ...selection, background_tone: event.target.checked ? "soft" : "original" })}
+                  />
+                  柔和底纹，突出主图
+                </label>
               </section>
               {current && changed && (
                 <div className="selection-warning">

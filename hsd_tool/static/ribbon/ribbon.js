@@ -848,15 +848,15 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	function Oe(e) {
 		return { current: e };
 	}
-	function O(e) {
+	function ke(e) {
 		0 > De || (e.current = Ee[De], Ee[De] = null, De--);
 	}
-	function k(e, t) {
+	function O(e, t) {
 		De++, Ee[De] = e.current, e.current = t;
 	}
-	var A = Oe(null), ke = Oe(null), Ae = Oe(null), je = Oe(null);
-	function Me(e, t) {
-		switch (k(Ae, t), k(ke, e), k(A, null), t.nodeType) {
+	var k = Oe(null), Ae = Oe(null), je = Oe(null), Me = Oe(null);
+	function Ne(e, t) {
+		switch (O(je, t), O(Ae, e), O(k, null), t.nodeType) {
 			case 9:
 			case 11:
 				e = (e = t.documentElement) && (e = e.namespaceURI) ? up(e) : 0;
@@ -872,34 +872,34 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 				default: e = 0;
 			}
 		}
-		O(A), k(A, e);
+		ke(k), O(k, e);
 	}
-	function Ne() {
-		O(A), O(ke), O(Ae);
-	}
-	function Pe(e) {
-		var t = e.memoizedState;
-		t !== null && (sh._currentValue = t.memoizedState, k(je, e)), t = A.current;
-		var n = dp(t, e.type);
-		t !== n && (k(ke, e), k(A, n));
+	function Pe() {
+		ke(k), ke(Ae), ke(je);
 	}
 	function Fe(e) {
-		ke.current === e && (O(A), O(ke)), je.current === e && (O(je), sh._currentValue = Te);
+		var t = e.memoizedState;
+		t !== null && (sh._currentValue = t.memoizedState, O(Me, e)), t = k.current;
+		var n = dp(t, e.type);
+		t !== n && (O(Ae, e), O(k, n));
 	}
-	var Ie, Le;
-	function Re(e) {
-		if (Ie === void 0) try {
+	function Ie(e) {
+		Ae.current === e && (ke(k), ke(Ae)), Me.current === e && (ke(Me), sh._currentValue = Te);
+	}
+	var Le, Re;
+	function ze(e) {
+		if (Le === void 0) try {
 			throw Error();
 		} catch (e) {
 			var t = e.stack.trim().match(/\n( *(at )?)/);
-			Ie = t && t[1] || "", Le = -1 < e.stack.indexOf("\n    at") ? " (<anonymous>)" : -1 < e.stack.indexOf("@") ? "@unknown:0:0" : "";
+			Le = t && t[1] || "", Re = -1 < e.stack.indexOf("\n    at") ? " (<anonymous>)" : -1 < e.stack.indexOf("@") ? "@unknown:0:0" : "";
 		}
-		return "\n" + Ie + e + Le;
+		return "\n" + Le + e + Re;
 	}
-	var ze = !1;
-	function Be(e, t) {
-		if (!e || ze) return "";
-		ze = !0;
+	var Be = !1;
+	function Ve(e, t) {
+		if (!e || Be) return "";
+		Be = !0;
 		var n = Error.prepareStackTrace;
 		Error.prepareStackTrace = void 0;
 		try {
@@ -970,50 +970,50 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 				}
 			}
 		} finally {
-			ze = !1, Error.prepareStackTrace = n;
+			Be = !1, Error.prepareStackTrace = n;
 		}
-		return (n = e ? e.displayName || e.name : "") ? Re(n) : "";
+		return (n = e ? e.displayName || e.name : "") ? ze(n) : "";
 	}
-	function Ve(e, t) {
+	function He(e, t) {
 		switch (e.tag) {
 			case 26:
 			case 27:
-			case 5: return Re(e.type);
-			case 16: return Re("Lazy");
-			case 13: return e.child !== t && t !== null ? Re("Suspense Fallback") : Re("Suspense");
-			case 19: return Re("SuspenseList");
+			case 5: return ze(e.type);
+			case 16: return ze("Lazy");
+			case 13: return e.child !== t && t !== null ? ze("Suspense Fallback") : ze("Suspense");
+			case 19: return ze("SuspenseList");
 			case 0:
-			case 15: return Be(e.type, !1);
-			case 11: return Be(e.type.render, !1);
-			case 1: return Be(e.type, !0);
-			case 31: return Re("Activity");
-			case 30: return Re("ViewTransition");
+			case 15: return Ve(e.type, !1);
+			case 11: return Ve(e.type.render, !1);
+			case 1: return Ve(e.type, !0);
+			case 31: return ze("Activity");
+			case 30: return ze("ViewTransition");
 			default: return "";
 		}
 	}
-	function He(e) {
+	function Ue(e) {
 		try {
 			var t = "", n = null;
 			do
-				t += Ve(e, n), n = e, e = e.return;
+				t += He(e, n), n = e, e = e.return;
 			while (e);
 			return t;
 		} catch (e) {
 			return "\nError generating stack: " + e.message + "\n" + e.stack;
 		}
 	}
-	var Ue = Object.prototype.hasOwnProperty, We = t.unstable_scheduleCallback, Ge = t.unstable_cancelCallback, Ke = t.unstable_shouldYield, qe = t.unstable_requestPaint, Je = t.unstable_now, Ye = t.unstable_getCurrentPriorityLevel, Xe = t.unstable_ImmediatePriority, Ze = t.unstable_UserBlockingPriority, Qe = t.unstable_NormalPriority, $e = t.unstable_LowPriority, j = t.unstable_IdlePriority, et = t.log, tt = t.unstable_setDisableYieldValue, nt = null, M = null;
-	function rt(e) {
-		if (typeof et == "function" && tt(e), M && typeof M.setStrictMode == "function") try {
+	var We = Object.prototype.hasOwnProperty, Ge = t.unstable_scheduleCallback, Ke = t.unstable_cancelCallback, qe = t.unstable_shouldYield, Je = t.unstable_requestPaint, Ye = t.unstable_now, Xe = t.unstable_getCurrentPriorityLevel, Ze = t.unstable_ImmediatePriority, Qe = t.unstable_UserBlockingPriority, $e = t.unstable_NormalPriority, et = t.unstable_LowPriority, A = t.unstable_IdlePriority, j = t.log, tt = t.unstable_setDisableYieldValue, nt = null, M = null;
+	function N(e) {
+		if (typeof j == "function" && tt(e), M && typeof M.setStrictMode == "function") try {
 			M.setStrictMode(nt, e);
 		} catch {}
 	}
-	var N = Math.clz32 ? Math.clz32 : ot, it = Math.log, at = Math.LN2;
-	function ot(e) {
-		return e >>>= 0, e === 0 ? 32 : 31 - (it(e) / at | 0) | 0;
+	var P = Math.clz32 ? Math.clz32 : at, rt = Math.log, it = Math.LN2;
+	function at(e) {
+		return e >>>= 0, e === 0 ? 32 : 31 - (rt(e) / it | 0) | 0;
 	}
-	var st = 256, ct = 262144, lt = 4194304;
-	function ut(e) {
+	var ot = 256, st = 262144, ct = 4194304;
+	function lt(e) {
 		var t = e & 42;
 		if (t !== 0) return t;
 		switch (e & -e) {
@@ -1051,27 +1051,27 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			default: return e;
 		}
 	}
-	function dt(e, t, n) {
+	function ut(e, t, n) {
 		var r = e.pendingLanes;
 		if (r === 0) return 0;
 		var i = 0, a = e.suspendedLanes, o = e.pingedLanes;
 		e = e.warmLanes;
 		var s = r & 134217727;
-		return s === 0 ? (s = r & ~a, s === 0 ? o === 0 ? n || (n = r & ~e, n !== 0 && (i = ut(n))) : i = ut(o) : i = ut(s)) : (r = s & ~a, r === 0 ? (o &= s, o === 0 ? n || (n = s & ~e, n !== 0 && (i = ut(n))) : i = ut(o)) : i = ut(r)), i === 0 ? 0 : t !== 0 && t !== i && (t & a) === 0 && (a = i & -i, n = t & -t, a >= n || a === 32 && n & 4194048) ? t : i;
+		return s === 0 ? (s = r & ~a, s === 0 ? o === 0 ? n || (n = r & ~e, n !== 0 && (i = lt(n))) : i = lt(o) : i = lt(s)) : (r = s & ~a, r === 0 ? (o &= s, o === 0 ? n || (n = s & ~e, n !== 0 && (i = lt(n))) : i = lt(o)) : i = lt(r)), i === 0 ? 0 : t !== 0 && t !== i && (t & a) === 0 && (a = i & -i, n = t & -t, a >= n || a === 32 && n & 4194048) ? t : i;
 	}
-	function ft(e, t) {
+	function dt(e, t) {
 		return (e.pendingLanes & ~(e.suspendedLanes & ~e.pingedLanes) & t) === 0;
 	}
-	function pt(e, t) {
+	function ft(e, t) {
 		t & 8 && (t |= t & 32);
 		var n = e.entangledLanes;
 		if (n !== 0) for (e = e.entanglements, n &= t; 0 < n;) {
-			var r = 31 - N(n), i = 1 << r;
+			var r = 31 - P(n), i = 1 << r;
 			t |= e[r], n &= ~i;
 		}
 		return t;
 	}
-	function mt(e, t) {
+	function pt(e, t) {
 		switch (e) {
 			case 1:
 			case 2:
@@ -1107,23 +1107,23 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			default: return -1;
 		}
 	}
-	function ht() {
-		var e = lt;
-		return lt <<= 1, !(lt & 62914560) && (lt = 4194304), e;
+	function mt() {
+		var e = ct;
+		return ct <<= 1, !(ct & 62914560) && (ct = 4194304), e;
 	}
-	function gt(e) {
+	function ht(e) {
 		for (var t = [], n = 0; 31 > n; n++) t.push(e);
 		return t;
 	}
-	function _t(e, t) {
+	function gt(e, t) {
 		e.pendingLanes |= t, t !== 268435456 && (e.suspendedLanes = 0, e.pingedLanes = 0, e.warmLanes = 0);
 	}
-	function vt(e, t, n, r, i, a) {
+	function _t(e, t, n, r, i, a) {
 		var o = e.pendingLanes;
 		e.pendingLanes = n, e.suspendedLanes = 0, e.pingedLanes = 0, e.warmLanes = 0, e.expiredLanes &= n, e.entangledLanes &= n, e.errorRecoveryDisabledLanes &= n, e.shellSuspendCounter = 0;
 		var s = e.entanglements, c = e.expirationTimes, l = e.hiddenUpdates;
 		for (n = o & ~n; 0 < n;) {
-			var u = 31 - N(n), d = 1 << u;
+			var u = 31 - P(n), d = 1 << u;
 			s[u] = 0, c[u] = -1;
 			var f = l[u];
 			if (f !== null) for (l[u] = null, u = 0; u < f.length; u++) {
@@ -1132,25 +1132,25 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			}
 			n &= ~d;
 		}
-		r !== 0 && yt(e, r, 0), a !== 0 && i === 0 && e.tag !== 0 && (e.suspendedLanes |= a & ~(o & ~t));
+		r !== 0 && vt(e, r, 0), a !== 0 && i === 0 && e.tag !== 0 && (e.suspendedLanes |= a & ~(o & ~t));
 	}
-	function yt(e, t, n) {
+	function vt(e, t, n) {
 		e.pendingLanes |= t, e.suspendedLanes &= ~t;
-		var r = 31 - N(t);
+		var r = 31 - P(t);
 		e.entangledLanes |= t, e.entanglements[r] = e.entanglements[r] | 1073741824 | n & 261930;
 	}
-	function bt(e, t) {
+	function yt(e, t) {
 		var n = e.entangledLanes |= t;
 		for (e = e.entanglements; n;) {
-			var r = 31 - N(n), i = 1 << r;
+			var r = 31 - P(n), i = 1 << r;
 			i & t | e[r] & t && (e[r] |= t), n &= ~i;
 		}
 	}
-	function xt(e, t) {
+	function bt(e, t) {
 		var n = t & -t;
-		return n = n & 42 ? 1 : St(n), (n & (e.suspendedLanes | t)) === 0 ? n : 0;
+		return n = n & 42 ? 1 : xt(n), (n & (e.suspendedLanes | t)) === 0 ? n : 0;
 	}
-	function St(e) {
+	function xt(e) {
 		switch (e) {
 			case 2:
 				e = 1;
@@ -1188,14 +1188,14 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		}
 		return e;
 	}
-	function Ct(e) {
+	function St(e) {
 		return e &= -e, 2 < e ? 8 < e ? e & 134217727 ? 32 : 268435456 : 8 : 2;
 	}
-	function wt() {
+	function Ct() {
 		var e = D.p;
 		return e === 0 ? (e = window.event, e === void 0 ? 32 : Ch(e.type)) : e;
 	}
-	function Tt(e, t) {
+	function wt(e, t) {
 		var n = D.p;
 		try {
 			return D.p = e, t();
@@ -1203,17 +1203,17 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			D.p = n;
 		}
 	}
-	var Et = Math.random().toString(36).slice(2), Dt = "__reactFiber$" + Et, P = "__reactProps$" + Et, Ot = "__reactContainer$" + Et, kt = "__reactEvents$" + Et, At = "__reactListeners$" + Et, jt = "__reactHandles$" + Et, Mt = "__reactResources$" + Et, Nt = "__reactMarker$" + Et, Pt = "__reactLoad$" + Et;
+	var Tt = Math.random().toString(36).slice(2), Et = "__reactFiber$" + Tt, Dt = "__reactProps$" + Tt, Ot = "__reactContainer$" + Tt, kt = "__reactEvents$" + Tt, At = "__reactListeners$" + Tt, jt = "__reactHandles$" + Tt, Mt = "__reactResources$" + Tt, Nt = "__reactMarker$" + Tt, Pt = "__reactLoad$" + Tt;
 	function Ft(e) {
-		delete e[Dt], delete e[P], delete e[At], delete e[jt];
+		delete e[Et], delete e[Dt], delete e[At], delete e[jt];
 	}
 	function It(e) {
 		var t;
-		if (t = e[Dt]) return t;
+		if (t = e[Et]) return t;
 		for (var n = e.parentNode; n;) {
-			if (t = n[Ot] || n[Dt]) {
+			if (t = n[Ot] || n[Et]) {
 				if (n = t.alternate, t.child !== null || n !== null && n.child !== null) for (e = fm(e); e !== null;) {
-					if (n = e[Dt]) return n;
+					if (n = e[Et]) return n;
 					e = fm(e);
 				}
 				return t;
@@ -1223,7 +1223,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		return null;
 	}
 	function Lt(e) {
-		if (e = e[Dt] || e[Ot]) {
+		if (e = e[Et] || e[Ot]) {
 			var t = e.tag;
 			if (t === 5 || t === 6 || t === 13 || t === 31 || t === 26 || t === 27 || t === 3) return e;
 		}
@@ -1256,7 +1256,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	}
 	var Kt = RegExp("^[:A-Z_a-z\\u00C0-\\u00D6\\u00D8-\\u00F6\\u00F8-\\u02FF\\u0370-\\u037D\\u037F-\\u1FFF\\u200C-\\u200D\\u2070-\\u218F\\u2C00-\\u2FEF\\u3001-\\uD7FF\\uF900-\\uFDCF\\uFDF0-\\uFFFD][:A-Z_a-z\\u00C0-\\u00D6\\u00D8-\\u00F6\\u00F8-\\u02FF\\u0370-\\u037D\\u037F-\\u1FFF\\u200C-\\u200D\\u2070-\\u218F\\u2C00-\\u2FEF\\u3001-\\uD7FF\\uF900-\\uFDCF\\uFDF0-\\uFFFD\\-.0-9\\u00B7\\u0300-\\u036F\\u203F-\\u2040]*$"), qt = {}, Jt = {};
 	function Yt(e) {
-		return Ue.call(Jt, e) ? !0 : Ue.call(qt, e) ? !1 : Kt.test(e) ? Jt[e] = !0 : (qt[e] = !0, !1);
+		return We.call(Jt, e) ? !0 : We.call(qt, e) ? !1 : Kt.test(e) ? Jt[e] = !0 : (qt[e] = !0, !1);
 	}
 	var F = !1;
 	function Xt() {
@@ -1549,7 +1549,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	function Dn(e) {
 		var t = Lt(e);
 		if (t && (e = t.stateNode)) {
-			var n = e[P] || null;
+			var n = e[Dt] || null;
 			a: switch (e = t.stateNode, t.type) {
 				case "input":
 					if (cn(e, n.value, n.defaultValue, n.defaultValue, n.checked, n.defaultChecked, n.type, n.name), t = n.name, n.type === "radio" && t != null) {
@@ -1557,7 +1557,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 						for (n = n.querySelectorAll("input[name=\"" + sn("" + t) + "\"][type=\"radio\"]"), t = 0; t < n.length; t++) {
 							var r = n[t];
 							if (r !== e && r.form === e.form) {
-								var i = r[P] || null;
+								var i = r[Dt] || null;
 								if (!i) throw Error(s(90));
 								cn(r, i.value, i.defaultValue, i.defaultValue, i.checked, i.defaultChecked, i.type, i.name);
 							}
@@ -1585,7 +1585,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	function An(e, t) {
 		var n = e.stateNode;
 		if (n === null) return null;
-		var r = n[P] || null;
+		var r = n[Dt] || null;
 		if (r === null) return null;
 		n = r[t];
 		a: switch (t) {
@@ -1948,7 +1948,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		if (n.length !== r.length) return !1;
 		for (r = 0; r < n.length; r++) {
 			var i = n[r];
-			if (!Ue.call(t, i) || !Gr(e[i], t[i])) return !1;
+			if (!We.call(t, i) || !Gr(e[i], t[i])) return !1;
 		}
 		return !0;
 	}
@@ -2119,7 +2119,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		var r = e.alternate;
 		r !== null && (r.lanes |= n);
 		for (var i = !1, a = e.return; a !== null;) a.childLanes |= n, r = a.alternate, r !== null && (r.childLanes |= n), a.tag === 22 && (e = a.stateNode, e === null || e._visibility & 1 || (i = !0)), e = a, a = a.return;
-		return e.tag === 3 ? (a = e.stateNode, i && t !== null && (i = 31 - N(n), e = a.hiddenUpdates, r = e[i], r === null ? e[i] = [t] : r.push(t), t.lane = n | 536870912), a) : null;
+		return e.tag === 3 ? (a = e.stateNode, i && t !== null && (i = 31 - P(n), e = a.hiddenUpdates, r = e[i], r === null ? e[i] = [t] : r.push(t), t.lane = n | 536870912), a) : null;
 	}
 	function Ni(e) {
 		if (50 < kd) throw kd = 0, Ad = null, Error(s(185));
@@ -2154,7 +2154,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	function Bi(e, t, n, r, i, a) {
 		var o = 0;
 		if (r = e, typeof r == "function") Li(r) && (o = 1);
-		else if (typeof r == "string") o = qm(e, n, A.current) ? 26 : e === "html" || e === "head" || e === "body" ? 27 : 5;
+		else if (typeof r == "string") o = qm(e, n, k.current) ? 26 : e === "html" || e === "head" || e === "body" ? 27 : 5;
 		else a: switch (r) {
 			case he: return e = Ii(31, n, t, i), e.elementType = he, e.lanes = a, e;
 			case ae: return Vi(n.children, i, a, t);
@@ -2217,13 +2217,13 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			return n === void 0 ? (t = {
 				value: e,
 				source: t,
-				stack: He(t)
+				stack: Ue(t)
 			}, Gi.set(e, t), t) : n;
 		}
 		return {
 			value: e,
 			source: t,
-			stack: He(t)
+			stack: Ue(t)
 		};
 	}
 	var qi = [], Ji = 0, Yi = null, Xi = 0, Zi = [], Qi = 0, $i = null, ea = 1, ta = "";
@@ -2234,12 +2234,12 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		Zi[Qi++] = ea, Zi[Qi++] = ta, Zi[Qi++] = $i, $i = e;
 		var r = ea;
 		e = ta;
-		var i = 32 - N(r) - 1;
+		var i = 32 - P(r) - 1;
 		r &= ~(1 << i), n += 1;
-		var a = 32 - N(t) + i;
+		var a = 32 - P(t) + i;
 		if (30 < a) {
 			var o = i - i % 5;
-			a = (r & (1 << o) - 1).toString(32), r >>= o, i -= o, ea = 1 << 32 - N(t) + i | n << i | r, ta = a + e;
+			a = (r & (1 << o) - 1).toString(32), r >>= o, i -= o, ea = 1 << 32 - P(t) + i | n << i | r, ta = a + e;
 		} else ea = 1 << a | n << i | r, ta = e;
 	}
 	function ia(e) {
@@ -2258,7 +2258,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	}
 	function fa(e) {
 		var t = e.stateNode, n = e.type, r = e.memoizedProps;
-		switch (t[Dt] = e, t[P] = r, n) {
+		switch (t[Et] = e, t[Dt] = r, n) {
 			case "dialog":
 				Q("cancel", t), Q("close", t);
 				break;
@@ -2331,10 +2331,10 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	}
 	var va = Oe(null), ya = null, ba = null;
 	function xa(e, t, n) {
-		k(va, t._currentValue), t._currentValue = n;
+		O(va, t._currentValue), t._currentValue = n;
 	}
 	function Sa(e) {
-		e._currentValue = va.current, O(va);
+		e._currentValue = va.current, ke(va);
 	}
 	function Ca(e, t, n) {
 		for (; e !== null;) {
@@ -2392,7 +2392,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 					var c = i.type;
 					Gr(i.pendingProps.value, o.value) || (e === null ? e = [c] : e.push(c));
 				}
-			} else if (i === je.current) {
+			} else if (i === Me.current) {
 				if (o = i.alternate, o === null) throw Error(s(387));
 				o.memoizedState.memoizedState !== i.memoizedState.memoizedState && (e === null ? e = [sh] : e.push(sh));
 			}
@@ -2517,7 +2517,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	}
 	var qa = E.S;
 	E.S = function(e, t) {
-		if (gd = Je(), typeof t == "object" && t && typeof t.then == "function" && Wa(e, t), Ra !== null) for (var n = bf; n !== null;) La(n, Ra), n = n.next;
+		if (gd = Ye(), typeof t == "object" && t && typeof t.then == "function" && Wa(e, t), Ra !== null) for (var n = bf; n !== null;) La(n, Ra), n = n.next;
 		if (n = e.types, n !== null) {
 			for (var r = bf; r !== null;) La(r, n), r = r.next;
 			if (Ha !== 0) {
@@ -2536,7 +2536,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		return e === null ? G.pooledCache : e;
 	}
 	function Xa(e, t) {
-		t === null ? k(Ja, Ja.current) : k(Ja, t.pool);
+		t === null ? O(Ja, Ja.current) : O(Ja, t.pool);
 	}
 	function Za() {
 		var e = Ya();
@@ -2838,7 +2838,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	function So(e, t, n) {
 		if (t = t.updateQueue, t !== null && (t = t.shared, n & 4194048)) {
 			var r = t.lanes;
-			r &= e.pendingLanes, n |= r, t.lanes = n, bt(e, n);
+			r &= e.pendingLanes, n |= r, t.lanes = n, yt(e, n);
 		}
 	}
 	function Co(e, t) {
@@ -2945,37 +2945,37 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	}
 	var ko = Oe(null), Ao = Oe(0);
 	function jo(e, t) {
-		e = od, k(Ao, e), k(ko, t), od = e | t.baseLanes;
+		e = od, O(Ao, e), O(ko, t), od = e | t.baseLanes;
 	}
 	function Mo() {
-		k(Ao, od), k(ko, ko.current);
+		O(Ao, od), O(ko, ko.current);
 	}
 	function No() {
-		od = Ao.current, O(ko), O(Ao);
+		od = Ao.current, ke(ko), ke(Ao);
 	}
 	var Po = Oe(null), Fo = null;
 	function Io(e) {
 		var t = e.alternate;
-		k(Vo, Vo.current & 1), k(Po, e), Fo === null && (t === null || ko.current !== null || t.memoizedState !== null) && (Fo = e);
+		O(Vo, Vo.current & 1), O(Po, e), Fo === null && (t === null || ko.current !== null || t.memoizedState !== null) && (Fo = e);
 	}
 	function Lo(e) {
-		k(Vo, Vo.current), k(Po, e), Fo === null && (Fo = e);
+		O(Vo, Vo.current), O(Po, e), Fo === null && (Fo = e);
 	}
 	function Ro(e) {
-		e.tag === 22 ? (k(Vo, Vo.current), k(Po, e), Fo === null && (Fo = e)) : zo();
+		e.tag === 22 ? (O(Vo, Vo.current), O(Po, e), Fo === null && (Fo = e)) : zo();
 	}
 	function zo() {
-		k(Vo, Vo.current), k(Po, Po.current);
+		O(Vo, Vo.current), O(Po, Po.current);
 	}
 	function Bo(e) {
-		O(Po), Fo === e && (Fo = null), O(Vo);
+		ke(Po), Fo === e && (Fo = null), ke(Vo);
 	}
 	var Vo = Oe(0);
 	function Ho(e, t) {
-		k(Po, Po.current), k(Vo, t);
+		O(Po, Po.current), O(Vo, t);
 	}
 	function Uo(e) {
-		O(Vo), O(Po), Fo === e && (Fo = null);
+		ke(Vo), ke(Po), Fo === e && (Fo = null);
 	}
 	function Wo(e) {
 		for (var t = e; t !== null;) {
@@ -3240,11 +3240,11 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		if (typeof e == "function") {
 			var n = e;
 			if (e = n(), Yo) {
-				rt(!0);
+				N(!0);
 				try {
 					n();
 				} finally {
-					rt(!1);
+					N(!1);
 				}
 			}
 		}
@@ -3481,11 +3481,11 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		var r = n.memoizedState;
 		if (t !== null && es(t, r[1])) return r[0];
 		if (r = e(), Yo) {
-			rt(!0);
+			N(!0);
 			try {
 				e();
 			} finally {
-				rt(!1);
+				N(!1);
 			}
 		}
 		return n.memoizedState = [r, t], r;
@@ -3641,7 +3641,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	function gc(e, t, n) {
 		if (n & 4194048) {
 			var r = t.lanes;
-			r &= e.pendingLanes, n |= r, t.lanes = n, bt(e, n);
+			r &= e.pendingLanes, n |= r, t.lanes = n, yt(e, n);
 		}
 	}
 	var _c = {
@@ -3691,11 +3691,11 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			t = t === void 0 ? null : t;
 			var r = e();
 			if (Yo) {
-				rt(!0);
+				N(!0);
 				try {
 					e();
 				} finally {
-					rt(!1);
+					N(!1);
 				}
 			}
 			return n.memoizedState = [r, t], r;
@@ -3705,11 +3705,11 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			if (n !== void 0) {
 				var i = n(t);
 				if (Yo) {
-					rt(!0);
+					N(!0);
 					try {
 						n(t);
 					} finally {
-						rt(!1);
+						N(!1);
 					}
 				}
 			} else i = t;
@@ -3758,7 +3758,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			var e = cs(), t = G.identifierPrefix;
 			if (L) {
 				var n = ta, r = ea;
-				n = (r & ~(1 << 32 - N(r) - 1)).toString(32) + n, t = "_" + t + "R_" + n, n = Xo++, 0 < n && (t += "H" + n.toString(32)), t += "_";
+				n = (r & ~(1 << 32 - P(r) - 1)).toString(32) + n, t = "_" + t + "R_" + n, n = Xo++, 0 < n && (t += "H" + n.toString(32)), t += "_";
 			} else n = $o++, t = "_" + t + "r_" + n.toString(32) + "_";
 			return e.memoizedState = t;
 		},
@@ -4095,7 +4095,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 				else throw Error(s(558));
 			} else if (Ic || Ta(e, t, n, !1), i = (n & e.childLanes) !== 0, Ic || i) {
 				if (ko.current === null) {
-					if (r = G, r !== null && (o = xt(r, n), o !== 0 && o !== a.retryLane)) throw a.retryLane = o, ji(e, o), Pd(r, e, o), Fc;
+					if (r = G, r !== null && (o = bt(r, n), o !== 0 && o !== a.retryLane)) throw a.retryLane = o, ji(e, o), Pd(r, e, o), Fc;
 					Kd();
 				}
 				t = Gc(e, t, n);
@@ -4226,7 +4226,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		}
 		if (Ic || Ta(e, t, c, !1), r = (c & e.childLanes) !== 0, Ic || r) {
 			if (ko.current !== null) return il(e, t, c);
-			if (r = G, r !== null && (i = xt(r, c), i !== 0 && i !== o.retryLane)) throw o.retryLane = i, ji(e, i), Pd(r, e, i), Fc;
+			if (r = G, r !== null && (i = bt(r, c), i !== 0 && i !== o.retryLane)) throw o.retryLane = i, ji(e, i), Pd(r, e, i), Fc;
 			return om(a) || Kd(), il(e, t, c);
 		}
 		return om(a) ? (t.flags |= 192, t.child = e.child, null) : (e = o.treeContext, I = lm(a.nextSibling), sa = t, L = !0, ca = null, la = !1, e !== null && oa(t, e), t = nl(t, i.children), t.flags |= 134221824, t);
@@ -4329,14 +4329,14 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	function ml(e, t, n) {
 		switch (t.tag) {
 			case 3:
-				Me(t, t.stateNode.containerInfo), xa(t, Pa, e.memoizedState.cache), ha();
+				Ne(t, t.stateNode.containerInfo), xa(t, Pa, e.memoizedState.cache), ha();
 				break;
 			case 27:
 			case 5:
-				Pe(t);
+				Fe(t);
 				break;
 			case 4:
-				Me(t, t.stateNode.containerInfo);
+				Ne(t, t.stateNode.containerInfo);
 				break;
 			case 10:
 				xa(t, t.type, t.memoizedProps.value);
@@ -4404,7 +4404,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			case 1: return r = t.type, i = Tc(r, t.pendingProps), Xc(e, t, r, i, n);
 			case 3:
 				a: {
-					if (Me(t, t.stateNode.containerInfo), e === null) throw Error(s(387));
+					if (Ne(t, t.stateNode.containerInfo), e === null) throw Error(s(387));
 					r = t.pendingProps;
 					var a = t.memoizedState;
 					i = a.element, yo(e, t), Eo(t, r, null, n);
@@ -4439,12 +4439,12 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 					t = t.child;
 				}
 				return t;
-			case 26: return qc(e, t), e === null ? (n = Nm(t.type, null, t.pendingProps, null)) ? t.memoizedState = n : L || (t.stateNode = fp(t.type, t.pendingProps, Ae.current, t)) : t.memoizedState = Nm(t.type, e.memoizedProps, t.pendingProps, e.memoizedState), null;
-			case 27: return Pe(t), e === null && L && (r = t.stateNode = hm(t.type, t.pendingProps, Ae.current), sa = t, la = !0, i = I, Sp(t.type) ? (um = i, I = lm(r.firstChild)) : I = i), Lc(e, t, t.pendingProps.children, n), qc(e, t), e === null && (t.flags |= 4194304), t.child;
-			case 5: return e === null && L && ((i = r = I) && (r = rm(r, t.type, t.pendingProps, la), r === null ? i = !1 : (t.stateNode = r, sa = t, I = lm(r.firstChild), la = !1, i = !0)), i || da(t)), Pe(t), i = t.type, a = t.pendingProps, o = e === null ? null : e.memoizedProps, r = a.children, pp(i, a) ? r = null : o !== null && pp(i, o) && (t.flags |= 32), t.memoizedState !== null && (i = ts(e, t, is, null, null, n), sh._currentValue = i), qc(e, t), Lc(e, t, r, n), t.child;
+			case 26: return qc(e, t), e === null ? (n = Nm(t.type, null, t.pendingProps, null)) ? t.memoizedState = n : L || (t.stateNode = fp(t.type, t.pendingProps, je.current, t)) : t.memoizedState = Nm(t.type, e.memoizedProps, t.pendingProps, e.memoizedState), null;
+			case 27: return Fe(t), e === null && L && (r = t.stateNode = hm(t.type, t.pendingProps, je.current), sa = t, la = !0, i = I, Sp(t.type) ? (um = i, I = lm(r.firstChild)) : I = i), Lc(e, t, t.pendingProps.children, n), qc(e, t), e === null && (t.flags |= 4194304), t.child;
+			case 5: return e === null && L && ((i = r = I) && (r = rm(r, t.type, t.pendingProps, la), r === null ? i = !1 : (t.stateNode = r, sa = t, I = lm(r.firstChild), la = !1, i = !0)), i || da(t)), Fe(t), i = t.type, a = t.pendingProps, o = e === null ? null : e.memoizedProps, r = a.children, pp(i, a) ? r = null : o !== null && pp(i, o) && (t.flags |= 32), t.memoizedState !== null && (i = ts(e, t, is, null, null, n), sh._currentValue = i), qc(e, t), Lc(e, t, r, n), t.child;
 			case 6: return e === null && L && ((e = n = I) && (n = im(n, t.pendingProps, la), n === null ? e = !1 : (t.stateNode = n, sa = t, I = null, e = !0)), e || da(t)), null;
 			case 13: return tl(e, t, n);
-			case 4: return Me(t, t.stateNode.containerInfo), r = t.pendingProps, e === null ? t.child = ho(t, null, r, n) : Lc(e, t, r, n), t.child;
+			case 4: return Ne(t, t.stateNode.containerInfo), r = t.pendingProps, e === null ? t.child = ho(t, null, r, n) : Lc(e, t, r, n), t.child;
 			case 11: return Rc(e, t, t.type, t.pendingProps, n);
 			case 7: return r = t.pendingProps, qc(e, t), Lc(e, t, r, n), t.child;
 			case 8: return Lc(e, t, t.pendingProps.children, n), t.child;
@@ -4494,7 +4494,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		}
 	}
 	function yl(e, t) {
-		t !== null && (e.flags |= 4), e.flags & 16384 && (t = e.tag === 22 ? 536870912 : ht(), e.lanes |= t, dd |= t);
+		t !== null && (e.flags |= 4), e.flags & 16384 && (t = e.tag === 22 ? 536870912 : mt(), e.lanes |= t, dd |= t);
 	}
 	function bl(e, t) {
 		if (!L) switch (e.tailMode) {
@@ -4527,30 +4527,30 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			case 9:
 			case 14: return V(t), null;
 			case 1: return V(t), null;
-			case 3: return n = t.stateNode, r = null, e !== null && (r = e.memoizedState.cache), t.memoizedState.cache !== r && (t.flags |= 2048), Sa(Pa), Ne(), n.pendingContext && (n.context = n.pendingContext, n.pendingContext = null), (e === null || e.child === null) && (ma(t) ? gl(t) : e === null || e.memoizedState.isDehydrated && !(t.flags & 256) || (t.flags |= 1024, ga())), V(t), null;
+			case 3: return n = t.stateNode, r = null, e !== null && (r = e.memoizedState.cache), t.memoizedState.cache !== r && (t.flags |= 2048), Sa(Pa), Pe(), n.pendingContext && (n.context = n.pendingContext, n.pendingContext = null), (e === null || e.child === null) && (ma(t) ? gl(t) : e === null || e.memoizedState.isDehydrated && !(t.flags & 256) || (t.flags |= 1024, ga())), V(t), null;
 			case 26:
 				var i = t.type, a = t.memoizedState;
 				return e === null ? (gl(t), a === null ? (V(t), _l(t, i, null, r, n)) : (V(t), vl(t, a))) : a ? a === e.memoizedState ? (V(t), t.flags &= -16777217) : (gl(t), V(t), vl(t, a)) : (e = e.memoizedProps, e !== r && gl(t), V(t), _l(t, i, e, r, n)), null;
 			case 27:
-				if (Fe(t), n = Ae.current, i = t.type, e !== null && t.stateNode != null) e.memoizedProps !== r && gl(t);
+				if (Ie(t), n = je.current, i = t.type, e !== null && t.stateNode != null) e.memoizedProps !== r && gl(t);
 				else {
 					if (!r) {
 						if (t.stateNode === null) throw Error(s(166));
 						return V(t), t.subtreeFlags &= -33554433, null;
 					}
-					e = A.current, ma(t) ? fa(t, e) : (e = hm(i, r, n), t.stateNode = e, gl(t));
+					e = k.current, ma(t) ? fa(t, e) : (e = hm(i, r, n), t.stateNode = e, gl(t));
 				}
 				return V(t), t.subtreeFlags &= -33554433, null;
 			case 5:
-				if (Fe(t), i = t.type, e !== null && t.stateNode != null) e.memoizedProps !== r && gl(t);
+				if (Ie(t), i = t.type, e !== null && t.stateNode != null) e.memoizedProps !== r && gl(t);
 				else {
 					if (!r) {
 						if (t.stateNode === null) throw Error(s(166));
 						return V(t), t.subtreeFlags &= -33554433, null;
 					}
-					if (a = A.current, ma(t)) fa(t, a);
+					if (a = k.current, ma(t)) fa(t, a);
 					else {
-						var o = lp(Ae.current);
+						var o = lp(je.current);
 						switch (a) {
 							case 1:
 								a = o.createElementNS("http://www.w3.org/2000/svg", i);
@@ -4574,7 +4574,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 								default: a = typeof r.is == "string" ? o.createElement(i, { is: r.is }) : o.createElement(i);
 							}
 						}
-						a[Dt] = t, a[P] = r;
+						a[Et] = t, a[Dt] = r;
 						a: for (o = t.child; o !== null;) {
 							if (o.tag === 5 || o.tag === 6) a.appendChild(o.stateNode);
 							else if (o.tag !== 4 && o.tag !== 27 && o.child !== null) {
@@ -4609,13 +4609,13 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 				if (e && t.stateNode != null) e.memoizedProps !== r && gl(t);
 				else {
 					if (typeof r != "string" && t.stateNode === null) throw Error(s(166));
-					if (e = Ae.current, ma(t)) {
+					if (e = je.current, ma(t)) {
 						if (e = t.stateNode, n = t.memoizedProps, r = null, i = sa, i !== null) switch (i.tag) {
 							case 27:
 							case 5: r = i.memoizedProps;
 						}
-						e[Dt] = t, e = !!(e.nodeValue === n || r !== null && !0 === r.suppressHydrationWarning || ep(e.nodeValue, n)), e || da(t, !0);
-					} else e = lp(e).createTextNode(r), e[Dt] = t, t.stateNode = e;
+						e[Et] = t, e = !!(e.nodeValue === n || r !== null && !0 === r.suppressHydrationWarning || ep(e.nodeValue, n)), e || da(t, !0);
+					} else e = lp(e).createTextNode(r), e[Et] = t, t.stateNode = e;
 				}
 				return V(t), null;
 			case 31:
@@ -4624,7 +4624,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 						if (e === null) {
 							if (!r) throw Error(s(318));
 							if (e = t.memoizedState, e = e === null ? null : e.dehydrated, !e) throw Error(s(557));
-							e[Dt] = t;
+							e[Et] = t;
 						} else ha(), !(t.flags & 128) && (t.memoizedState = null), t.flags |= 4;
 						V(t), e = !1;
 					} else n = ga(), e !== null && e.memoizedState !== null && (e.memoizedState.hydrationErrors = n), e = !0;
@@ -4638,14 +4638,14 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 						if (e === null) {
 							if (!i) throw Error(s(318));
 							if (i = t.memoizedState, i = i === null ? null : i.dehydrated, !i) throw Error(s(317));
-							i[Dt] = t;
+							i[Et] = t;
 						} else ha(), !(t.flags & 128) && (t.memoizedState = null), t.flags |= 4;
 						V(t), i = !1;
 					} else i = ga(), e !== null && e.memoizedState !== null && (e.memoizedState.hydrationErrors = i), i = !0;
 					if (!i) return t.flags & 256 ? (Bo(t), t) : (Bo(t), null);
 				}
 				return Bo(t), t.flags & 128 ? (t.lanes = n, t) : (n = r !== null, e = e !== null && e.memoizedState !== null, n && (r = t.child, i = null, r.alternate !== null && r.alternate.memoizedState !== null && r.alternate.memoizedState.cachePool !== null && (i = r.alternate.memoizedState.cachePool.pool), a = null, r.memoizedState !== null && r.memoizedState.cachePool !== null && (a = r.memoizedState.cachePool.pool), a !== i && (r.flags |= 2048)), n !== e && n && (t.child.flags |= 8192), yl(t, t.updateQueue), V(t), null);
-			case 4: return Ne(), e === null && Wf(t.stateNode.containerInfo), t.flags |= 67108864, V(t), null;
+			case 4: return Pe(), e === null && Wf(t.stateNode.containerInfo), t.flags |= 67108864, V(t), null;
 			case 10: return Sa(t.type), V(t), null;
 			case 19:
 				if (Uo(t), r = t.memoizedState, r === null) return V(t), null;
@@ -4659,13 +4659,13 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 							}
 							e = e.sibling;
 						}
-						r.tail !== null && Je() > _d && (t.flags |= 128, i = !0, bl(r, !1), t.lanes = 4194304);
+						r.tail !== null && Ye() > _d && (t.flags |= 128, i = !0, bl(r, !1), t.lanes = 4194304);
 					}
 				} else {
 					if (!i) {
 						if (e = Wo(a), e !== null) {
 							if (t.flags |= 128, i = !0, e = e.updateQueue, t.updateQueue = e, yl(t, e), bl(r, !0), r.tail === null && r.tailMode !== "collapsed" && r.tailMode !== "visible" && !a.alternate && !L) return V(t), null;
-						} else 2 * Je() - r.renderingStartTime > _d && n !== 536870912 && (t.flags |= 128, i = !0, bl(r, !1), t.lanes = 4194304);
+						} else 2 * Ye() - r.renderingStartTime > _d && n !== 536870912 && (t.flags |= 128, i = !0, bl(r, !1), t.lanes = 4194304);
 					}
 					r.isBackwards ? (a.sibling = t.child, t.child = a) : (e = r.last, e === null ? t.child = a : e.sibling = a, r.last = a);
 				}
@@ -4681,11 +4681,11 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 						}
 						n = !0;
 					}
-					return r.rendering = e, r.tail = e.sibling, r.renderingStartTime = Je(), e.sibling = null, a = Vo.current, a = i ? a & 1 | 2 : a & 1, r.tailMode === "visible" || r.tailMode === "collapsed" || !n || L ? Ho(t, a) : (n = a, k(Po, t), k(Vo, n), Fo === null && (Fo = t)), L && na(t, r.treeForkCount), e;
+					return r.rendering = e, r.tail = e.sibling, r.renderingStartTime = Ye(), e.sibling = null, a = Vo.current, a = i ? a & 1 | 2 : a & 1, r.tailMode === "visible" || r.tailMode === "collapsed" || !n || L ? Ho(t, a) : (n = a, O(Po, t), O(Vo, n), Fo === null && (Fo = t)), L && na(t, r.treeForkCount), e;
 				}
 				return V(t), null;
 			case 22:
-			case 23: return Bo(t), No(), r = t.memoizedState !== null, e === null ? r && (t.flags |= 8192) : e.memoizedState !== null !== r && (t.flags |= 8192), r ? n & 536870912 && !(t.flags & 128) && (V(t), t.subtreeFlags & 6 && (t.flags |= 8192)) : V(t), n = t.updateQueue, n !== null && yl(t, n.retryQueue), n = null, e !== null && e.memoizedState !== null && e.memoizedState.cachePool !== null && (n = e.memoizedState.cachePool.pool), r = null, t.memoizedState !== null && t.memoizedState.cachePool !== null && (r = t.memoizedState.cachePool.pool), r !== n && (t.flags |= 2048), e !== null && O(Ja), null;
+			case 23: return Bo(t), No(), r = t.memoizedState !== null, e === null ? r && (t.flags |= 8192) : e.memoizedState !== null !== r && (t.flags |= 8192), r ? n & 536870912 && !(t.flags & 128) && (V(t), t.subtreeFlags & 6 && (t.flags |= 8192)) : V(t), n = t.updateQueue, n !== null && yl(t, n.retryQueue), n = null, e !== null && e.memoizedState !== null && e.memoizedState.cachePool !== null && (n = e.memoizedState.cachePool.pool), r = null, t.memoizedState !== null && t.memoizedState.cachePool !== null && (r = t.memoizedState.cachePool.pool), r !== n && (t.flags |= 2048), e !== null && ke(Ja), null;
 			case 24: return n = null, e !== null && (n = e.memoizedState.cache), t.memoizedState.cache !== n && (t.flags |= 2048), Sa(Pa), V(t), null;
 			case 25: return null;
 			case 30: return t.flags |= 33554432, V(t), null;
@@ -4695,10 +4695,10 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	function Sl(e, t) {
 		switch (aa(t), t.tag) {
 			case 1: return e = t.flags, e & 65536 ? (t.flags = e & -65537 | 128, t) : null;
-			case 3: return Sa(Pa), Ne(), e = t.flags, e & 65536 && !(e & 128) ? (t.flags = e & -65537 | 128, t) : null;
+			case 3: return Sa(Pa), Pe(), e = t.flags, e & 65536 && !(e & 128) ? (t.flags = e & -65537 | 128, t) : null;
 			case 26:
 			case 27:
-			case 5: return Fe(t), null;
+			case 5: return Ie(t), null;
 			case 31:
 				if (t.memoizedState !== null) {
 					if (Bo(t), t.alternate === null) throw Error(s(340));
@@ -4712,10 +4712,10 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 				}
 				return e = t.flags, e & 65536 ? (t.flags = e & -65537 | 128, t) : null;
 			case 19: return Uo(t), e = t.flags, e & 65536 ? (t.flags = e & -65537 | 128, e = t.memoizedState, e !== null && (e.rendering = null, e.tail = null), t.flags |= 4, t) : null;
-			case 4: return Ne(), null;
+			case 4: return Pe(), null;
 			case 10: return Sa(t.type), null;
 			case 22:
-			case 23: return Bo(t), No(), e !== null && O(Ja), e = t.flags, e & 65536 ? (t.flags = e & -65537 | 128, t) : null;
+			case 23: return Bo(t), No(), e !== null && ke(Ja), e = t.flags, e & 65536 ? (t.flags = e & -65537 | 128, t) : null;
 			case 24: return Sa(Pa), null;
 			case 25: return null;
 			default: return null;
@@ -4724,15 +4724,15 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	function Cl(e, t) {
 		switch (aa(t), t.tag) {
 			case 3:
-				Sa(Pa), Ne();
+				Sa(Pa), Pe();
 				break;
 			case 26:
 			case 27:
 			case 5:
-				Fe(t);
+				Ie(t);
 				break;
 			case 4:
-				Ne();
+				Pe();
 				break;
 			case 31:
 				t.memoizedState !== null && Bo(t);
@@ -4748,7 +4748,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 				break;
 			case 22:
 			case 23:
-				Bo(t), No(), e !== null && O(Ja);
+				Bo(t), No(), e !== null && ke(Ja);
 				break;
 			case 24: Sa(Pa);
 		}
@@ -4898,7 +4898,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	function Il(e, t, n) {
 		try {
 			var r = e.stateNode;
-			ip(r, e.type, n, t), r[P] = t;
+			ip(r, e.type, n, t), r[Dt] = t;
 		} catch (t) {
 			Z(e, e.return, t);
 		}
@@ -4933,7 +4933,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		var t = e.stateNode, n = e.memoizedProps;
 		try {
 			for (var r = e.type, i = t.attributes; i.length;) t.removeAttributeNode(i[0]);
-			np(t, r, n), t[Dt] = e, t[P] = n;
+			np(t, r, n), t[Et] = e, t[Dt] = n;
 		} catch (t) {
 			Z(e, e.return, t);
 		}
@@ -5484,7 +5484,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 										t = e.type, n = e.memoizedProps, i = a.ownerDocument || a;
 										b: switch (t) {
 											case "title":
-												r = i.getElementsByTagName("title")[0], (!r || r[Nt] || r[Dt] || r.namespaceURI === "http://www.w3.org/2000/svg" || r.hasAttribute("itemprop")) && (r = i.createElement(t), i.head.insertBefore(r, i.querySelector("head > title"))), np(r, t, n), r[Dt] = e, Bt(r), t = r;
+												r = i.getElementsByTagName("title")[0], (!r || r[Nt] || r[Et] || r.namespaceURI === "http://www.w3.org/2000/svg" || r.hasAttribute("itemprop")) && (r = i.createElement(t), i.head.insertBefore(r, i.querySelector("head > title"))), np(r, t, n), r[Et] = e, Bt(r), t = r;
 												break a;
 											case "link":
 												if (a = Gm("link", "href", i).get(t + (n.href || ""))) {
@@ -5506,7 +5506,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 												break;
 											default: throw Error(s(468, t));
 										}
-										r[Dt] = e, Bt(r), t = r;
+										r[Et] = e, Bt(r), t = r;
 									}
 									e.stateNode = t;
 								}
@@ -5558,7 +5558,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 				Au(t, e, n), Nu(e), i & 4 && (t = e.updateQueue, t !== null && (e.updateQueue = null, ku(e, t)));
 				break;
 			case 13:
-				Au(t, e, n), Nu(e), e.child.flags & 8192 && e.memoizedState !== null != (r !== null && r.memoizedState !== null) && (hd = Je()), i & 4 && (t = e.updateQueue, t !== null && (e.updateQueue = null, ku(e, t)));
+				Au(t, e, n), Nu(e), e.child.flags & 8192 && e.memoizedState !== null != (r !== null && r.memoizedState !== null) && (hd = Ye()), i & 4 && (t = e.updateQueue, t !== null && (e.updateQueue = null, ku(e, t)));
 				break;
 			case 22:
 				a = e.memoizedState !== null, o = r !== null && r.memoizedState !== null;
@@ -6016,13 +6016,13 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		}
 	}, td = typeof WeakMap == "function" ? WeakMap : Map, W = 0, G = null, K = null, q = 0, J = 0, nd = null, rd = !1, id = !1, ad = !1, od = 0, Y = 0, sd = 0, cd = 0, ld = 0, ud = 0, dd = 0, fd = null, pd = null, md = !1, hd = 0, gd = 0, _d = Infinity, vd = null, yd = null, X = 0, bd = null, xd = null, Sd = 0, Cd = 0, wd = null, Td = null, Ed = null, Dd = null, Od = null, kd = 0, Ad = null;
 	function jd() {
-		return W & 2 && q !== 0 ? q & -q : E.T === null ? wt() : Pf();
+		return W & 2 && q !== 0 ? q & -q : E.T === null ? Ct() : Pf();
 	}
 	function Md() {
 		if (ud === 0) {
 			if (!(q & 536870912) || L) {
-				var e = ct;
-				ct <<= 1, !(ct & 3932160) && (ct = 262144), ud = e;
+				var e = st;
+				st <<= 1, !(st & 3932160) && (st = 262144), ud = e;
 			} else ud = 536870912;
 		}
 		return e = Po.current, e !== null && (e.flags |= 32), ud;
@@ -6034,11 +6034,11 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		}
 	}
 	function Pd(e, t, n) {
-		(e === G && (J === 2 || J === 9) || e.cancelPendingCommit !== null) && (Vd(e, 0), Rd(e, q, ud, !1)), _t(e, n), W & 2 && e === G || (e === G && (!(W & 2) && (cd |= n), Y === 4 && Rd(e, q, ud, !1)), Ef(e));
+		(e === G && (J === 2 || J === 9) || e.cancelPendingCommit !== null) && (Vd(e, 0), Rd(e, q, ud, !1)), gt(e, n), W & 2 && e === G || (e === G && (!(W & 2) && (cd |= n), Y === 4 && Rd(e, q, ud, !1)), Ef(e));
 	}
 	function Fd(e, t, n) {
 		if (W & 6) throw Error(s(327));
-		var r = !n && !(t & 127) && (t & e.expiredLanes) === 0 || ft(e, t), i = r ? Yd(e, t) : qd(e, t, !0), a = r;
+		var r = !n && !(t & 127) && (t & e.expiredLanes) === 0 || dt(e, t), i = r ? Yd(e, t) : qd(e, t, !0), a = r;
 		do {
 			if (i === 0) {
 				id && !r && Rd(e, t, 0, !1);
@@ -6086,8 +6086,8 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 						case 5: break;
 						default: throw Error(s(329));
 					}
-					if ((t & 62914560) === t && (i = hd + 300 - Je(), 10 < i)) {
-						if (Rd(r, t, ud, !rd), dt(r, 0, !0) !== 0) break a;
+					if ((t & 62914560) === t && (i = hd + 300 - Ye(), 10 < i)) {
+						if (Rd(r, t, ud, !rd), ut(r, 0, !0) !== 0) break a;
 						Sd = t, r.timeoutHandle = gp(Id.bind(null, r, n, pd, vd, md, t, ud, cd, dd, rd, a, "Throttled", -0, 0), i);
 						break a;
 					}
@@ -6110,7 +6110,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			waitingForImages: !0,
 			waitingForViewTransition: !1,
 			unsuspend: Sn
-		}, Ul = null, Ju(t, a, d), h && (m = d, h = e.containerInfo, h = (h.nodeType === 9 ? h : h.ownerDocument).__reactViewTransition, h != null && (m.count++, m.waitingForViewTransition = !0, m = nh.bind(m), h.finished.then(m, m))), m = (a & 62914560) === a ? hd - Je() : (a & 4194048) === a ? gd - Je() : 0, m = eh(d, m), m !== null) ? (Sd = a, e.cancelPendingCommit = m(nf.bind(null, e, t, a, n, r, i, o, s, c, l, u, d, null, f, p)), Rd(e, a, o, !l)) : nf(e, t, a, n, r, i, o, s, c, l, u, d);
+		}, Ul = null, Ju(t, a, d), h && (m = d, h = e.containerInfo, h = (h.nodeType === 9 ? h : h.ownerDocument).__reactViewTransition, h != null && (m.count++, m.waitingForViewTransition = !0, m = nh.bind(m), h.finished.then(m, m))), m = (a & 62914560) === a ? hd - Ye() : (a & 4194048) === a ? gd - Ye() : 0, m = eh(d, m), m !== null) ? (Sd = a, e.cancelPendingCommit = m(nf.bind(null, e, t, a, n, r, i, o, s, c, l, u, d, null, f, p)), Rd(e, a, o, !l)) : nf(e, t, a, n, r, i, o, s, c, l, u, d);
 	}
 	function Ld(e) {
 		for (var t = e;;) {
@@ -6137,12 +6137,12 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		return !0;
 	}
 	function Rd(e, t, n, r) {
-		t = pt(e, t), t &= ~ld, t &= ~cd, e.suspendedLanes |= t, e.pingedLanes &= ~t, r && (e.warmLanes |= t), r = e.expirationTimes;
+		t = ft(e, t), t &= ~ld, t &= ~cd, e.suspendedLanes |= t, e.pingedLanes &= ~t, r && (e.warmLanes |= t), r = e.expirationTimes;
 		for (var i = t; 0 < i;) {
-			var a = 31 - N(i), o = 1 << a;
+			var a = 31 - P(i), o = 1 << a;
 			r[a] = -1, i &= ~o;
 		}
-		n !== 0 && yt(e, n, t);
+		n !== 0 && vt(e, n, t);
 	}
 	function zd() {
 		return W & 6 ? !0 : (Df(0, !1), !1);
@@ -6157,7 +6157,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	}
 	function Vd(e, t) {
 		var n = e.timeoutHandle;
-		return n !== -1 && (e.timeoutHandle = -1, _p(n)), n = e.cancelPendingCommit, n !== null && (e.cancelPendingCommit = null, n()), Sd = 0, Bd(), G = e, K = n = Ri(e.current, null), q = t, J = 0, nd = null, rd = !1, id = ft(e, t), ad = !1, dd = ud = ld = cd = sd = Y = 0, pd = fd = null, md = !1, od = pt(e, t), Oi(), n;
+		return n !== -1 && (e.timeoutHandle = -1, _p(n)), n = e.cancelPendingCommit, n !== null && (e.cancelPendingCommit = null, n()), Sd = 0, Bd(), G = e, K = n = Ri(e.current, null), q = t, J = 0, nd = null, rd = !1, id = dt(e, t), ad = !1, dd = ud = ld = cd = sd = Y = 0, pd = fd = null, md = !1, od = ft(e, t), Oi(), n;
 	}
 	function Hd(e, t) {
 		R = null, E.H = _c, t === Qa || t === eo ? (t = oo(), J = 3) : t === $a ? (t = oo(), J = 4) : J = t === Fc ? 8 : typeof t == "object" && t && typeof t.then == "function" ? 6 : 1, nd = t, K === null && (Y = 1, kc(e, Ki(t, e.current)));
@@ -6220,7 +6220,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		var n = W;
 		W |= 2;
 		var r = Wd(), i = Gd();
-		G !== e || q !== t ? (vd = null, _d = Je() + 500, Vd(e, t)) : id = ft(e, t);
+		G !== e || q !== t ? (vd = null, _d = Ye() + 500, Vd(e, t)) : id = dt(e, t);
 		a: do
 			try {
 				if (J !== 0 && K !== null) {
@@ -6287,7 +6287,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		return ba = ya = null, E.H = r, E.A = i, W = n, K === null ? (G = null, q = 0, Oi(), Y) : 0;
 	}
 	function Xd() {
-		for (; K !== null && !Ke();) Zd(K);
+		for (; K !== null && !qe();) Zd(K);
 	}
 	function Zd(e) {
 		var t = hl(e.alternate, e, od);
@@ -6375,7 +6375,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	}
 	function rf(e, t, n, r, i, a, o) {
 		var s = t.lanes | t.childLanes;
-		if (Cd = s, s |= Di, vt(e, n, s, r, i, a), Dd = null, (n & 335544064) === n ? (Od = za(e), r = 10262) : (Od = null, r = 10256), (t.subtreeFlags & r) !== 0 || (t.flags & r) !== 0 ? (e.callbackNode = null, e.callbackPriority = 0, yf(Qe, function() {
+		if (Cd = s, s |= Di, _t(e, n, s, r, i, a), Dd = null, (n & 335544064) === n ? (Od = za(e), r = 10262) : (Od = null, r = 10256), (t.subtreeFlags & r) !== 0 || (t.flags & r) !== 0 ? (e.callbackNode = null, e.callbackPriority = 0, yf($e, function() {
 			return ff(), null;
 		})) : (e.callbackNode = null, e.callbackPriority = 0), Hl = !1, r = !!(t.flags & 13878), t.subtreeFlags & 13878 || r) {
 			r = E.T, E.T = null, i = D.p, D.p = 2, a = W, W |= 4;
@@ -6467,9 +6467,9 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		if (X === 4 || X === 3) {
 			X = 0;
 			var e = Ed;
-			Ed = null, qe();
+			Ed = null, Je();
 			var t = bd, n = xd, r = Sd, i = Td, a = (r & 335544064) === r ? 10262 : 10256;
-			if ((n.subtreeFlags & a) !== 0 || (n.flags & a) !== 0 ? X = 5 : (X = 0, xd = bd = null, uf(t, t.pendingLanes)), a = t.pendingLanes, a === 0 && (yd = null), Ct(r), n = n.stateNode, M && typeof M.onCommitFiberRoot == "function") try {
+			if ((n.subtreeFlags & a) !== 0 || (n.flags & a) !== 0 ? X = 5 : (X = 0, xd = bd = null, uf(t, t.pendingLanes)), a = t.pendingLanes, a === 0 && (yd = null), St(r), n = n.stateNode, M && typeof M.onCommitFiberRoot == "function") try {
 				M.onCommitFiberRoot(nt, n, void 0, (n.current.flags & 128) == 128);
 			} catch {}
 			if (i !== null) {
@@ -6497,7 +6497,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		if (X !== 5) return !1;
 		var e = bd, t = Cd;
 		Cd = 0;
-		var n = Ct(Sd), r = E.T, i = D.p;
+		var n = St(Sd), r = E.T, i = D.p;
 		try {
 			D.p = 32 > n ? 32 : n, E.T = null, n = wd, wd = null;
 			var a = bd, o = Sd;
@@ -6512,7 +6512,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		}
 	}
 	function pf(e, t, n) {
-		t = Ki(n, t), t = jc(e.stateNode, t, 2), e = xo(e, t, 2), e !== null && (_t(e, 2), Ef(e));
+		t = Ki(n, t), t = jc(e.stateNode, t, 2), e = xo(e, t, 2), e !== null && (gt(e, 2), Ef(e));
 	}
 	function Z(e, t, n) {
 		if (e.tag === 3) pf(e, e, n);
@@ -6524,7 +6524,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			if (t.tag === 1) {
 				var r = t.stateNode;
 				if (typeof t.type.getDerivedStateFromError == "function" || typeof r.componentDidCatch == "function" && (yd === null || !yd.has(r))) {
-					e = Ki(n, e), n = Mc(2), r = xo(t, n, 2), r !== null && (Nc(n, r, t, e), _t(r, 2), Ef(r));
+					e = Ki(n, e), n = Mc(2), r = xo(t, n, 2), r !== null && (Nc(n, r, t, e), gt(r, 2), Ef(r));
 					break;
 				}
 			}
@@ -6542,10 +6542,10 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	}
 	function hf(e, t, n) {
 		var r = e.pingCache;
-		r !== null && r.delete(t), e.pingedLanes |= e.suspendedLanes & n, e.warmLanes &= ~n, G === e && (q & n) === n && (Y === 4 || Y === 3 && (q & 62914560) === q && 300 > Je() - hd ? W & 2 ? ld |= n : Vd(e, 0) : ld |= n, dd === q && (dd = 0)), Ef(e);
+		r !== null && r.delete(t), e.pingedLanes |= e.suspendedLanes & n, e.warmLanes &= ~n, G === e && (q & n) === n && (Y === 4 || Y === 3 && (q & 62914560) === q && 300 > Ye() - hd ? W & 2 ? ld |= n : Vd(e, 0) : ld |= n, dd === q && (dd = 0)), Ef(e);
 	}
 	function gf(e, t) {
-		t === 0 && (t = ht()), e = ji(e, t), e !== null && (_t(e, t), Ef(e));
+		t === 0 && (t = mt()), e = ji(e, t), e !== null && (gt(e, t), Ef(e));
 	}
 	function _f(e) {
 		var t = e.memoizedState, n = 0;
@@ -6570,7 +6570,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		r !== null && r.delete(t), gf(e, n);
 	}
 	function yf(e, t) {
-		return We(e, t);
+		return Ge(e, t);
 	}
 	var bf = null, xf = null, Sf = !1, Cf = !1, wf = !1, Tf = 0;
 	function Ef(e) {
@@ -6587,10 +6587,10 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 							if (i === 0) var a = 0;
 							else {
 								var o = r.suspendedLanes, s = r.pingedLanes;
-								a = (1 << 31 - N(42 | e) + 1) - 1, a &= i & ~(o & ~s), a = a & 201326741 ? a & 201326741 | 1 : a ? a | 2 : 0;
+								a = (1 << 31 - P(42 | e) + 1) - 1, a &= i & ~(o & ~s), a = a & 201326741 ? a & 201326741 | 1 : a ? a | 2 : 0;
 							}
 							a !== 0 && (n = !0, Mf(r, a));
-						} else a = q, a = dt(r, r === G ? a : 0, r.cancelPendingCommit !== null || r.timeoutHandle !== -1), !(a & 3) || ft(r, a) || (n = !0, Mf(r, a));
+						} else a = q, a = ut(r, r === G ? a : 0, r.cancelPendingCommit !== null || r.timeoutHandle !== -1), !(a & 3) || dt(r, a) || (n = !0, Mf(r, a));
 					}
 					r = r.next;
 				}
@@ -6605,7 +6605,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		Cf = Sf = !1;
 		var e = 0;
 		Tf !== 0 && hp() && (e = Tf);
-		for (var t = Je(), n = null, r = bf; r !== null;) {
+		for (var t = Ye(), n = null, r = bf; r !== null;) {
 			var i = r.next, a = Af(r, t);
 			a === 0 ? (r.next = null, n === null ? bf = i : n.next = i, i === null && (xf = n)) : (n = r, (e !== 0 || a & 3) && (Cf = !0)), r = i;
 		}
@@ -6613,35 +6613,35 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	}
 	function Af(e, t) {
 		for (var n = e.suspendedLanes, r = e.pingedLanes, i = e.expirationTimes, a = e.pendingLanes & -62914561; 0 < a;) {
-			var o = 31 - N(a), s = 1 << o, c = i[o];
-			c === -1 ? ((s & n) === 0 || (s & r) !== 0) && (i[o] = mt(s, t)) : c <= t && (e.expiredLanes |= s), a &= ~s;
+			var o = 31 - P(a), s = 1 << o, c = i[o];
+			c === -1 ? ((s & n) === 0 || (s & r) !== 0) && (i[o] = pt(s, t)) : c <= t && (e.expiredLanes |= s), a &= ~s;
 		}
-		if (t = G, n = q, n = dt(e, e === t ? n : 0, e.cancelPendingCommit !== null || e.timeoutHandle !== -1), r = e.callbackNode, n === 0 || e === t && (J === 2 || J === 9) || e.cancelPendingCommit !== null) return r !== null && r !== null && Ge(r), e.callbackNode = null, e.callbackPriority = 0;
-		if (!(n & 3) || ft(e, n)) {
+		if (t = G, n = q, n = ut(e, e === t ? n : 0, e.cancelPendingCommit !== null || e.timeoutHandle !== -1), r = e.callbackNode, n === 0 || e === t && (J === 2 || J === 9) || e.cancelPendingCommit !== null) return r !== null && r !== null && Ke(r), e.callbackNode = null, e.callbackPriority = 0;
+		if (!(n & 3) || dt(e, n)) {
 			if (t = n & -n, t === e.callbackPriority) return t;
-			switch (r !== null && Ge(r), Ct(n)) {
+			switch (r !== null && Ke(r), St(n)) {
 				case 2:
 				case 8:
-					n = Ze;
-					break;
-				case 32:
 					n = Qe;
 					break;
-				case 268435456:
-					n = j;
+				case 32:
+					n = $e;
 					break;
-				default: n = Qe;
+				case 268435456:
+					n = A;
+					break;
+				default: n = $e;
 			}
-			return r = jf.bind(null, e), n = We(n, r), e.callbackPriority = t, e.callbackNode = n, t;
+			return r = jf.bind(null, e), n = Ge(n, r), e.callbackPriority = t, e.callbackNode = n, t;
 		}
-		return r !== null && r !== null && Ge(r), e.callbackPriority = 2, e.callbackNode = null, 2;
+		return r !== null && r !== null && Ke(r), e.callbackPriority = 2, e.callbackNode = null, 2;
 	}
 	function jf(e, t) {
 		if (X !== 0 && X !== 5) return e.callbackNode = null, e.callbackPriority = 0, null;
 		var n = e.callbackNode;
 		if (df() && e.callbackNode !== n) return null;
 		var r = q;
-		return r = dt(e, e === G ? r : 0, e.cancelPendingCommit !== null || e.timeoutHandle !== -1), r === 0 ? null : (Fd(e, r, t), Af(e, Je()), e.callbackNode != null && e.callbackNode === n ? jf.bind(null, e) : null);
+		return r = ut(e, e === G ? r : 0, e.cancelPendingCommit !== null || e.timeoutHandle !== -1), r === 0 ? null : (Fd(e, r, t), Af(e, Ye()), e.callbackNode != null && e.callbackNode === n ? jf.bind(null, e) : null);
 	}
 	function Mf(e, t) {
 		if (df()) return null;
@@ -6649,13 +6649,13 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	}
 	function Nf() {
 		bp(function() {
-			W & 6 ? We(Xe, Of) : kf();
+			W & 6 ? Ge(Ze, Of) : kf();
 		});
 	}
 	function Pf() {
 		if (Tf === 0) {
 			var e = Ha;
-			e === 0 && (e = st, st <<= 1, !(st & 261888) && (st = 256)), Tf = e;
+			e === 0 && (e = ot, ot <<= 1, !(ot & 261888) && (ot = 256)), Tf = e;
 		}
 		return Tf;
 	}
@@ -6664,8 +6664,8 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	}
 	function If(e, t, n, r, i) {
 		if (t === "submit" && n && n.stateNode === i) {
-			var a = Ff((i[P] || null).action), o = r.submitter;
-			o && (t = (t = o[P] || null) ? Ff(t.formAction) : o.getAttribute("formAction"), t !== null && (a = t, o = null));
+			var a = Ff((i[Dt] || null).action), o = r.submitter;
+			o && (t = (t = o[Dt] || null) ? Ff(t.formAction) : o.getAttribute("formAction"), t !== null && (a = t, o = null));
 			var s = new Un("action", "action", null, r, i);
 			e.push({
 				event: s,
@@ -7210,7 +7210,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			case "textContent": return;
 			default:
 				if (!Ut.hasOwnProperty(n)) a: {
-					if (n[0] === "o" && n[1] === "n" && (i = n.endsWith("Capture"), a = n.slice(2, i ? n.length - 7 : void 0), t = e[P] || null, t = t == null ? null : t[n], typeof t == "function" && e.removeEventListener(a, t, i), typeof r == "function")) {
+					if (n[0] === "o" && n[1] === "n" && (i = n.endsWith("Capture"), a = n.slice(2, i ? n.length - 7 : void 0), t = e[Dt] || null, t = t == null ? null : t[n], typeof t == "function" && e.removeEventListener(a, t, i), typeof r == "function")) {
 						typeof t != "function" && t !== null && (n in e ? e[n] = null : e.hasAttribute(n) && e.removeAttribute(n)), e.addEventListener(a, r, i);
 						break a;
 					}
@@ -7553,7 +7553,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		return e === 1 && t === "foreignObject" ? 0 : e;
 	}
 	function fp(e, t, n, r) {
-		return n = lp(n).createElement(e), n[Dt] = r, n[P] = t, np(n, e, t), Bt(n), n;
+		return n = lp(n).createElement(e), n[Et] = r, n[Dt] = t, np(n, e, t), Bt(n), n;
 	}
 	function pp(e, t) {
 		return e === "textarea" || e === "noscript" || typeof t.children == "string" || typeof t.children == "number" || typeof t.children == "bigint" || typeof t.dangerouslySetInnerHTML == "object" && t.dangerouslySetInnerHTML !== null && t.dangerouslySetInnerHTML.__html != null;
@@ -8339,7 +8339,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		}
 	}
 	function Nm(e, t, n, r) {
-		var i = (i = Ae.current) ? bm(i) : null;
+		var i = (i = je.current) ? bm(i) : null;
 		if (!i) throw Error(s(446));
 		switch (e) {
 			case "meta":
@@ -8477,7 +8477,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		if (r.has(e)) return r;
 		for (r.set(e, null), n = n.getElementsByTagName(e), i = 0; i < n.length; i++) {
 			var a = n[i];
-			if (!(a[Nt] || a[Dt] || e === "link" && a.getAttribute("rel") === "stylesheet") && a.namespaceURI !== "http://www.w3.org/2000/svg") {
+			if (!(a[Nt] || a[Et] || e === "link" && a.getAttribute("rel") === "stylesheet") && a.namespaceURI !== "http://www.w3.org/2000/svg") {
 				var o = a.getAttribute(t) || "";
 				o = e + o;
 				var s = r.get(o);
@@ -8600,7 +8600,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		_threadCount: 0
 	};
 	function ch(e, t, n, r, i, a, o, s, c) {
-		this.tag = 1, this.containerInfo = e, this.pingCache = this.current = this.pendingChildren = null, this.timeoutHandle = -1, this.callbackNode = this.next = this.pendingContext = this.context = this.cancelPendingCommit = null, this.callbackPriority = 0, this.expirationTimes = gt(-1), this.entangledLanes = this.shellSuspendCounter = this.errorRecoveryDisabledLanes = this.expiredLanes = this.warmLanes = this.pingedLanes = this.suspendedLanes = this.pendingLanes = 0, this.entanglements = gt(0), this.hiddenUpdates = gt(null), this.identifierPrefix = r, this.onUncaughtError = i, this.onCaughtError = a, this.onRecoverableError = o, this.pooledCache = null, this.pooledCacheLanes = 0, this.formState = c, this.transitionTypes = null, this.incompleteTransitions = /* @__PURE__ */ new Map();
+		this.tag = 1, this.containerInfo = e, this.pingCache = this.current = this.pendingChildren = null, this.timeoutHandle = -1, this.callbackNode = this.next = this.pendingContext = this.context = this.cancelPendingCommit = null, this.callbackPriority = 0, this.expirationTimes = ht(-1), this.entangledLanes = this.shellSuspendCounter = this.errorRecoveryDisabledLanes = this.expiredLanes = this.warmLanes = this.pingedLanes = this.suspendedLanes = this.pendingLanes = 0, this.entanglements = ht(0), this.hiddenUpdates = ht(null), this.identifierPrefix = r, this.onUncaughtError = i, this.onCaughtError = a, this.onRecoverableError = o, this.pooledCache = null, this.pooledCacheLanes = 0, this.formState = c, this.transitionTypes = null, this.incompleteTransitions = /* @__PURE__ */ new Map();
 	}
 	function lh(e, t, n, r, i, a, o, s, c, l, u, d) {
 		return e = new ch(e, t, n, o, c, l, u, d, s), t = 1, !0 === a && (t |= 24), a = Ii(3, null, null, t), e.current = a, a.stateNode = e, t = Fa(), t.refCount++, e.pooledCache = t, t.refCount++, a.memoizedState = {
@@ -8633,7 +8633,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	function hh(e) {
 		if (e.tag === 13 || e.tag === 31) {
 			var t = jd();
-			t = St(t);
+			t = xt(t);
 			var n = ji(e, t);
 			n !== null && Pd(n, e, t), ph(e, t);
 		}
@@ -8670,14 +8670,14 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 					if (a !== null) switch (a.tag) {
 						case 3:
 							if (a = a.stateNode, a.current.memoizedState.isDehydrated) {
-								var o = ut(a.pendingLanes);
+								var o = lt(a.pendingLanes);
 								if (o !== 0) {
 									var s = a;
 									for (s.pendingLanes |= 2, s.entangledLanes |= 2; o;) {
-										var c = 1 << 31 - N(o);
+										var c = 1 << 31 - P(o);
 										s.entanglements[1] |= c, o &= ~c;
 									}
-									Ef(a), !(W & 6) && (_d = Je() + 500, Df(0, !1));
+									Ef(a), !(W & 6) && (_d = Ye() + 500, Df(0, !1));
 								}
 							}
 							break;
@@ -8789,12 +8789,12 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			case "mouseleave":
 			case "pointerenter":
 			case "pointerleave": return 8;
-			case "message": switch (Ye()) {
-				case Xe: return 2;
-				case Ze: return 8;
-				case Qe:
-				case $e: return 32;
-				case j: return 268435456;
+			case "message": switch (Xe()) {
+				case Ze: return 2;
+				case Qe: return 8;
+				case $e:
+				case et: return 32;
+				case A: return 268435456;
 				default: return 32;
 			}
 			default: return 32;
@@ -8851,14 +8851,14 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			if (n !== null) {
 				if (t = n.tag, t === 13) {
 					if (t = u(n), t !== null) {
-						e.blockedOn = t, Tt(e.priority, function() {
+						e.blockedOn = t, wt(e.priority, function() {
 							hh(n);
 						});
 						return;
 					}
 				} else if (t === 31) {
 					if (t = d(n), t !== null) {
-						e.blockedOn = t, Tt(e.priority, function() {
+						e.blockedOn = t, wt(e.priority, function() {
 							hh(n);
 						});
 						return;
@@ -8924,12 +8924,12 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		}
 		for (; 0 < Ah.length && (n = Ah[0], n.blockedOn === null);) Fh(n), n.blockedOn === null && Ah.shift();
 		if (n = (e.ownerDocument || e).$$reactFormReplay, n != null) for (r = 0; r < n.length; r += 3) {
-			var i = n[r], a = n[r + 1], o = i[P] || null;
+			var i = n[r], a = n[r + 1], o = i[Dt] || null;
 			if (typeof a == "function") o || Vh(n);
 			else if (o) {
 				var s = null;
 				if (a && a.hasAttribute("formAction")) {
-					if (i = a, o = a[P] || null) s = o.formAction;
+					if (i = a, o = a[Dt] || null) s = o.formAction;
 					else if (Sh(i) !== null) continue;
 				} else s = o.action;
 				typeof s == "function" ? n[r + 1] = s : (n.splice(r, 3), r -= 3), Vh(n);
@@ -8989,7 +8989,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	}
 	Gh.prototype.unstable_scheduleHydration = function(e) {
 		if (e) {
-			var t = wt();
+			var t = Ct();
 			e = {
 				blockedOn: null,
 				target: e,
@@ -9739,7 +9739,9 @@ function ae(e) {
 var oe = {
 	asset_ids: [],
 	background_id: "",
-	template_id: ""
+	template_id: "",
+	background_tone: "soft",
+	design_density: "balanced"
 }, se = /* @__PURE__ */ new Set([
 	"grid",
 	"stagger",
@@ -9748,8 +9750,12 @@ var oe = {
 	"ends",
 	"panels"
 ]), ce = {
+	grid: "完整图案按行排列，保持比例；可用画面密度选择疏朗或饱满。",
+	stagger: "相邻行错开，整组图案连续重复；文字和装饰作为一个整体保留。",
+	scatter: "轻微错落排列，默认保持图案朝向；不会自动拆出小装饰。",
+	single: "适合文字或较大的主体，多个图案按选择顺序整组重复。",
 	bordered: "第一个图案放中间，其余图案做上下边饰；至少选择 2 个图案。",
-	scene: "所选图案先组成一组，再整组循环；不会自动补画或拼接无缝场景。",
+	scene: "第一个图案作主图，其余稍小、底部对齐，再整组循环；辅助装饰需自行选入。",
 	fullwidth: "只选 1 张完整设计，保持比例放置一次；重复间距不适用。",
 	alternating: "图案一大一小依次重复，可选择 1–12 个图案。",
 	ends_open: "选 1–2 个图案放在两端，中间留白；重复间距不适用。",
@@ -9772,10 +9778,19 @@ function ue(e, t) {
 			"demo-ring"
 		].filter((t) => e.some((e) => e.id === t)),
 		background_id: e.find((e) => e.id === "demo-bg-sage")?.id || "",
+		background_tone: "soft",
+		design_density: "balanced",
 		template_id: t.find((e) => e.mode === "stagger" && e.enabled)?.id || t.find((e) => e.enabled)?.id || ""
 	};
 }
-var de = {
+function de(e, t) {
+	let n = t?.snapshot, r = !t || n?.layout_engine === "design-rhythm-v1", i = {
+		...e,
+		background_tone: e.background_tone ?? n?.background_tone ?? (r ? "soft" : "original")
+	};
+	return r ? i.design_density = e.design_density ?? n?.design_density ?? "balanced" : delete i.design_density, i;
+}
+var fe = {
 	queued: "等待处理",
 	planning: "正在理解修改要求",
 	rendering: "正在生成设计",
@@ -9791,7 +9806,7 @@ var de = {
 	SUCCEEDED: "已保存",
 	FAILED: "处理未完成"
 };
-function fe({ active: e, view: t }) {
+function pe({ active: e, view: t }) {
 	let [n, r] = (0, l.useState)(null), [i, a] = (0, l.useState)(!0), [o, s] = (0, l.useState)("");
 	return (0, l.useEffect)(() => {
 		if (!e) return;
@@ -9825,7 +9840,7 @@ function fe({ active: e, view: t }) {
 		}),
 		n && /* @__PURE__ */ (0, x.jsx)("div", {
 			hidden: i,
-			children: /* @__PURE__ */ (0, x.jsx)(pe, {
+			children: /* @__PURE__ */ (0, x.jsx)(me, {
 				user: n,
 				active: e && !i,
 				view: t,
@@ -9836,16 +9851,16 @@ function fe({ active: e, view: t }) {
 		})
 	] });
 }
-function pe({ user: e, onLogout: t, active: n, view: r }) {
-	let i = `ribbon:${e.id}:`, [a, o] = (0, l.useState)(null), [s, c] = (0, l.useState)([]), [u, p] = (0, l.useState)([]), [m, b] = (0, l.useState)([]), [S, ee] = (0, l.useState)(null), [C, ne] = (0, l.useState)(oe), [fe, pe] = (0, l.useState)(null), [me, he] = (0, l.useState)("detail"), [ge, _e] = (0, l.useState)(""), [ve, ye] = (0, l.useState)(""), [be, xe] = (0, l.useState)(null), [Se, Ce] = (0, l.useState)(null), [we, E] = (0, l.useState)(!0), [D, Te] = (0, l.useState)(!1), [Ee, De] = (0, l.useState)(!1), [Oe, O] = (0, l.useState)(null), [k, A] = (0, l.useState)(null), [ke, Ae] = (0, l.useState)(() => v(i + "pending", null)), [je, Me] = (0, l.useState)(""), [Ne, Pe] = (0, l.useState)(!1), [Fe, Ie] = (0, l.useState)(null), [Le, Re] = (0, l.useState)(!1), [ze, Be] = (0, l.useState)(null), [Ve, He] = (0, l.useState)(!1), Ue = (0, l.useRef)(null);
+function me({ user: e, onLogout: t, active: n, view: r }) {
+	let i = `ribbon:${e.id}:`, [a, o] = (0, l.useState)(null), [s, c] = (0, l.useState)([]), [u, p] = (0, l.useState)([]), [m, b] = (0, l.useState)([]), [S, ee] = (0, l.useState)(null), [C, ne] = (0, l.useState)(oe), [pe, me] = (0, l.useState)(null), [he, ge] = (0, l.useState)("detail"), [_e, ve] = (0, l.useState)(""), [ye, be] = (0, l.useState)(""), [xe, Se] = (0, l.useState)(null), [Ce, we] = (0, l.useState)(null), [E, D] = (0, l.useState)(!0), [Te, Ee] = (0, l.useState)(!1), [De, Oe] = (0, l.useState)(!1), [ke, O] = (0, l.useState)(null), [k, Ae] = (0, l.useState)(null), [je, Me] = (0, l.useState)(() => v(i + "pending", null)), [Ne, Pe] = (0, l.useState)(""), [Fe, Ie] = (0, l.useState)(!1), [Le, Re] = (0, l.useState)(null), [ze, Be] = (0, l.useState)(!1), [Ve, He] = (0, l.useState)(null), [Ue, We] = (0, l.useState)(!1), Ge = (0, l.useRef)(null);
 	(0, l.useEffect)(() => {
-		n && r === "ribbon" || (Be(null), Ue.current = null);
+		n && r === "ribbon" || (He(null), Ge.current = null);
 	}, [n, r]);
-	let We = (0, l.useRef)(!1), Ge = (0, l.useRef)(null), Ke = (0, l.useRef)(null), qe = (0, l.useRef)(!1), Je = (0, l.useRef)(null), Ye = (0, l.useRef)(!0), Xe = (0, l.useRef)(null), Ze = (0, l.useRef)(null);
-	(0, l.useEffect)(() => (Ye.current = !0, () => {
-		Ye.current = !1, Je.current?.abort();
+	let Ke = (0, l.useRef)(!1), qe = (0, l.useRef)(null), Je = (0, l.useRef)(null), Ye = (0, l.useRef)(!1), Xe = (0, l.useRef)(null), Ze = (0, l.useRef)(!0), Qe = (0, l.useRef)(null), $e = (0, l.useRef)(null);
+	(0, l.useEffect)(() => (Ze.current = !0, () => {
+		Ze.current = !1, Xe.current?.abort();
 	}), []);
-	let Qe = e.role === "admin", $e = S?.versions?.find((e) => e.id === S.current_version_id), j = S?.versions?.find((e) => e.id === fe) || $e, et = Math.max(0, 2 - (S?.successful_refinement_count || 0)), tt = !!S?.active_job_id || g(be), nt = g(Se), M = D || tt || !!ke || Ne, rt = !!j && j.id !== S?.current_version_id, N = j?.snapshot?.output_profile, it = N?.width && N?.height && N?.dpi ? `${N.width}×${N.height}px · ${N.dpi} DPI · ${(N.width / N.dpi * 2.54).toFixed(1)}×${(N.height / N.dpi * 2.54).toFixed(1)} cm` : "", at = u.find((e) => e.id === C.template_id), ot = le(at?.mode, C.asset_ids.length), st = C.asset_ids.length > 0 && !!C.background_id && !!at && !ot, ct = !!$e && (JSON.stringify($e.snapshot.asset_refs) !== JSON.stringify(C.asset_ids) || $e.snapshot.background_ref !== C.background_id || $e.snapshot.template_id !== C.template_id), lt = C.asset_ids.map((e) => s.find((t) => t.id === e)).filter(Boolean), ut = s.find((e) => e.id === C.background_id), dt = u.filter((e) => e.enabled || e.id === C.template_id), ft = dt.filter((e) => se.has(e.mode)), pt = dt.filter((e) => !se.has(e.mode)), mt = a?.provider === "test", ht = mt ? a?.auth_mode !== "hsd" : a?.ai_ready === !0, gt = ct && (!ge.trim() || ["应用所选配置", "应用新的素材与排版"].includes(ge.trim())), _t = $e?.editing || a?.editing, vt = ct && _t && [
+	let et = e.role === "admin", A = S?.versions?.find((e) => e.id === S.current_version_id), j = S?.versions?.find((e) => e.id === pe) || A, tt = Math.max(0, 2 - (S?.successful_refinement_count || 0)), nt = !!S?.active_job_id || g(xe), M = g(Ce), N = Te || nt || !!je || Fe, P = !!j && j.id !== S?.current_version_id, rt = j?.snapshot?.output_profile, it = rt?.width && rt?.height && rt?.dpi ? `${rt.width}×${rt.height}px · ${rt.dpi} DPI · ${(rt.width / rt.dpi * 2.54).toFixed(1)}×${(rt.height / rt.dpi * 2.54).toFixed(1)} cm` : "", at = u.find((e) => e.id === C.template_id), ot = le(at?.mode, C.asset_ids.length), st = C.asset_ids.length > 0 && !!C.background_id && !!at && !ot, ct = !!A && (JSON.stringify(A.snapshot.asset_refs) !== JSON.stringify(C.asset_ids) || A.snapshot.background_ref !== C.background_id || A.snapshot.template_id !== C.template_id || (A.snapshot.background_tone || "original") !== (C.background_tone || "original") || (A.snapshot.design_density || "balanced") !== (C.design_density || "balanced")), lt = C.asset_ids.map((e) => s.find((t) => t.id === e)).filter(Boolean), ut = s.find((e) => e.id === C.background_id), dt = u.filter((e) => e.enabled || e.id === C.template_id), ft = dt.filter((e) => se.has(e.mode)), pt = dt.filter((e) => !se.has(e.mode)), mt = a?.provider === "test", ht = mt ? a?.auth_mode !== "hsd" : a?.ai_ready === !0, gt = ct && (!_e.trim() || ["应用所选配置", "应用新的素材与排版"].includes(_e.trim())), _t = A?.editing || a?.editing, vt = ct && _t && [
 		"test",
 		"openai",
 		"deepseek_seedream"
@@ -9872,14 +9887,14 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 		...bt("edit_composite") ? ["给画面添加星光"] : []
 	];
 	(0, l.useEffect)(() => {
-		at && !se.has(at.mode) && He(!0);
+		at && !se.has(at.mode) && We(!0);
 	}, [at?.id, at?.mode]);
 	function Ct(e) {
 		return /* @__PURE__ */ (0, x.jsxs)("div", {
 			className: "template-option",
 			children: [/* @__PURE__ */ (0, x.jsxs)("button", {
 				className: `template-card ${C.template_id === e.id ? "selected" : ""}`,
-				disabled: M,
+				disabled: N,
 				"aria-pressed": C.template_id === e.id,
 				onClick: () => wt({
 					...C,
@@ -9896,7 +9911,7 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 				type: "button",
 				className: "template-example-button",
 				"aria-label": `查看${e.name}案例`,
-				onClick: () => Be({
+				onClick: () => He({
 					mode: e.mode,
 					name: e.name
 				}),
@@ -9906,22 +9921,24 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 	}
 	function wt(e) {
 		ne(e), y(i + "selection", {
-			design_id: Ze.current?.id || null,
-			base_version_id: Ze.current?.current_version_id || null,
+			design_id: $e.current?.id || null,
+			base_version_id: $e.current?.current_version_id || null,
 			value: e
 		});
 	}
 	function Tt(e, t = !1) {
-		let n = Xe.current !== e.current_version_id;
-		if (Ze.current = e, ee(e), y(i + "design", e.id), b((t) => [e, ...t.filter((t) => t.id !== e.id)]), t || n) {
+		let n = Qe.current !== e.current_version_id;
+		if ($e.current = e, ee(e), y(i + "design", e.id), b((t) => [e, ...t.filter((t) => t.id !== e.id)]), t || n) {
 			let r = e.versions?.find((t) => t.id === e.current_version_id), a = v(i + "selection", null), o = t && a?.design_id === e.id && a.base_version_id === e.current_version_id ? a.value : r ? {
 				asset_ids: r.snapshot.asset_refs,
 				background_id: r.snapshot.background_ref,
-				template_id: r.snapshot.template_id
+				template_id: r.snapshot.template_id,
+				background_tone: r.snapshot.background_tone || "original",
+				...r.snapshot.layout_engine === "design-rhythm-v1" ? { design_density: r.snapshot.design_density || "balanced" } : {}
 			} : oe;
-			ne(o), pe(e.current_version_id), Xe.current = e.current_version_id, n && _e("");
+			ne(de(o, r)), me(e.current_version_id), Qe.current = e.current_version_id, n && ve("");
 		}
-		e.active_job && xe(e.active_job);
+		e.active_job && Se(e.active_job);
 	}
 	async function Et() {
 		let [e, t, n] = await Promise.all([
@@ -9952,12 +9969,12 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 					}));
 				} else {
 					let e = v(i + "selection", null);
-					ne(e?.value || ue(t, n));
+					ne(de(e?.value || ue(t, n)));
 				}
 				let u = v(i + "backgroundJob", null);
 				if (u) {
 					let t = await f(`/jobs/${u}`);
-					e || Ce(t);
+					e || we(t);
 				}
 			} catch (n) {
 				e || (O({
@@ -9965,14 +9982,14 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 					type: "error"
 				}), n instanceof d && n.status === 401 && t());
 			} finally {
-				e || E(!1);
+				e || D(!1);
 			}
 		}
 		return n(), () => {
 			e = !0;
 		};
 	}, []), (0, l.useEffect)(() => {
-		if (!n || !S?.id && !Se?.id) return;
+		if (!n || !S?.id && !Ce?.id) return;
 		let e = !1, r = !1, a = async () => {
 			if (!(r || document.hidden)) {
 				r = !0;
@@ -9980,34 +9997,34 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 					if (S?.id) {
 						let t = await f(`/designs/${S.id}`);
 						if (e) return;
-						let n = Ze.current;
+						let n = $e.current;
 						Tt(t);
-						let r = t.active_job_id || n?.active_job_id || be?.id;
+						let r = t.active_job_id || n?.active_job_id || xe?.id;
 						if (r) {
 							let t = await f(`/jobs/${r}`);
 							if (e) return;
-							xe(t), t.status === "FAILED" && be?.status !== "FAILED" && O({
+							Se(t), t.status === "FAILED" && xe?.status !== "FAILED" && O({
 								text: t.error || "此次处理未完成，已保留原结果，不扣精修次数。",
 								type: "error"
 							});
 						}
 					}
-					if (Se && g(Se)) {
-						let t = await f(`/jobs/${Se.id}`);
+					if (Ce && g(Ce)) {
+						let t = await f(`/jobs/${Ce.id}`);
 						if (e) return;
-						if (Ce(t), t.status === "SUCCEEDED" && t.result_asset_id) {
+						if (we(t), t.status === "SUCCEEDED" && t.result_asset_id) {
 							let n = await f("/assets");
 							if (e) return;
 							c(n);
 							let r = v(i + "backgroundTarget", null);
-							r && r.design_id !== (Ze.current?.id || null) || ne((e) => {
+							r && r.design_id !== ($e.current?.id || null) || ne((e) => {
 								let n = {
 									...e,
 									background_id: t.result_asset_id
 								};
 								return y(i + "selection", {
-									design_id: Ze.current?.id || null,
-									base_version_id: Ze.current?.current_version_id || null,
+									design_id: $e.current?.id || null,
+									base_version_id: $e.current?.current_version_id || null,
 									value: n
 								}), n;
 							}), y(i + "backgroundJob", null), O({
@@ -10019,16 +10036,16 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 							type: "error"
 						}));
 					}
-					De(!1);
+					Oe(!1);
 				} catch (n) {
-					e || (De(!0), n instanceof d && n.status === 401 && t());
+					e || (Oe(!0), n instanceof d && n.status === 401 && t());
 				} finally {
 					r = !1;
 				}
 			}
 		};
 		a();
-		let o = tt || nt ? window.setInterval(a, 1200) : void 0;
+		let o = nt || M ? window.setInterval(a, 1200) : void 0;
 		return document.addEventListener("visibilitychange", a), window.addEventListener("focus", a), () => {
 			e = !0, clearInterval(o), document.removeEventListener("visibilitychange", a), window.removeEventListener("focus", a);
 		};
@@ -10036,55 +10053,55 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 		n,
 		S?.id,
 		S?.active_job_id,
-		Se?.id,
-		Se?.status,
-		be?.id,
-		be?.status
+		Ce?.id,
+		Ce?.status,
+		xe?.id,
+		xe?.status
 	]), (0, l.useEffect)(() => {
-		S?.current_version_id && f("/assets").then(c).catch(() => De(!0));
+		S?.current_version_id && f("/assets").then(c).catch(() => Oe(!0));
 	}, [S?.current_version_id]), (0, l.useEffect)(() => {
-		Se?.status === "SUCCEEDED" && Se.result_asset_id && v(i + "backgroundJob", null) === Se.id && f("/assets").then((e) => {
+		Ce?.status === "SUCCEEDED" && Ce.result_asset_id && v(i + "backgroundJob", null) === Ce.id && f("/assets").then((e) => {
 			c(e);
 			let t = v(i + "backgroundTarget", null);
-			t && t.design_id !== (Ze.current?.id || null) || ne((e) => {
+			t && t.design_id !== ($e.current?.id || null) || ne((e) => {
 				let t = {
 					...e,
-					background_id: Se.result_asset_id
+					background_id: Ce.result_asset_id
 				};
 				return y(i + "selection", {
-					design_id: Ze.current?.id || null,
-					base_version_id: Ze.current?.current_version_id || null,
+					design_id: $e.current?.id || null,
+					base_version_id: $e.current?.current_version_id || null,
 					value: t
 				}), t;
 			}), y(i + "backgroundJob", null), O({
 				text: "已恢复上次完成的底图。",
 				type: "success"
 			});
-		}).catch(() => De(!0));
-	}, [Se?.id, Se?.status]);
+		}).catch(() => Oe(!0));
+	}, [Ce?.id, Ce?.status]);
 	async function Dt(e) {
-		Ae(e), y(i + "pending", e);
+		Me(e), y(i + "pending", e);
 		try {
 			let t = await h(e.path, e.body);
-			if (Ae(null), y(i + "pending", null), O(null), e.kind === "background") y(i + "backgroundTarget", { design_id: e.designId || null }), Ce(t), y(i + "backgroundJob", t.id);
-			else if (xe(t), e.designId) try {
+			if (Me(null), y(i + "pending", null), O(null), e.kind === "background") y(i + "backgroundTarget", { design_id: e.designId || null }), we(t), y(i + "backgroundJob", t.id);
+			else if (Se(t), e.designId) try {
 				Tt(await f(`/designs/${e.designId}`));
 			} catch {
-				De(!0), O({
+				Oe(!0), O({
 					text: "任务已接受，正在等待连接恢复以同步结果。",
 					type: "info"
 				});
 			}
 		} catch (e) {
-			e instanceof d && e.status >= 400 && e.status < 500 && e.status !== 408 && (Ae(null), y(i + "pending", null)), O({
+			e instanceof d && e.status >= 400 && e.status < 500 && e.status !== 408 && (Me(null), y(i + "pending", null)), O({
 				text: e instanceof d && e.status >= 400 && e.status < 500 && e.status !== 408 ? ae(e) : "连接中断，提交结果尚未确认。请点击“恢复提交”，将使用原请求安全查询或继续。",
 				type: "error"
 			});
 		}
 	}
-	async function P(e) {
-		if (!We.current) {
-			We.current = !0, Te(!0);
+	async function Ot(e) {
+		if (!Ke.current) {
+			Ke.current = !0, Ee(!0);
 			try {
 				await e();
 			} catch (e) {
@@ -10093,12 +10110,12 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 					type: "error"
 				});
 			} finally {
-				We.current = !1, Te(!1);
+				Ke.current = !1, Ee(!1);
 			}
 		}
 	}
-	async function Ot() {
-		!M && st && await P(async () => {
+	async function kt() {
+		!N && st && await Ot(async () => {
 			let e = S;
 			e || (e = await h("/designs", { name: `丝带设计 ${(/* @__PURE__ */ new Date()).toLocaleDateString("zh-CN")}` }), Tt(e)), await Dt({
 				path: `/designs/${e.id}/generate`,
@@ -10111,45 +10128,45 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 			});
 		});
 	}
-	async function kt() {
-		M || !$e || et === 0 || rt || !st || yt || !ge.trim() && !ct || await P(() => Dt({
+	async function At() {
+		N || !A || tt === 0 || P || !st || yt || !_e.trim() && !ct || await Ot(() => Dt({
 			path: `/designs/${S.id}/refinements`,
 			body: {
 				idempotency_key: crypto.randomUUID(),
-				base_version_id: $e.id,
-				prompt: ge.trim() || (ct ? "应用所选配置" : ""),
+				base_version_id: A.id,
+				prompt: _e.trim() || (ct ? "应用所选配置" : ""),
 				...ct ? { selection: C } : {}
 			},
 			kind: "design",
 			designId: S.id
 		}));
 	}
-	async function At() {
-		!M && $e?.parent_version_id && await P(async () => {
-			Tt(await h(`/designs/${S.id}/rollback`, { expected_version_id: $e.id })), xe(null), O({
+	async function jt() {
+		!N && A?.parent_version_id && await Ot(async () => {
+			Tt(await h(`/designs/${S.id}/rollback`, { expected_version_id: A.id })), Se(null), O({
 				text: "已回退到当前版本的父版本。累计精修次数保持不变。",
 				type: "success"
 			});
 		});
 	}
-	async function jt() {
-		D || ke || nt || Ne || await P(async () => {
+	async function Mt() {
+		Te || je || M || Fe || await Ot(async () => {
 			let e = await h("/designs", { name: `丝带设计 ${m.length + 1}` });
-			Xe.current = null, Tt(e, !0), wt(ue(s, u)), _e(""), xe(null), O(null), A(null);
+			Qe.current = null, Tt(e, !0), wt(ue(s, u)), ve(""), Se(null), O(null), Ae(null);
 		});
 	}
-	async function Mt(e) {
-		D || ke || nt || Ne || await P(async () => {
+	async function Nt(e) {
+		Te || je || M || Fe || await Ot(async () => {
 			let t = await f(`/designs/${e}`);
-			Tt(t, !0), xe(t.active_job || null), _e(""), O(null), A(null);
+			Tt(t, !0), Se(t.active_job || null), ve(""), O(null), Ae(null);
 		});
 	}
-	async function Nt() {
-		M || nt || (ht ? await P(() => Dt({
+	async function Pt() {
+		N || M || (ht ? await Ot(() => Dt({
 			path: "/background-jobs",
 			body: {
 				idempotency_key: crypto.randomUUID(),
-				prompt: ve.trim()
+				prompt: ye.trim()
 			},
 			kind: "background",
 			designId: S?.id
@@ -10158,12 +10175,12 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 			type: "info"
 		}));
 	}
-	async function Pt(e, n) {
-		if (!e?.length || qe.current || M) return;
-		let r = Array.from(e), a = Qe && Le;
-		qe.current = !0;
+	async function Ft(e, n) {
+		if (!e?.length || Ye.current || N) return;
+		let r = Array.from(e), a = et && ze;
+		Ye.current = !0;
 		let o = new AbortController();
-		Je.current = o, Pe(!0), Ie({
+		Xe.current = o, Ie(!0), Re({
 			completed: 0,
 			total: r.length
 		}), O({
@@ -10173,7 +10190,7 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 		let s = [];
 		try {
 			for (let [e, t] of r.entries()) {
-				if (!Ye.current) return;
+				if (!Ze.current) return;
 				let l = new FormData();
 				l.append("file", t), l.append("kind", n), l.append("name", t.name.replace(/\.[^.]+$/, "")), l.append("shared", String(a));
 				let u = await f("/assets", {
@@ -10181,7 +10198,7 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 					body: l,
 					signal: o.signal
 				});
-				if (!Ye.current) return;
+				if (!Ze.current) return;
 				s.push(u), c((e) => e.some((e) => e.id === u.id) ? e.map((e) => e.id === u.id ? u : e) : [...e, u]), ne((e) => {
 					let t = n === "pattern" ? {
 						...e,
@@ -10191,11 +10208,11 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 						background_id: u.id
 					};
 					return y(i + "selection", {
-						design_id: Ze.current?.id || null,
-						base_version_id: Ze.current?.current_version_id || null,
+						design_id: $e.current?.id || null,
+						base_version_id: $e.current?.current_version_id || null,
 						value: t
 					}), t;
-				}), Ie({
+				}), Re({
 					completed: s.length,
 					total: r.length
 				}), e + 1 < r.length && O({
@@ -10208,7 +10225,7 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 				type: "success"
 			});
 		} catch (e) {
-			if (!Ye.current) return;
+			if (!Ze.current) return;
 			e instanceof d && e.status === 401 && t();
 			let n = e instanceof d ? ae(e) : "本张上传结果尚未确认。请重新载入网页，在素材库查看后再决定是否重传。";
 			O({
@@ -10216,11 +10233,11 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 				type: "error"
 			});
 		} finally {
-			qe.current = !1, Je.current = null, Ye.current && (Pe(!1), Ie(null)), Ge.current && (Ge.current.value = ""), Ke.current && (Ke.current.value = "");
+			Ye.current = !1, Xe.current = null, Ze.current && (Ie(!1), Re(null)), qe.current && (qe.current.value = ""), Je.current && (Je.current.value = "");
 		}
 	}
-	function Ft(e) {
-		M || (!C.asset_ids.includes(e) && C.asset_ids.length >= 12 ? O({
+	function It(e) {
+		N || (!C.asset_ids.includes(e) && C.asset_ids.length >= 12 ? O({
 			text: "每份设计最多选择 12 个图案。",
 			type: "info"
 		}) : wt({
@@ -10229,17 +10246,17 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 		}));
 	}
 	(0, l.useEffect)(() => {
-		n ? r === "ribbon-admin" && (Qe ? A("admin") : O({
+		n ? r === "ribbon-admin" && (et ? Ae("admin") : O({
 			text: "排版与规格维护仅供管理员使用。",
 			type: "error"
-		})) : A(null);
+		})) : Ae(null);
 	}, [
 		n,
 		r,
-		Qe
+		et
 	]);
-	async function It(e) {
-		await P(async () => {
+	async function Lt(e) {
+		await Ot(async () => {
 			await f(`/assets/${e.id}`, { method: "DELETE" }), c((t) => t.filter((t) => t.id !== e.id)), wt({
 				...C,
 				asset_ids: C.asset_ids.filter((t) => t !== e.id),
@@ -10247,7 +10264,7 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 			});
 		});
 	}
-	let Lt = tt ? de[be?.phase || ""] || be?.phase || de[be?.status || ""] || "正在处理" : $e ? et ? "可继续精修" : "精修已用完" : st ? "可以生成首稿" : "等待选择素材", Rt = s.filter((e) => e.kind === k && e.name.toLocaleLowerCase().includes(je.toLocaleLowerCase()));
+	let Rt = nt ? fe[xe?.phase || ""] || xe?.phase || fe[xe?.status || ""] || "正在处理" : A ? tt ? "可继续精修" : "精修已用完" : st ? "可以生成首稿" : "等待选择素材", zt = s.filter((e) => e.kind === k && e.name.toLocaleLowerCase().includes(Ne.toLocaleLowerCase()));
 	return /* @__PURE__ */ (0, x.jsxs)("div", {
 		className: "app-shell",
 		children: [
@@ -10257,7 +10274,7 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 					className: "header-actions",
 					children: [/* @__PURE__ */ (0, x.jsxs)("button", {
 						className: "text-button",
-						onClick: () => A("designs"),
+						onClick: () => Ae("designs"),
 						children: [
 							/* @__PURE__ */ (0, x.jsx)(T, { name: "folder" }),
 							"我的作品",
@@ -10266,9 +10283,9 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 								children: m.length
 							})
 						]
-					}), Qe && /* @__PURE__ */ (0, x.jsxs)("button", {
+					}), et && /* @__PURE__ */ (0, x.jsxs)("button", {
 						className: "text-button",
-						onClick: () => A("admin"),
+						onClick: () => Ae("admin"),
 						children: [/* @__PURE__ */ (0, x.jsx)(T, { name: "settings" }), "排版与规格"]
 					})]
 				})]
@@ -10278,8 +10295,8 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 					className: "workspace-title",
 					children: [/* @__PURE__ */ (0, x.jsxs)("div", { children: [/* @__PURE__ */ (0, x.jsx)("h1", { children: "选择图案，开始设计" }), /* @__PURE__ */ (0, x.jsx)("p", { children: "选择图案、排版和底图，生成首稿后可继续精修。" })] }), /* @__PURE__ */ (0, x.jsxs)("button", {
 						className: "secondary",
-						disabled: D || !!ke || nt || Ne,
-						onClick: () => void jt(),
+						disabled: Te || !!je || M || Fe,
+						onClick: () => void Mt(),
 						children: [/* @__PURE__ */ (0, x.jsx)(T, { name: "plus" }), "新建作品"]
 					})]
 				}),
@@ -10294,10 +10311,10 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 						children: a?.output_profile?.is_demo ? "演示输出 · 未经业务验收" : "内部输出配置"
 					})]
 				}),
-				Oe && /* @__PURE__ */ (0, x.jsxs)("div", {
-					className: `notice ${Oe.type}`,
-					role: Oe.type === "error" ? "alert" : "status",
-					children: [/* @__PURE__ */ (0, x.jsx)("span", { children: Oe.text }), /* @__PURE__ */ (0, x.jsx)("button", {
+				ke && /* @__PURE__ */ (0, x.jsxs)("div", {
+					className: `notice ${ke.type}`,
+					role: ke.type === "error" ? "alert" : "status",
+					children: [/* @__PURE__ */ (0, x.jsx)("span", { children: ke.text }), /* @__PURE__ */ (0, x.jsx)("button", {
 						"aria-label": "关闭提示",
 						className: "icon-button",
 						onClick: () => O(null),
@@ -10307,21 +10324,21 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 						})
 					})]
 				}),
-				Ee && /* @__PURE__ */ (0, x.jsx)("div", {
+				De && /* @__PURE__ */ (0, x.jsx)("div", {
 					className: "notice error",
 					role: "status",
 					children: "连接暂时中断，正在重连。后台任务和已保存版本不会因此重置。"
 				}),
-				ke && /* @__PURE__ */ (0, x.jsxs)("div", {
+				je && /* @__PURE__ */ (0, x.jsxs)("div", {
 					className: "notice info",
 					children: [/* @__PURE__ */ (0, x.jsx)("span", { children: "有一项提交尚未确认；恢复使用原幂等键，不会重复扣次。" }), /* @__PURE__ */ (0, x.jsx)("button", {
 						className: "secondary small",
-						disabled: D,
-						onClick: () => void P(() => Dt(ke)),
+						disabled: Te,
+						onClick: () => void Ot(() => Dt(je)),
 						children: "恢复提交"
 					})]
 				}),
-				we ? /* @__PURE__ */ (0, x.jsxs)("div", {
+				E ? /* @__PURE__ */ (0, x.jsxs)("div", {
 					className: "page-loader in-page",
 					children: [/* @__PURE__ */ (0, x.jsx)("span", { className: "spinner" }), "正在恢复作品和素材…"]
 				}) : /* @__PURE__ */ (0, x.jsxs)("div", {
@@ -10352,19 +10369,19 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 											className: "two-actions",
 											children: [/* @__PURE__ */ (0, x.jsxs)("button", {
 												className: "secondary",
-												disabled: M || Ne,
+												disabled: N || Fe,
 												onClick: () => {
-													Re(!1), Ge.current?.click();
+													Be(!1), qe.current?.click();
 												},
 												children: [/* @__PURE__ */ (0, x.jsx)(T, {
 													name: "upload",
 													size: 16
-												}), Ne ? `上传 ${Fe?.completed || 0}/${Fe?.total || 0}` : "上传图案"]
+												}), Fe ? `上传 ${Le?.completed || 0}/${Le?.total || 0}` : "上传图案"]
 											}), /* @__PURE__ */ (0, x.jsxs)("button", {
 												className: "secondary",
-												disabled: M,
+												disabled: N,
 												onClick: () => {
-													Me(""), A("pattern");
+													Pe(""), Ae("pattern");
 												},
 												children: [/* @__PURE__ */ (0, x.jsx)(T, {
 													name: "folder",
@@ -10373,12 +10390,12 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 											})]
 										}),
 										/* @__PURE__ */ (0, x.jsx)("input", {
-											ref: Ge,
+											ref: qe,
 											type: "file",
 											accept: "image/png,image/jpeg,image/webp",
 											multiple: !0,
 											hidden: !0,
-											onChange: (e) => void Pt(e.target.files, "pattern")
+											onChange: (e) => void Ft(e.target.files, "pattern")
 										}),
 										lt.length ? /* @__PURE__ */ (0, x.jsx)("div", {
 											className: "selected-patterns",
@@ -10392,9 +10409,9 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 														decoding: "async"
 													}), /* @__PURE__ */ (0, x.jsx)("button", {
 														className: "remove-asset",
-														disabled: M,
+														disabled: N,
 														"aria-label": `移除${e.name}`,
-														onClick: () => Ft(e.id),
+														onClick: () => It(e.id),
 														children: "×"
 													})]
 												}), /* @__PURE__ */ (0, x.jsxs)("span", {
@@ -10408,9 +10425,9 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 											}, e.id))
 										}) : /* @__PURE__ */ (0, x.jsxs)("button", {
 											className: "empty-patterns",
-											disabled: M,
+											disabled: N,
 											onClick: () => {
-												Me(""), A("pattern");
+												Pe(""), Ae("pattern");
 											},
 											children: [
 												/* @__PURE__ */ (0, x.jsx)(T, { name: "plus" }),
@@ -10428,7 +10445,7 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 											children: [/* @__PURE__ */ (0, x.jsx)("h3", { children: "排版模式" }), /* @__PURE__ */ (0, x.jsx)("button", {
 												type: "button",
 												className: "template-examples-all",
-												onClick: () => Be({
+												onClick: () => He({
 													mode: null,
 													name: "全部排版案例"
 												}),
@@ -10444,18 +10461,18 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 											children: [/* @__PURE__ */ (0, x.jsxs)("button", {
 												type: "button",
 												className: "more-layouts-toggle",
-												"aria-expanded": Ve,
+												"aria-expanded": Ue,
 												"aria-controls": "ribbon-more-layouts",
-												onClick: () => He((e) => !e),
+												onClick: () => We((e) => !e),
 												children: [/* @__PURE__ */ (0, x.jsxs)("span", { children: [
 													"更多排法（",
 													pt.length,
 													"）"
 												] }), /* @__PURE__ */ (0, x.jsx)("span", {
 													"aria-hidden": "true",
-													children: Ve ? "▾" : "▸"
+													children: Ue ? "▾" : "▸"
 												})]
-											}), Ve && /* @__PURE__ */ (0, x.jsx)("div", {
+											}), Ue && /* @__PURE__ */ (0, x.jsx)("div", {
 												className: "template-grid",
 												id: "ribbon-more-layouts",
 												children: pt.map(Ct)
@@ -10470,6 +10487,32 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 											id: "ribbon-layout-issue",
 											role: "alert",
 											children: ot
+										}),
+										(!A || A.snapshot.layout_engine === "design-rhythm-v1") && /* @__PURE__ */ (0, x.jsxs)("label", {
+											className: "density-control",
+											children: ["画面密度", /* @__PURE__ */ (0, x.jsxs)("select", {
+												"aria-label": "画面密度",
+												value: C.design_density || "balanced",
+												disabled: N,
+												onChange: (e) => wt({
+													...C,
+													design_density: e.target.value
+												}),
+												children: [
+													/* @__PURE__ */ (0, x.jsx)("option", {
+														value: "airy",
+														children: "疏朗"
+													}),
+													/* @__PURE__ */ (0, x.jsx)("option", {
+														value: "balanced",
+														children: "均衡"
+													}),
+													/* @__PURE__ */ (0, x.jsx)("option", {
+														value: "rich",
+														children: "饱满"
+													})
+												]
+											})]
 										})
 									]
 								}),
@@ -10487,9 +10530,9 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 											className: "two-actions",
 											children: [/* @__PURE__ */ (0, x.jsxs)("button", {
 												className: "secondary",
-												disabled: M,
+												disabled: N,
 												onClick: () => {
-													Me(""), A("background");
+													Pe(""), Ae("background");
 												},
 												children: [/* @__PURE__ */ (0, x.jsx)(T, {
 													name: "folder",
@@ -10497,9 +10540,9 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 												}), "底图库"]
 											}), /* @__PURE__ */ (0, x.jsxs)("button", {
 												className: "secondary",
-												disabled: M || nt || !ht,
-												onClick: () => void Nt(),
-												children: [nt ? /* @__PURE__ */ (0, x.jsx)("span", { className: "spinner tiny" }) : /* @__PURE__ */ (0, x.jsx)(T, {
+												disabled: N || M || !ht,
+												onClick: () => void Pt(),
+												children: [M ? /* @__PURE__ */ (0, x.jsx)("span", { className: "spinner tiny" }) : /* @__PURE__ */ (0, x.jsx)(T, {
 													name: "spark",
 													size: 16
 												}), mt ? "生成测试底图" : "AI 生成底图"]
@@ -10513,11 +10556,11 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 										/* @__PURE__ */ (0, x.jsx)("textarea", {
 											id: "background-prompt",
 											className: "background-prompt",
-											value: ve,
-											onChange: (e) => ye(e.target.value),
+											value: ye,
+											onChange: (e) => be(e.target.value),
 											maxLength: 2e3,
 											rows: 2,
-											disabled: M || nt || !ht,
+											disabled: N || M || !ht,
 											placeholder: "例如：浅蓝色细条纹，不要文字；不填则随机生成。",
 											"aria-describedby": ht ? void 0 : "background-ai-unavailable"
 										}),
@@ -10545,17 +10588,29 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 											className: "empty-background",
 											children: "选择底图，为图案定下基调"
 										}),
-										nt && /* @__PURE__ */ (0, x.jsxs)("p", {
+										M && /* @__PURE__ */ (0, x.jsxs)("p", {
 											className: "microcopy",
 											children: [
 												mt ? "正在生成测试底图…" : "AI 正在生成底图…",
 												" ",
 												"可离开后恢复。"
 											]
+										}),
+										/* @__PURE__ */ (0, x.jsxs)("label", {
+											className: "background-tone-control",
+											children: [/* @__PURE__ */ (0, x.jsx)("input", {
+												type: "checkbox",
+												checked: C.background_tone === "soft",
+												disabled: N || M,
+												onChange: (e) => wt({
+													...C,
+													background_tone: e.target.checked ? "soft" : "original"
+												})
+											}), "柔和底纹，突出主图"]
 										})
 									]
 								}),
-								$e && ct && /* @__PURE__ */ (0, x.jsx)("div", {
+								A && ct && /* @__PURE__ */ (0, x.jsx)("div", {
 									className: "selection-warning",
 									children: "素材或排版已更改。点击右侧“开始精修”应用，会计入本作品精修次数。"
 								})
@@ -10573,8 +10628,8 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 												className: "step-label",
 												children: "02 / PREVIEW"
 											}), /* @__PURE__ */ (0, x.jsx)("h2", { children: S?.name || "设计预览" })] }), /* @__PURE__ */ (0, x.jsxs)("span", {
-												className: `state-pill ${tt ? "working" : ""}`,
-												children: [/* @__PURE__ */ (0, x.jsx)("span", { className: "status-dot" }), Lt]
+												className: `state-pill ${nt ? "working" : ""}`,
+												children: [/* @__PURE__ */ (0, x.jsx)("span", { className: "status-dot" }), Rt]
 											})]
 										}),
 										/* @__PURE__ */ (0, x.jsxs)("div", {
@@ -10585,9 +10640,9 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 													children: [/* @__PURE__ */ (0, x.jsx)("span", { children: j ? `V${j.sequence} · ${_(j)}` : "你的设计画布" }), j && /* @__PURE__ */ (0, x.jsx)("span", { children: j.id === S?.current_version_id ? "当前版本" : "历史版本" })]
 												}),
 												j ? /* @__PURE__ */ (0, x.jsxs)(x.Fragment, { children: [/* @__PURE__ */ (0, x.jsx)("div", {
-													className: `ribbon-display ${me}`,
+													className: `ribbon-display ${he}`,
 													children: /* @__PURE__ */ (0, x.jsx)("img", {
-														src: me === "detail" && j.view_url || j.preview_url,
+														src: he === "detail" && j.view_url || j.preview_url,
 														alt: `${_(j)}的设计预览`
 													})
 												}), /* @__PURE__ */ (0, x.jsxs)("div", {
@@ -10599,15 +10654,15 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 															"aria-label": "预览缩放",
 															children: [/* @__PURE__ */ (0, x.jsx)("button", {
 																type: "button",
-																className: me === "detail" ? "is-active" : "",
-																"aria-pressed": me === "detail",
-																onClick: () => he("detail"),
+																className: he === "detail" ? "is-active" : "",
+																"aria-pressed": he === "detail",
+																onClick: () => ge("detail"),
 																children: "细节"
 															}), /* @__PURE__ */ (0, x.jsx)("button", {
 																type: "button",
-																className: me === "fit" ? "is-active" : "",
-																"aria-pressed": me === "fit",
-																onClick: () => he("fit"),
+																className: he === "fit" ? "is-active" : "",
+																"aria-pressed": he === "fit",
+																onClick: () => ge("fit"),
 																children: "整条"
 															})]
 														}),
@@ -10617,7 +10672,7 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 														}),
 														/* @__PURE__ */ (0, x.jsx)("span", {
 															className: "ribbon-hint",
-															children: me === "detail" ? "左右拖动查看整条" : ""
+															children: he === "detail" ? "左右拖动查看整条" : ""
 														})
 													]
 												})] }) : /* @__PURE__ */ (0, x.jsxs)("div", {
@@ -10645,12 +10700,12 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 														})
 													]
 												}),
-												tt && /* @__PURE__ */ (0, x.jsxs)("div", {
+												nt && /* @__PURE__ */ (0, x.jsxs)("div", {
 													className: "processing-overlay",
 													role: "status",
 													children: [
 														/* @__PURE__ */ (0, x.jsx)("span", { className: "spinner" }),
-														/* @__PURE__ */ (0, x.jsx)("strong", { children: de[be?.phase || ""] || be?.phase || "正在处理设计…" }),
+														/* @__PURE__ */ (0, x.jsx)("strong", { children: fe[xe?.phase || ""] || xe?.phase || "正在处理设计…" }),
 														/* @__PURE__ */ (0, x.jsx)("span", { children: "完成后自动更新，已有版本仍可下载" })
 													]
 												}),
@@ -10666,14 +10721,14 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 												children: [/* @__PURE__ */ (0, x.jsxs)("span", { children: [/* @__PURE__ */ (0, x.jsx)(T, {
 													name: "check",
 													size: 14
-												}), rt ? "正在查看历史保存版本" : "当前设计已保存"] }), /* @__PURE__ */ (0, x.jsx)("span", { children: j.provider === "test" ? "测试模式结果" : "" })]
+												}), P ? "正在查看历史保存版本" : "当前设计已保存"] }), /* @__PURE__ */ (0, x.jsx)("span", { children: j.provider === "test" ? "测试模式结果" : "" })]
 											}),
 											/* @__PURE__ */ (0, x.jsxs)("div", {
 												className: "result-actions",
 												children: [/* @__PURE__ */ (0, x.jsxs)("button", {
 													className: "secondary",
-													disabled: M || !$e?.parent_version_id,
-													onClick: () => void At(),
+													disabled: N || !A?.parent_version_id,
+													onClick: () => void jt(),
 													children: [/* @__PURE__ */ (0, x.jsx)(T, {
 														name: "back",
 														size: 17
@@ -10685,13 +10740,13 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 													children: [/* @__PURE__ */ (0, x.jsx)(T, {
 														name: "download",
 														size: 17
-													}), rt ? "下载所选版本" : "下载当前图"]
+													}), P ? "下载所选版本" : "下载当前图"]
 												})]
 											}),
-											rt && /* @__PURE__ */ (0, x.jsxs)("div", {
+											P && /* @__PURE__ */ (0, x.jsxs)("div", {
 												className: "history-hint",
 												children: ["历史预览不改变当前版本。", /* @__PURE__ */ (0, x.jsx)("button", {
-													onClick: () => pe(S.current_version_id),
+													onClick: () => me(S.current_version_id),
 													children: "返回当前版本"
 												})]
 											})
@@ -10699,12 +10754,12 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 											className: "generate-area",
 											children: [/* @__PURE__ */ (0, x.jsxs)("button", {
 												className: "primary full",
-												disabled: !st || M || nt,
+												disabled: !st || N || M,
 												"aria-describedby": ot ? "ribbon-layout-issue" : void 0,
-												onClick: () => void Ot(),
+												onClick: () => void kt(),
 												children: [
-													tt ? /* @__PURE__ */ (0, x.jsx)("span", { className: "spinner tiny" }) : /* @__PURE__ */ (0, x.jsx)(T, { name: "spark" }),
-													tt ? "正在生成首稿…" : "生成首稿",
+													nt ? /* @__PURE__ */ (0, x.jsx)("span", { className: "spinner tiny" }) : /* @__PURE__ */ (0, x.jsx)(T, { name: "spark" }),
+													nt ? "正在生成首稿…" : "生成首稿",
 													/* @__PURE__ */ (0, x.jsx)(T, {
 														name: "arrow",
 														size: 16
@@ -10723,7 +10778,7 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 										className: "version-grid",
 										children: S.versions.map((e) => /* @__PURE__ */ (0, x.jsxs)("button", {
 											className: `version-card ${e.id === j?.id ? "selected" : ""}`,
-											onClick: () => pe(e.id),
+											onClick: () => me(e.id),
 											"aria-pressed": e.id === j?.id,
 											children: [
 												/* @__PURE__ */ (0, x.jsx)("img", {
@@ -10774,10 +10829,10 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 									}), /* @__PURE__ */ (0, x.jsx)("h2", { children: "文字精修" })] }), /* @__PURE__ */ (0, x.jsx)(T, { name: "spark" })]
 								}),
 								/* @__PURE__ */ (0, x.jsxs)("div", {
-									className: `quota-card ${et === 0 ? "exhausted" : ""}`,
-									children: [/* @__PURE__ */ (0, x.jsxs)("div", { children: [/* @__PURE__ */ (0, x.jsx)("span", { children: "剩余精修次数" }), /* @__PURE__ */ (0, x.jsxs)("strong", { children: [et, /* @__PURE__ */ (0, x.jsx)("small", { children: " / 2" })] })] }), /* @__PURE__ */ (0, x.jsx)("div", {
+									className: `quota-card ${tt === 0 ? "exhausted" : ""}`,
+									children: [/* @__PURE__ */ (0, x.jsxs)("div", { children: [/* @__PURE__ */ (0, x.jsx)("span", { children: "剩余精修次数" }), /* @__PURE__ */ (0, x.jsxs)("strong", { children: [tt, /* @__PURE__ */ (0, x.jsx)("small", { children: " / 2" })] })] }), /* @__PURE__ */ (0, x.jsx)("div", {
 										className: "quota-dots",
-										children: [0, 1].map((e) => /* @__PURE__ */ (0, x.jsx)("span", { className: e < et ? "available" : "" }, e))
+										children: [0, 1].map((e) => /* @__PURE__ */ (0, x.jsx)("span", { className: e < tt ? "available" : "" }, e))
 									})]
 								}),
 								/* @__PURE__ */ (0, x.jsxs)("div", {
@@ -10794,21 +10849,21 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 										}),
 										/* @__PURE__ */ (0, x.jsx)("textarea", {
 											id: "refinement",
-											value: ge,
-											onChange: (e) => _e(e.target.value),
+											value: _e,
+											onChange: (e) => ve(e.target.value),
 											maxLength: 2e3,
-											disabled: !$e || M || et === 0 || rt,
+											disabled: !A || N || tt === 0 || P,
 											placeholder: xt ? "例如：把图案缩小一些，间距拉开一点，保留现在的底色。" : "例如：把图案缩小一些，保留现在的底色。"
 										}),
 										/* @__PURE__ */ (0, x.jsxs)("div", {
 											className: "text-limit",
-											children: [ge.length, " / 2000"]
+											children: [_e.length, " / 2000"]
 										}),
 										/* @__PURE__ */ (0, x.jsxs)("div", {
 											className: "suggestions",
 											children: [/* @__PURE__ */ (0, x.jsx)("span", { children: mt ? "可试试这些测试指令" : "给灵感一点提示" }), St.map((e) => /* @__PURE__ */ (0, x.jsxs)("button", {
-												disabled: !$e || M || et === 0 || rt || !ht,
-												onClick: () => _e(e),
+												disabled: !A || N || tt === 0 || P || !ht,
+												onClick: () => ve(e),
 												children: [e, /* @__PURE__ */ (0, x.jsx)(T, {
 													name: "plus",
 													size: 13
@@ -10818,13 +10873,13 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 										/* @__PURE__ */ (0, x.jsxs)("button", {
 											className: "primary full refine-button",
 											"aria-describedby": ot ? "ribbon-layout-issue" : void 0,
-											disabled: !$e || M || et === 0 || rt || !st || yt || !ge.trim() && !ct,
-											onClick: () => void kt(),
-											children: [tt ? /* @__PURE__ */ (0, x.jsx)("span", { className: "spinner tiny" }) : /* @__PURE__ */ (0, x.jsx)(T, { name: "spark" }), tt ? "正在处理…" : et === 0 ? "精修次数已用完" : "开始精修"]
+											disabled: !A || N || tt === 0 || P || !st || yt || !_e.trim() && !ct,
+											onClick: () => void At(),
+											children: [nt ? /* @__PURE__ */ (0, x.jsx)("span", { className: "spinner tiny" }) : /* @__PURE__ */ (0, x.jsx)(T, { name: "spark" }), nt ? "正在处理…" : tt === 0 ? "精修次数已用完" : "开始精修"]
 										}),
 										/* @__PURE__ */ (0, x.jsx)("p", {
 											className: "refine-help",
-											children: $e ? rt ? "请返回当前版本后继续精修。" : et === 0 ? "仍可查看历史、回退和下载。" : ht ? vt?.allowed_operations.length === 0 && !gt ? "当前版本不支持直接修改，请重新选择素材与排版后应用。" : ct ? "本次将同时应用左侧的素材与排版选择。" : "成功完成后计一次，系统失败不扣次。" : ct ? "AI 尚未配置；清空文字可仅应用所选素材与排版，成功后计一次。" : "AI 尚未配置，仍可查看、下载或更换素材后应用所选配置。" : "先生成首稿，再开始细化你的设计。"
+											children: A ? P ? "请返回当前版本后继续精修。" : tt === 0 ? "仍可查看历史、回退和下载。" : ht ? vt?.allowed_operations.length === 0 && !gt ? "当前版本不支持直接修改，请重新选择素材与排版后应用。" : ct ? "本次将同时应用左侧的素材与排版选择。" : "成功完成后计一次，系统失败不扣次。" : ct ? "AI 尚未配置；清空文字可仅应用所选素材与排版，成功后计一次。" : "AI 尚未配置，仍可查看、下载或更换素材后应用所选配置。" : "先生成首稿，再开始细化你的设计。"
 										})
 									]
 								}),
@@ -10868,16 +10923,16 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 					]
 				})
 			] }),
-			ze && n && r === "ribbon" && /* @__PURE__ */ (0, x.jsx)(re, {
-				title: ze.mode ? `${ze.name} · 案例` : "全部排版案例",
-				onClose: () => Be(null),
+			Ve && n && r === "ribbon" && /* @__PURE__ */ (0, x.jsx)(re, {
+				title: Ve.mode ? `${Ve.name} · 案例` : "全部排版案例",
+				onClose: () => He(null),
 				wide: !0,
 				className: "layout-examples-modal",
 				children: /* @__PURE__ */ (0, x.jsx)(w, {
-					mode: ze.mode,
-					cache: Ue,
+					mode: Ve.mode,
+					cache: Ge,
 					onUnauthorized: t,
-					onViewAll: () => Be({
+					onViewAll: () => He({
 						mode: null,
 						name: "全部排版案例"
 					})
@@ -10885,7 +10940,7 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 			}),
 			(k === "pattern" || k === "background") && /* @__PURE__ */ (0, x.jsxs)(re, {
 				title: k === "pattern" ? "图案素材库" : "底图素材库",
-				onClose: () => A(null),
+				onClose: () => Ae(null),
 				wide: !0,
 				children: [
 					/* @__PURE__ */ (0, x.jsxs)("div", {
@@ -10893,32 +10948,32 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 						children: [/* @__PURE__ */ (0, x.jsx)("input", {
 							"aria-label": "搜索素材",
 							placeholder: "搜索素材名称…",
-							value: je,
-							onChange: (e) => Me(e.target.value)
+							value: Ne,
+							onChange: (e) => Pe(e.target.value)
 						}), /* @__PURE__ */ (0, x.jsxs)("label", {
-							className: `secondary upload-label ${Ne ? "disabled" : ""}`,
+							className: `secondary upload-label ${Fe ? "disabled" : ""}`,
 							children: [
 								/* @__PURE__ */ (0, x.jsx)(T, { name: "upload" }),
-								Ne ? `上传 ${Fe?.completed || 0}/${Fe?.total || 0}` : "上传素材",
+								Fe ? `上传 ${Le?.completed || 0}/${Le?.total || 0}` : "上传素材",
 								/* @__PURE__ */ (0, x.jsx)("input", {
-									ref: Ke,
+									ref: Je,
 									type: "file",
 									accept: "image/png,image/jpeg,image/webp",
 									multiple: !0,
 									hidden: !0,
-									disabled: Ne || M,
-									onChange: (e) => void Pt(e.target.files, k)
+									disabled: Fe || N,
+									onChange: (e) => void Ft(e.target.files, k)
 								})
 							]
 						})]
 					}),
-					Qe && /* @__PURE__ */ (0, x.jsxs)("label", {
+					et && /* @__PURE__ */ (0, x.jsxs)("label", {
 						className: "checkbox-line",
 						children: [/* @__PURE__ */ (0, x.jsx)("input", {
 							type: "checkbox",
-							checked: Le,
-							disabled: M,
-							onChange: (e) => Re(e.target.checked)
+							checked: ze,
+							disabled: N,
+							onChange: (e) => Be(e.target.checked)
 						}), "上传为共享素材，供所有账号使用"]
 					}),
 					/* @__PURE__ */ (0, x.jsxs)("p", {
@@ -10931,15 +10986,15 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 					}),
 					/* @__PURE__ */ (0, x.jsx)("div", {
 						className: "library-grid",
-						children: Rt.map((e) => {
+						children: zt.map((e) => {
 							let t = k === "pattern" ? C.asset_ids.includes(e.id) : C.background_id === e.id;
 							return /* @__PURE__ */ (0, x.jsxs)("div", {
 								className: "library-item",
 								children: [/* @__PURE__ */ (0, x.jsxs)("button", {
 									className: `library-card ${t ? "selected" : ""}`,
-									disabled: M,
+									disabled: N,
 									"aria-pressed": t,
-									onClick: () => k === "pattern" ? Ft(e.id) : wt({
+									onClick: () => k === "pattern" ? It(e.id) : wt({
 										...C,
 										background_id: e.id
 									}),
@@ -10962,16 +11017,16 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 										/* @__PURE__ */ (0, x.jsx)("strong", { children: e.name }),
 										/* @__PURE__ */ (0, x.jsxs)("span", { children: [e.is_demo ? "演示 · " : "", e.shared ? "共享素材" : "私有素材"] })
 									]
-								}), (!e.shared || Qe) && /* @__PURE__ */ (0, x.jsx)("button", {
+								}), (!e.shared || et) && /* @__PURE__ */ (0, x.jsx)("button", {
 									className: "hide-asset",
-									disabled: M,
-									onClick: () => void It(e),
+									disabled: N,
+									onClick: () => void Lt(e),
 									children: "从素材库移除"
 								})]
 							}, e.id);
 						})
 					}),
-					!Rt.length && /* @__PURE__ */ (0, x.jsx)("div", {
+					!zt.length && /* @__PURE__ */ (0, x.jsx)("div", {
 						className: "empty-library",
 						children: "没有找到素材，可上传新的图案或底图。"
 					}),
@@ -10979,7 +11034,7 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 						className: "modal-footer",
 						children: [/* @__PURE__ */ (0, x.jsx)("span", { children: k === "pattern" ? `已选 ${C.asset_ids.length} 个图案` : ut ? `已选：${ut.name}` : "尚未选择底图" }), /* @__PURE__ */ (0, x.jsxs)("button", {
 							className: "primary",
-							onClick: () => A(null),
+							onClick: () => Ae(null),
 							children: ["完成选择", /* @__PURE__ */ (0, x.jsx)(T, {
 								name: "check",
 								size: 16
@@ -10990,15 +11045,15 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 			}),
 			k === "designs" && /* @__PURE__ */ (0, x.jsxs)(re, {
 				title: "我的作品",
-				onClose: () => A(null),
+				onClose: () => Ae(null),
 				wide: !0,
 				children: [
 					/* @__PURE__ */ (0, x.jsx)("div", {
 						className: "design-library",
 						children: m.map((e) => /* @__PURE__ */ (0, x.jsxs)("button", {
-							disabled: D || !!ke || nt || Ne,
+							disabled: Te || !!je || M || Fe,
 							className: `design-list-item ${e.id === S?.id ? "selected" : ""}`,
-							onClick: () => void Mt(e.id),
+							onClick: () => void Nt(e.id),
 							children: [
 								/* @__PURE__ */ (0, x.jsx)("span", {
 									className: "design-list-icon",
@@ -11029,29 +11084,29 @@ function pe({ user: e, onLogout: t, active: n, view: r }) {
 						className: "modal-footer",
 						children: [/* @__PURE__ */ (0, x.jsx)("span", { children: "作品、额度和版本均保存在服务端" }), /* @__PURE__ */ (0, x.jsxs)("button", {
 							className: "primary",
-							disabled: D || !!ke || nt || Ne,
-							onClick: () => void jt(),
+							disabled: Te || !!je || M || Fe,
+							onClick: () => void Mt(),
 							children: [/* @__PURE__ */ (0, x.jsx)(T, { name: "plus" }), "新建作品"]
 						})]
 					})
 				]
 			}),
-			k === "admin" && Qe && /* @__PURE__ */ (0, x.jsx)(te, {
-				onClose: () => A(null),
+			k === "admin" && et && /* @__PURE__ */ (0, x.jsx)(te, {
+				onClose: () => Ae(null),
 				onChanged: Et
 			})
 		]
 	});
 }
 // src/styles.css?inline
-var me = ":host{color:#233d35;font-synthesis:none;--green:#215b4d;--deep:#163d33;--pale:#edf3e9;--line:#e3e9e2;--muted:#839087;--gold:#b7a66a;--radius:16px;background:#f7f8f4;min-width:0;font-family:Noto Sans SC,Microsoft YaHei,sans-serif;font-size:14px;font-weight:400;line-height:1.55;display:block;container-type:inline-size}*{box-sizing:border-box}.app-shell{min-width:0;margin:0}button,input,textarea,select{font:inherit}button,a,input,textarea,select{-webkit-tap-highlight-color:transparent}button{cursor:pointer}button:disabled{cursor:not-allowed;opacity:.45}button,a{transition:background .16s,border-color .16s,box-shadow .16s,transform .16s}button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline-offset:3px;outline:3px solid #a6c6a8}button{color:inherit}a{color:inherit;text-decoration:none}img{max-width:100%;display:block}h1,h2,h3,p{margin:0}h1,h2,h3{font-weight:650}h3{font-size:14px}button svg,a svg{flex-shrink:0}input,textarea,select{width:100%;color:var(--deep);background:#fff;border:1px solid #dfe6df;border-radius:8px;padding:11px 12px}input:focus,textarea:focus,select:focus{border-color:#7ba28c;outline:none}textarea{resize:vertical}input[type=checkbox]{width:15px;height:15px;accent-color:var(--green)}small{font-size:11px}.muted{color:var(--muted)}.microcopy{color:#7c8a80;font-size:11px;line-height:1.8}.eyebrow,.step-label{letter-spacing:1.9px;color:#94a395;font-size:10px;font-weight:500}.primary,.secondary,.text-button,.icon-button{white-space:nowrap;border:0;border-radius:8px;justify-content:center;align-items:center;gap:8px;font-weight:550;display:inline-flex}.primary{background:var(--green);color:#fff;border:1px solid var(--green);padding:13px 22px}.primary:hover:not(:disabled){background:#174b3f;box-shadow:0 4px 14px #184f3c16}.secondary{background:#fff;border:1px solid #dce4dc;padding:10px 16px;font-size:12px}.secondary:hover:not(:disabled){background:#fafcf8;border-color:#8fae99}.text-button{background:0 0;padding:7px;font-size:12px}.text-button:hover{background:#edf1e9}.icon-button{color:#7b8980;background:0 0;flex-shrink:0;width:32px;height:32px}.icon-button:hover{color:var(--green);background:#e9f0e5}.full{width:100%}.small{padding:7px 11px;font-size:11px}.tiny-pill{color:#52735b;white-space:nowrap;background:#edf3e9;border-radius:4px;padding:2px 6px;font-size:10px}.outline-pill{color:#8b8e72;white-space:nowrap;border:1px solid #dddfcf;border-radius:4px;padding:3px 9px;font-size:10px}.spinner{border:2px solid #becfbe;border-top-color:var(--green);border-radius:50%;flex-shrink:0;width:25px;height:25px;animation:.8s linear infinite spin;display:inline-block}.spinner.tiny{width:16px;height:16px}.primary .spinner{border-color:#fff #ffffff45 #ffffff45}@keyframes spin{to{transform:rotate(360deg)}}.page-loader{color:#7a897f;justify-content:center;align-items:center;gap:14px;min-height:90vh;display:flex}.page-loader.in-page{min-height:430px}.notice{border:1px solid;border-radius:8px;justify-content:space-between;align-items:center;gap:14px;margin-bottom:14px;padding:10px 15px;font-size:12px;display:flex}.notice.error{color:#945d41;background:#fff4ef;border-color:#eddbc9}.notice.success{color:#477047;background:#edf5e9;border-color:#dbe8d2}.notice.info{color:#536c7e;background:#f0f4f7;border-color:#dfe7ef}.topbar{background:#fff;border-bottom:1px solid #e6eae1;justify-content:space-between;align-items:center;min-height:64px;padding:12px 20px;display:flex}.brand{align-items:center;gap:10px;display:flex}.brand-icon{color:var(--green);justify-content:center;align-items:center;display:flex}.brand strong{letter-spacing:1px;font-size:20px;line-height:1.5;display:block}.brand small{letter-spacing:2px;color:#94a38f;font-size:8px;font-weight:500;display:block}.version-tag{color:#77906c;border:1px solid #dce3d7;border-radius:4px;align-self:flex-start;margin-top:6px;margin-left:3px;padding:1px 5px;font-size:9px}.header-actions{color:#627268;align-items:center;gap:15px;display:flex}.header-divider{background:#e4e9e0;width:1px;height:24px;margin:0 5px}.count{background:#eef2e9;border-radius:4px;padding:1px 5px;font-size:9px}.avatar{color:#638059;background:#e6eddf;border-radius:50%;justify-content:center;align-items:center;width:29px;height:29px;font-size:12px;display:flex}.user-name{margin-left:-8px;font-size:12px}.app-shell main{max-width:1700px;margin:auto;padding:20px 20px 12px}.workspace-title{justify-content:space-between;align-items:center;margin-bottom:24px;display:flex}.workspace-title h1{letter-spacing:.2px;margin:4px 0;font-size:27px;line-height:1.7}.workspace-title p{color:#8a968b;font-size:12px}.title-dot{color:#b8c59f}.workspace-title>.secondary{margin-top:9px}.environment-strip{color:#91957f;background:#f0f2e8;border:1px solid #e4e7d8;border-radius:7px;justify-content:space-between;align-items:center;gap:15px;margin-bottom:21px;padding:10px 14px;font-size:10px;display:flex}.environment-strip>div{align-items:center;gap:8px;display:flex}.environment-strip strong{color:#7f8268;font-weight:500}.status-dot{background:#6b956d;border-radius:50%;flex-shrink:0;width:6px;height:6px;display:inline-block}.status-dot.amber{background:#baab70}.workspace-grid{grid-template-columns:294px minmax(350px,1fr) 290px;align-items:start;gap:20px;display:grid}.panel{border:1px solid var(--line);border-radius:var(--radius);background:#fff;overflow:hidden;box-shadow:0 2px 5px #274c2402}.panel-heading{justify-content:space-between;align-items:center;gap:9px;padding:22px 23px 0;display:flex}.panel-heading h2{letter-spacing:.3px;text-overflow:ellipsis;white-space:nowrap;max-width:320px;margin-top:4px;font-size:17px;overflow:hidden}.panel-heading>svg{color:#a6b49b}.source-panel .panel-heading{margin-bottom:3px}.source-section{border-bottom:1px solid #edf0e9;padding:21px 22px}.source-section:last-of-type{border:0}.section-label{justify-content:space-between;align-items:center;margin-bottom:12px;display:flex}.section-label h3{font-size:13px}.section-label>span{color:#a0aa9c;font-size:10px}.two-actions{grid-template-columns:1fr 1fr;gap:9px;display:grid}.two-actions .secondary{padding:9px 5px;font-size:11px}.selected-patterns{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:13px;display:grid}.pattern-tile .checker{background-color:#f9fbf5;border:1px solid #e8ece4;border-radius:7px;justify-content:center;align-items:center;height:64px;padding:10px;display:flex;position:relative}.checker{background-image:linear-gradient(45deg,#e9ede31a 25%,#0000 25%),linear-gradient(-45deg,#e9ede333 25%,#0000 25%),linear-gradient(45deg,#0000 75%,#e9ede333 75%),linear-gradient(-45deg,#0000 75%,#e9ede333 75%);background-position:0 0,0 6px,6px -6px,-6px 0;background-size:12px 12px}.pattern-tile img{object-fit:contain;width:46px;height:46px}.pattern-tile>span{text-align:center;white-space:nowrap;text-overflow:ellipsis;color:#677b68;margin-top:6px;font-size:10px;display:block;overflow:hidden}.remove-asset{color:#73906e;background:#fff;border:0;border-radius:50%;justify-content:center;align-items:center;width:17px;height:17px;padding:0;font-size:14px;line-height:1;display:flex;position:absolute;top:3px;right:3px}.remove-asset:hover{background:#e2ebda}.empty-patterns{color:#9aaa91;background:#fafcf7;border:1px dashed #d8e2d1;border-radius:8px;flex-direction:column;align-items:center;gap:6px;width:100%;margin-top:13px;padding:18px 8px;display:flex}.empty-patterns span{font-size:10px}.empty-patterns small{color:#b0baaa;font-size:9px}.template-grid{grid-template-columns:1fr 1fr;gap:9px;display:grid}.template-card{background:#fff;border:1px solid #e2e8df;border-radius:7px;min-width:0;padding:6px;position:relative;overflow:hidden}.template-card img{object-fit:cover;opacity:.85;border-radius:3px;width:100%;height:42px}.template-card>span{color:#82927d;justify-content:center;align-items:center;gap:6px;padding:6px 0 2px;font-size:11px;display:flex}.template-card.selected{background:#fbfcf8;border-color:#648666;box-shadow:inset 0 0 0 1px #648666}.template-card.selected>span{color:#3d6546;font-weight:600}.template-card:hover:not(:disabled){border-color:#719774}.background-selected{background:#f4f7ee;border:1px solid #e3e9db;border-radius:7px;align-items:center;gap:10px;margin-top:12px;padding:9px;display:flex}.background-selected img{object-fit:cover;border-radius:4px;width:39px;height:34px}.background-selected>div{flex:1;min-width:0}.background-selected strong{white-space:nowrap;text-overflow:ellipsis;font-size:11px;font-weight:500;display:block;overflow:hidden}.background-selected small{color:#95a28d;margin-top:2px;font-size:9px;display:block}.background-selected>svg{color:#799371}.empty-background{color:#a3ac9c;text-align:center;padding:17px 4px 0;font-size:10px}.background-section .microcopy{margin-top:9px}.selection-warning{color:#aa8650;background:#fff6e8;border-radius:7px;margin:0 15px 18px;padding:10px;font-size:11px;line-height:1.8}.center-column{flex-direction:column;gap:17px;min-width:0;display:flex}.preview-panel{padding-bottom:22px}.preview-panel .panel-heading{padding:22px 24px 20px}.state-pill{color:#7c9672;white-space:nowrap;background:#f1f6ec;border-radius:5px;align-items:center;gap:5px;padding:5px 8px;font-size:9px;display:inline-flex}.state-pill.working{color:#a58c55;background:#f6f2e6}.state-pill.working .status-dot{background:#bfa363}.preview-stage{background-color:#f5f7ef;background-image:linear-gradient(#e7ebdf55 5%,#eff2e700 5%),linear-gradient(90deg,#eff2e700 95%,#e7ebdf55 95%);background-position:0 0;background-repeat:repeat;background-size:20px 20px;background-attachment:scroll;background-origin:padding-box;background-clip:border-box;border:1px solid #e6eadd;border-radius:10px;flex-direction:column;min-height:330px;margin:0 23px;display:flex;position:relative;overflow:hidden}.stage-topline,.stage-bottomline{color:#a4b095;justify-content:space-between;align-items:center;padding:14px 15px;font-size:9px;display:flex}.stage-topline>span:first-child{color:#899f79;font-size:10px}.stage-bottomline{letter-spacing:1px;margin-top:auto;font-size:8px}.stage-bottomline>span:first-child{letter-spacing:.2px}.preview-stage.is-filled{min-height:0}.ribbon-display{scrollbar-width:thin;scrollbar-color:#cfd8c2 transparent;flex:1;align-items:center;min-height:0;padding:18px 0;display:flex;overflow:auto hidden}.ribbon-display::-webkit-scrollbar{height:6px}.ribbon-display::-webkit-scrollbar-thumb{background:#cfd8c2;border-radius:3px}.ribbon-display img{border-radius:2px;flex:none;display:block;box-shadow:0 7px 12px #3351350a}.ribbon-display.detail img{width:auto;max-width:none;height:168px}.ribbon-display.fit img{width:100%;height:auto;max-height:none}.ribbon-tools{color:#94a385;align-items:center;gap:12px;padding:0 15px 14px;font-size:10px;display:flex}.ribbon-zoom{border:1px solid #dfe5d5;border-radius:6px;flex:none;display:inline-flex;overflow:hidden}.ribbon-zoom button{color:#7d8f6f;cursor:pointer;background:#fff;border:0;padding:4px 10px;font-size:10px}.ribbon-zoom button.is-active{color:#4e6343;background:#eef2e6;font-weight:500}.ribbon-metrics{font-variant-numeric:tabular-nums;letter-spacing:.2px;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}.ribbon-hint{white-space:nowrap;color:#b0bc9f;margin-left:auto}.preview-stage.is-empty{min-height:330px}.empty-canvas{text-align:center;flex-direction:column;flex:1;justify-content:center;align-items:center;padding:10px 15px 15px;display:flex}.empty-symbol{color:#98ad7f;background:#e9efdf;border-radius:18px;justify-content:center;align-items:center;width:56px;height:56px;margin-bottom:12px;display:flex}.empty-canvas h3{color:#839575;font-size:14px;font-weight:500}.empty-canvas p{color:#a6b09a;margin-top:7px;font-size:10px;line-height:1.9}.template-peek{color:#a1af90;border-top:1px solid #e2e9d9;align-items:center;gap:8px;margin-top:15px;padding-top:12px;font-size:9px;display:flex}.template-peek img{object-fit:cover;opacity:.65;border-radius:3px;width:85px;height:24px}.processing-overlay{-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);background:#f8faf1d9;flex-direction:column;justify-content:center;align-items:center;gap:10px;display:flex;position:absolute;inset:0}.processing-overlay strong{font-size:13px;font-weight:500}.processing-overlay>span:last-child{color:#91a086;font-size:10px}.preview-caption{color:#a4af9a;justify-content:space-between;align-items:center;padding:11px 24px 0;font-size:9px;display:flex}.preview-caption>span:first-child{align-items:center;gap:5px;display:flex}.result-actions{grid-template-columns:1fr 1fr;gap:12px;padding:19px 23px 0;display:grid}.result-actions .primary,.result-actions .secondary{padding:12px 8px;font-size:12px}.generate-area{padding:20px 23px 0}.generate-area>.primary{font-size:13px}.generate-area>.primary svg:last-child{margin-left:auto}.generate-area>.primary svg:first-child{margin-right:auto}.generate-area>small{text-align:center;color:#9eaa94;padding-top:10px;font-size:10px;display:block}.history-hint{color:#9caa90;padding:12px 24px 0;font-size:10px}.history-hint button{color:#507644;background:0 0;border:0;padding:0 0 0 5px;font-size:10px;text-decoration:underline}.history-panel{padding:20px 22px 21px}.history-heading{justify-content:space-between;align-items:center;gap:7px;margin-bottom:16px;display:flex}.history-heading h3{font-size:13px}.history-heading>span{color:#a9b19f;font-size:9px}.version-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;display:grid}.version-card{text-align:left;background:#fff;border:1px solid #e5eadf;border-radius:8px;min-width:0;padding:8px}.version-card.selected{background:#fcfdf9;border-color:#7a9969;box-shadow:inset 0 0 0 1px #7a9969}.version-card>img{object-fit:cover;background:#f4f6ed;border-radius:3px;width:100%;height:46px}.version-card>div{justify-content:space-between;align-items:center;gap:5px;margin-top:8px;display:flex}.version-card strong{font-size:11px;font-weight:500}.version-card>div>small{color:#a9b19d;font-size:9px}.version-card .tiny-pill{padding:1px 5px;font-size:8px}.version-parent{white-space:nowrap;text-overflow:ellipsis;color:#a8b29c;margin-top:5px;font-size:8px;display:block;overflow:hidden}.empty-history{color:#aab69f;justify-content:center;align-items:center;gap:12px;min-height:63px;font-size:10px;display:flex}.history-line{background:#e2e9d9;width:25px;height:1px}.handoff-note{color:#9baa92;align-items:center;gap:11px;padding:1px 9px;display:flex}.note-icon{color:#94a681;background:#eaf0e2;border-radius:50%;flex-shrink:0;justify-content:center;align-items:center;width:34px;height:34px;display:flex}.handoff-note strong{color:#91a180;font-size:10px;font-weight:500;display:block}.handoff-note span:not(.note-icon){margin-top:2px;font-size:9px;display:block}.refinement-panel .panel-heading{padding:22px 22px 21px}.quota-card{background:#edf3e5;border:1px solid #e6eddc;border-radius:9px;margin:0 21px;padding:15px 17px 12px}.quota-card>div:first-child{justify-content:space-between;align-items:center;display:flex}.quota-card>div:first-child>span{color:#749263;font-size:11px}.quota-card strong{color:#547944;font-size:27px;font-weight:500;line-height:1}.quota-card strong small{color:#a1b48d;font-size:12px;font-weight:400}.quota-dots{gap:5px;margin-top:13px;display:flex}.quota-dots>span{background:#dfe8d5;border-radius:2px;flex:1;height:3px}.quota-dots>span.available{background:#9fbb83}.quota-card.exhausted{background:#f2f1eb;border-color:#eae8de}.refinement-body{padding:24px 21px 18px}.refinement-body>label{font-size:13px;font-weight:600}.refinement-body>p{color:#a0ac95;margin:7px 0 14px;font-size:10px;line-height:1.9}.refinement-body textarea{resize:vertical;background:#fcfdf9;border-color:#e2e9da;border-radius:8px;min-height:150px;padding:13px;font-size:11px;line-height:2.1}.refinement-body textarea::placeholder{color:#b1bba6}.refinement-body textarea:disabled{background:#f8faf4}.text-limit{text-align:right;color:#aeb9a1;margin-top:4px;font-size:8px}.suggestions{flex-direction:column;align-items:start;gap:6px;margin-top:15px;display:flex}.suggestions>span{color:#a6b099;margin-bottom:2px;font-size:9px}.suggestions>button{color:#97a587;text-align:left;background:#fcfdf9;border:1px solid #e8eddf;border-radius:5px;justify-content:space-between;align-items:center;gap:4px;width:100%;padding:6px 8px;font-size:9px;display:flex}.suggestions>button:hover:not(:disabled){color:#52753f;background:#f0f5e7;border-color:#bace9d}.refine-button{margin-top:22px;font-size:12px}.refinement-body p.refine-help{text-align:center;color:#a9b39c;margin:10px 0 0;font-size:9px;line-height:1.8}.refine-footer{background:#fdfefb;border-top:1px solid #edf0e7;padding:20px 22px}.refine-footer>div{color:#93a380;align-items:center;gap:6px;display:flex}.refine-footer strong{font-size:10px;font-weight:500}.refine-footer p{color:#a6b199;margin-top:7px;font-size:9px;line-height:1.9}.refine-footer .test-limit{color:#a8a88b;border-top:1px dashed #e7eddf;padding-top:10px}.page-footer{color:#b2bba7;justify-content:space-between;align-items:center;margin-top:29px;font-size:9px;display:flex}.page-footer>span:first-child{letter-spacing:1px}.page-footer>span:nth-child(2){letter-spacing:2px}.modal-scrim{-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);z-index:20;background:#16392a55;justify-content:center;align-items:center;padding:24px;display:flex;position:fixed;inset:0}.modal{background:#fff;border-radius:18px;width:520px;max-width:100%;max-height:90vh;padding:27px 30px;overflow:auto;box-shadow:0 20px 80px #142f2733}.modal-wide{width:840px}.modal-heading{justify-content:space-between;align-items:center;margin-bottom:25px;display:flex}.modal-heading h2{margin-top:5px;font-size:23px}.modal-heading .eyebrow{font-size:8px}.modal-footer{border-top:1px solid var(--line);justify-content:space-between;align-items:center;gap:15px;margin-top:22px;padding-top:20px;display:flex}.modal-footer>span{color:#8fa180;font-size:11px}.modal-footer>.primary{padding:10px 17px;font-size:12px}.library-toolbar{gap:12px;display:flex}.library-toolbar>input{flex:1;font-size:12px}.upload-label{cursor:pointer;font-size:12px}.upload-label.disabled{opacity:.5;pointer-events:none}.checkbox-line{color:#859775;align-items:center;gap:8px;margin:12px 0;font-size:11px;display:flex!important}.library-note{margin:15px 0;font-size:11px}.library-grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:15px;display:grid}.library-card{text-align:left;background:#fff;border:1px solid #e2e9da;border-radius:9px;width:100%;padding:7px;overflow:hidden}.library-card.selected{background:#fafcf6;border-color:#7b9a67;box-shadow:inset 0 0 0 1px #7b9a67}.library-image{background-color:#f7f9f1;border-radius:5px;justify-content:center;align-items:center;height:100px;display:flex;position:relative}.library-image img{object-fit:contain;width:100%;max-height:100%;padding:8px}.library-image:not(.checker) img{object-fit:cover;height:100%;padding:0}.check-mark{color:#fff;background:#3b6c41;border-radius:50%;justify-content:center;align-items:center;width:20px;height:20px;display:flex;position:absolute;top:6px;right:6px}.library-card strong{text-overflow:ellipsis;white-space:nowrap;margin:9px 4px 4px;font-size:12px;font-weight:500;display:block;overflow:hidden}.library-card>span{color:#a0ad92;margin:0 4px 5px;font-size:9px;display:block}.hide-asset{color:#a5af9c;background:0 0;border:0;padding:5px 3px;font-size:9px}.hide-asset:hover{color:#a2765c}.empty-library{text-align:center;color:#9fae91;padding:45px 10px;font-size:12px}.design-library{flex-direction:column;gap:10px;display:flex}.design-list-item{text-align:left;background:#fff;border:1px solid #e4eadc;border-radius:9px;align-items:center;gap:15px;padding:15px;display:flex}.design-list-item.selected{background:#f6f9ef;border-color:#afc299}.design-list-item>div{flex:1}.design-list-item strong{font-size:13px;font-weight:500;display:block}.design-list-item small{color:#a0ae90;margin-top:4px;font-size:10px;display:block}.design-list-icon{color:#95ae79;background:#edf3e4;border-radius:10px;justify-content:center;align-items:center;width:42px;height:42px;display:flex}.design-list-item>svg{color:#a5b890}.admin-tabs{border-bottom:1px solid #e5eadf;gap:8px;margin-bottom:18px;padding-bottom:15px;display:flex}.admin-tabs button{color:#899a7b;background:0 0;border:0;border-radius:7px;padding:9px 15px;font-size:12px}.admin-tabs button.active{color:#50713a;background:#eaf2df}.admin-intro{color:#91a17f;justify-content:space-between;align-items:center;margin-bottom:16px;font-size:12px;display:flex}.table-scroll{max-height:450px;overflow:auto}.table-scroll table{border-collapse:collapse;width:100%;font-size:11px}.table-scroll th{text-align:left;color:#95a582;white-space:nowrap;background:#f5f8ed;font-size:10px;font-weight:500}.table-scroll th,.table-scroll td{border-bottom:1px solid #e9efdf;padding:12px 10px}.table-scroll td{word-break:break-word;color:#7e936a;max-width:240px}.table-scroll td strong{font-size:10px;font-weight:500;display:block}.table-scroll td small{color:#a2b48c;margin-top:4px;font-size:9px;display:block}.job-status{background:#f3f4ec;border-radius:4px;padding:3px 5px;font-size:9px}.job-status.succeeded{background:#ebf3e0}.job-status.failed{color:#a88463;background:#fff1e6}.admin-columns{grid-template-columns:1fr 1fr;gap:28px;display:grid}.admin-columns h3{margin-bottom:14px}.admin-form label{color:#849970;margin-bottom:15px;font-size:11px;display:block}.admin-form label input,.admin-form label select,.admin-form label textarea{margin-top:6px;font-size:12px}.admin-form>small{color:#a0b18a;margin-top:-8px;margin-bottom:15px;font-size:9px;display:block}.admin-form>.primary{width:100%;margin-top:12px;font-size:12px}.admin-form>.text-button{justify-content:center;width:100%;margin-top:7px;font-size:10px}.admin-form .checkbox-line input{margin:0}.code-input{font-family:Consolas,monospace}.admin-existing{max-height:530px;overflow:auto}.admin-template{text-align:left;background:#fff;border:1px solid #e4ecd9;border-radius:7px;align-items:center;gap:10px;width:100%;margin-bottom:9px;padding:9px;display:flex}.admin-template.selected{background:#f5f9ec;border-color:#acc58d}.admin-template img{object-fit:cover;border-radius:4px;width:87px;height:35px}.admin-template>div{flex:1}.admin-template strong{font-size:11px;font-weight:500;display:block}.admin-template small{color:#a4b58e;margin-top:3px;font-size:9px;display:block}.admin-template>svg{color:#a5b58e}.profile-item{border:1px solid #e6eddb;border-radius:8px;margin-top:10px;padding:13px 10px}.profile-item strong{justify-content:space-between;align-items:center;gap:7px;font-size:12px;font-weight:500;display:flex}.profile-item small,.profile-item>span{color:#a1b28a;margin-top:5px;font-size:10px;display:block}.form-two{grid-template-columns:1fr 1fr;gap:12px;display:grid}.admin-intro+.table-scroll+.microcopy{margin-top:15px}.login-page{grid-template-columns:1.1fr 1fr;min-height:100vh;display:grid}.login-illustration{background:#edf2e5;flex-direction:column;justify-content:space-between;padding:50px 9%;display:flex;position:relative;overflow:hidden}.login-illustration>div:nth-child(2){margin:60px 0 30px}.login-illustration h1{letter-spacing:1px;color:#385b36;margin:17px 0 20px;font-size:49px;font-weight:550;line-height:1.5}.login-illustration p{color:#92a77f;font-size:13px;line-height:2.1}.login-illustration .eyebrow{color:#8da478;letter-spacing:1px;font-size:11px}.decorative-ribbon{background:#dce9ca;border-top:1px solid #cfdfbd;border-bottom:1px solid #cfdfbd;justify-content:space-around;align-items:center;gap:20px;width:140%;margin-left:-20%;padding:28px 23px;display:flex;transform:rotate(-8deg);box-shadow:0 15px 30px #6e855518}.decorative-ribbon span{color:#9caf76;font-size:45px}.decorative-ribbon span:nth-child(3n+1){color:#d3aa7d;font-size:54px}.decorative-ribbon span:nth-child(3n+2){color:#cebf7c}.login-illustration>small{letter-spacing:3px;color:#a3b58f;margin-top:60px;font-size:9px}.login-form-wrap{background:#fff;justify-content:center;align-items:center;padding:40px;display:flex}.login-form{width:350px;max-width:100%}.login-form>h2{margin:9px 0 12px;font-size:27px}.login-form>.muted{margin-bottom:30px;font-size:12px}.login-form>label{color:#6e8563;margin-bottom:19px;font-size:12px;display:block}.login-form>label>input{margin-top:8px;padding:12px 14px}.login-form>.primary{justify-content:space-between;margin-top:10px}.login-demo{color:#a0af91;border-top:1px solid #e9efdf;margin-top:30px;padding-top:20px;font-size:11px}.login-demo strong{margin-bottom:8px;font-size:10px;font-weight:500;display:block}.login-demo span{margin:3px 0;font-size:10px;display:block}.login-demo small{color:#b0bda3;margin-top:12px;font-size:9px;display:block}@media (width>=1500px){.workspace-grid{grid-template-columns:315px minmax(480px,1fr) 310px;gap:24px}.source-section{padding:23px}.preview-stage{min-height:380px}.refinement-body textarea{min-height:185px}.template-card img{height:48px}.empty-canvas{min-height:280px}.panel-heading{padding-top:25px}.preview-stage.is-empty{min-height:380px}}@media (width<=1200px){.workspace-grid{grid-template-columns:260px minmax(300px,1fr) 255px;gap:14px}.app-shell main{padding:25px 2.5% 20px}.topbar{padding:0 2.5%}.source-section{padding:20px 17px}.panel-heading,.refinement-panel .panel-heading{padding-left:18px;padding-right:18px}.quota-card{margin-left:17px;margin-right:17px}.refinement-body{padding-left:17px;padding-right:17px}.preview-panel .panel-heading{padding:22px 17px 19px}.preview-stage{margin:0 17px}.result-actions{padding-left:17px;padding-right:17px}.panel-heading h2{max-width:190px;font-size:15px}.preview-stage{min-height:310px}.state-pill{font-size:8px}.stage-topline,.stage-bottomline{padding:11px}.refine-footer{padding:18px}.preview-caption{padding-left:17px;padding-right:17px}.history-panel{padding:18px 16px}.history-heading>span{font-size:8px}.template-card>span{font-size:10px}.selected-patterns{gap:7px}.pattern-tile .checker{height:59px;padding:7px}.template-card img{height:38px}.source-section .section-label>span{font-size:9px}.brand strong{font-size:18px}}@media (width<=1000px){.workspace-grid{grid-template-columns:250px minmax(360px,1fr);gap:18px}.refinement-panel{grid-area:2/2}.source-panel{grid-row:span 2}.center-column{grid-column:2}.refinement-panel .refinement-body{grid-template-columns:1fr 1fr;column-gap:15px;display:grid}.refinement-body>label,.refinement-body>p,.refinement-body textarea,.refinement-body>.text-limit{grid-column:1/-1}.refinement-body .suggestions{grid-column:1}.refinement-body>.refine-button{grid-area:5/2;align-self:center;height:45px}.refinement-body>.refine-help{grid-area:6/2}.refinement-body textarea{min-height:100px}.refinement-panel .panel-heading{padding-bottom:15px}.quota-card{padding:12px 17px}.quota-card>div:first-child>span{font-size:12px}.quota-dots{margin-top:8px}.refine-footer{padding:15px 20px}.refine-footer .test-limit{margin-top:7px}.environment-strip>div>span:last-child{display:none}.workspace-title h1{font-size:23px}.page-footer>span:nth-child(2){display:none}.login-illustration h1{font-size:38px}}@media (width<=700px){.topbar{height:70px;padding:0 18px}.brand strong{font-size:16px}.brand small{letter-spacing:1.5px;font-size:6px}.brand-icon svg{width:20px}.version-tag{display:none}.header-actions{gap:5px}.header-actions>.text-button{gap:0;padding:8px;font-size:0}.header-actions>.text-button .count,.header-divider,.user-name{display:none}.avatar{width:25px;height:25px;margin-left:5px}.app-shell main{padding:22px 16px 18px}.workspace-title{align-items:start;gap:10px}.workspace-title h1{margin:7px 0;font-size:21px;line-height:1.6}.workspace-title p{max-width:240px;font-size:10px;line-height:1.8}.workspace-title .eyebrow{font-size:8px}.workspace-title>.secondary{gap:0;margin-top:20px;padding:10px;font-size:0}.workspace-grid{grid-template-columns:1fr;gap:17px}.source-panel,.center-column,.refinement-panel{grid-area:auto/1}.source-panel{overflow:visible}.source-section{padding:18px}.source-panel .panel-heading{padding:20px 18px 0}.source-section:first-of-type .two-actions{max-width:300px}.selected-patterns{flex-wrap:wrap;gap:10px;display:flex}.pattern-tile{width:65px}.empty-patterns{padding:12px}.template-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}.template-card img{height:34px}.template-card>span{font-size:10px}.template-card{padding:5px}.environment-strip{gap:7px;padding:9px 10px;font-size:9px}.environment-strip strong{font-size:9px}.outline-pill{padding:3px 5px;font-size:8px}.environment-strip>div{gap:6px}.background-section .two-actions,.background-selected{max-width:300px}.preview-stage{min-height:285px}.preview-stage.is-empty{min-height:300px}.preview-panel .panel-heading h2{max-width:225px}.history-panel{padding:20px 18px}.refinement-panel .refinement-body{display:block}.refinement-body textarea{min-height:130px}.suggestions{display:flex}.suggestions>button,.refine-footer p{font-size:10px}.page-footer{gap:12px;font-size:8px}.modal-scrim{padding:10px}.modal{border-radius:12px;max-height:94vh;padding:22px 18px}.modal-heading{margin-bottom:20px}.modal-heading h2{font-size:21px}.library-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.library-image{height:80px}.library-card strong{font-size:10px}.library-card>span{font-size:8px}.library-toolbar{gap:7px}.upload-label{padding:10px;font-size:10px}.library-toolbar input{min-width:0;font-size:11px}.modal-footer{gap:10px}.modal-footer>span{font-size:10px}.modal-footer>.primary{padding:10px 12px;font-size:11px}.admin-columns{grid-template-columns:1fr}.admin-existing{max-height:240px}.login-page{flex-direction:column;min-height:100vh;display:flex}.login-illustration{min-height:320px;padding:25px 30px 30px}.login-illustration>div:nth-child(2){margin:30px 0 0}.login-illustration h1{margin:10px 0 14px;font-size:30px;line-height:1.4}.login-illustration h1 br{display:none}.login-illustration p{font-size:11px}.decorative-ribbon,.login-illustration>small{display:none}.login-form-wrap{flex:1;padding:35px 30px 40px}.login-form>h2{font-size:24px}.login-form>.eyebrow{font-size:8px}.login-demo{margin-top:23px}.notice{font-size:11px}}@media (prefers-reduced-motion:reduce){*{transition:none!important;animation-duration:.01ms!important}}@container (width<=950px){.workspace-grid{grid-template-columns:250px minmax(0,1fr);gap:16px}.source-panel{grid-row:span 2}.center-column{grid-column:2}.refinement-panel{grid-area:2/2}.refinement-body textarea{min-height:120px}.topbar{flex-wrap:wrap;gap:12px}.workspace-title h1{font-size:22px}}@container (width<=700px){.workspace-grid{grid-template-columns:minmax(0,1fr)}.source-panel,.center-column,.refinement-panel{grid-area:auto/1}.topbar,.app-shell main{padding:14px}.workspace-title,.environment-strip{flex-wrap:wrap}.header-actions>.text-button{gap:5px;font-size:12px}.workspace-title>.secondary{margin-top:0;font-size:12px}}.template-option{flex-direction:column;gap:3px;min-width:0;display:flex}.template-option>.template-card{width:100%}.more-layouts{border-top:1px solid var(--line);margin-top:12px}.more-layouts-toggle{color:#345e45;background:0 0;border:0;justify-content:space-between;align-items:center;width:100%;min-height:40px;padding:9px 2px;font-size:13px;font-weight:600;display:flex}.more-layouts-toggle:hover{background:#edf3e9}.layout-selection-help,.layout-selection-issue{margin-top:12px;font-size:12px;line-height:1.7}.layout-selection-help{color:#526a5d}.layout-selection-issue{color:#9e4634}.template-rules-help{color:#526a5d;font-size:12px;line-height:1.7;display:block}.template-example-button,.template-examples-all{color:#345e45;text-underline-offset:3px;background:0 0;border:0;font-size:12px;font-weight:500;line-height:1.5;text-decoration:underline}.template-example-button{min-height:30px;padding:4px 6px}.template-examples-all{padding:4px 0 4px 8px}.template-example-button:hover,.template-examples-all:hover{color:#193f29;background:#edf3e9}.template-example-button:focus-visible,.template-examples-all:focus-visible{outline-offset:2px;outline:2px solid #507857}.layout-examples-modal{width:1160px}.layout-examples-modal .modal-heading{z-index:2;background:#fff;margin-top:-12px;margin-bottom:14px;padding-top:12px;padding-bottom:12px;position:sticky;top:-27px}.layout-examples-intro{margin-bottom:22px}.layout-mode-summary{color:#284a36;margin:0 0 8px;font-size:16px;line-height:1.65}.layout-mode-note{color:#455b49;background:#f2f6ee;border-left:3px solid #90a77f;margin:8px 0 12px;padding:10px 13px;font-size:14px;line-height:1.7}.layout-examples-tools{flex-wrap:wrap;align-items:center;gap:14px;display:flex}.layout-examples-tools>button{min-height:34px;font-size:13px}.layout-examples-loading,.layout-examples-error{color:#37513d;flex-wrap:wrap;align-items:center;gap:14px;min-height:140px;display:flex}.layout-examples-error{padding:20px 0;display:block}.layout-examples-error>p{margin:0 0 16px;font-size:15px;line-height:1.7}.layout-examples-list{flex-direction:column;gap:22px;display:flex}.layout-example{border-top:1px solid #dbe5d7;min-width:0;padding-top:18px}.layout-example-heading{flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:12px;display:flex}.layout-example-heading h3{color:#284a36;margin:0;font-size:19px;line-height:1.5}.layout-example-heading>div{flex-wrap:wrap;align-items:center;gap:12px;display:flex}.layout-example-code{color:#50624d;font-variant-numeric:tabular-nums;font-size:13px}.layout-reference-tag{color:#6b5828;background:#f4f1e6;border-radius:4px;padding:3px 7px;font-size:12px}.layout-example-description{color:#304f3a;margin:8px 0 0;font-size:15px;line-height:1.7}.layout-example-image-tools{align-items:center;gap:12px;min-height:38px;display:flex}.layout-example-image-tools>button{color:#335c40;min-height:34px;padding:5px 0;font-size:13px}.layout-example-image-tools>span{color:#53644d;font-size:12px}.layout-example-viewport{background:#f7f9f5;border:1px solid #e3e9df;border-radius:5px;overflow:auto hidden}.layout-example-viewport>img{width:100%;max-width:none;height:auto;display:block}.layout-example-viewport.is-zoomed>img{width:max(100%, var(--example-width))}.layout-example-viewport:focus-visible{outline-offset:3px;outline:2px solid #507857}.layout-example-look{color:#3e5941;margin:10px 0 0;font-size:14px;line-height:1.7}.layout-example-look strong{font-weight:600}.layout-example-reference{color:#6b5828;margin:8px 0 0;font-size:13px;line-height:1.7}.layout-example-unavailable{color:#465d48;background:#f7f9f5;border:1px dashed #b8c7b1;border-radius:5px;margin-top:14px;padding:18px;font-size:14px;line-height:1.7}.layout-example-unavailable p{margin:0}.layout-example-unavailable button{margin-top:12px;font-size:13px}.layout-examples-source{color:#53644d;border-top:1px solid #dbe5d7;margin:20px 0 0;padding-top:14px;font-size:12px;line-height:1.8}.background-prompt-label{color:var(--ink);margin:12px 0 6px;font-size:13px;font-weight:600;display:block}.background-prompt{box-sizing:border-box;border:1px solid var(--line);width:100%;min-height:66px;color:var(--ink);font:inherit;resize:vertical;background:#fff;border-radius:6px;padding:9px 10px;font-size:13px;line-height:1.65;display:block}.background-prompt:focus{outline-offset:2px;outline:2px solid #91a88a}.model-help,.model-edit-boundary{color:#4c634f;font-size:13px;line-height:1.7}.refinement-body .model-edit-boundary{border-left:2px solid #b4c6ab;margin:0 0 12px;padding-left:9px}.model-workflow-help{color:#4c634f;margin-bottom:16px;font-size:13px;line-height:1.7}.model-workflow-help summary{cursor:pointer;font-weight:600}.model-workflow-help p{margin:8px 0 0}@media (width<=600px){.layout-examples-modal .modal-heading{top:-20px}.layout-examples-modal .modal-heading h2{font-size:20px}.layout-mode-summary{font-size:15px}.layout-example-heading h3{font-size:17px}.layout-example-heading{gap:4px}}";
+var he = ":host{color:#233d35;font-synthesis:none;--green:#215b4d;--deep:#163d33;--pale:#edf3e9;--line:#e3e9e2;--muted:#839087;--gold:#b7a66a;--radius:16px;background:#f7f8f4;min-width:0;font-family:Noto Sans SC,Microsoft YaHei,sans-serif;font-size:14px;font-weight:400;line-height:1.55;display:block;container-type:inline-size}*{box-sizing:border-box}.app-shell{min-width:0;margin:0}button,input,textarea,select{font:inherit}button,a,input,textarea,select{-webkit-tap-highlight-color:transparent}button{cursor:pointer}button:disabled{cursor:not-allowed;opacity:.45}button,a{transition:background .16s,border-color .16s,box-shadow .16s,transform .16s}button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline-offset:3px;outline:3px solid #a6c6a8}button{color:inherit}a{color:inherit;text-decoration:none}img{max-width:100%;display:block}h1,h2,h3,p{margin:0}h1,h2,h3{font-weight:650}h3{font-size:14px}button svg,a svg{flex-shrink:0}input,textarea,select{width:100%;color:var(--deep);background:#fff;border:1px solid #dfe6df;border-radius:8px;padding:11px 12px}input:focus,textarea:focus,select:focus{border-color:#7ba28c;outline:none}textarea{resize:vertical}input[type=checkbox]{width:15px;height:15px;accent-color:var(--green)}small{font-size:11px}.muted{color:var(--muted)}.microcopy{color:#7c8a80;font-size:11px;line-height:1.8}.eyebrow,.step-label{letter-spacing:1.9px;color:#94a395;font-size:10px;font-weight:500}.primary,.secondary,.text-button,.icon-button{white-space:nowrap;border:0;border-radius:8px;justify-content:center;align-items:center;gap:8px;font-weight:550;display:inline-flex}.primary{background:var(--green);color:#fff;border:1px solid var(--green);padding:13px 22px}.primary:hover:not(:disabled){background:#174b3f;box-shadow:0 4px 14px #184f3c16}.secondary{background:#fff;border:1px solid #dce4dc;padding:10px 16px;font-size:12px}.secondary:hover:not(:disabled){background:#fafcf8;border-color:#8fae99}.text-button{background:0 0;padding:7px;font-size:12px}.text-button:hover{background:#edf1e9}.icon-button{color:#7b8980;background:0 0;flex-shrink:0;width:32px;height:32px}.icon-button:hover{color:var(--green);background:#e9f0e5}.full{width:100%}.small{padding:7px 11px;font-size:11px}.tiny-pill{color:#52735b;white-space:nowrap;background:#edf3e9;border-radius:4px;padding:2px 6px;font-size:10px}.outline-pill{color:#8b8e72;white-space:nowrap;border:1px solid #dddfcf;border-radius:4px;padding:3px 9px;font-size:10px}.spinner{border:2px solid #becfbe;border-top-color:var(--green);border-radius:50%;flex-shrink:0;width:25px;height:25px;animation:.8s linear infinite spin;display:inline-block}.spinner.tiny{width:16px;height:16px}.primary .spinner{border-color:#fff #ffffff45 #ffffff45}@keyframes spin{to{transform:rotate(360deg)}}.page-loader{color:#7a897f;justify-content:center;align-items:center;gap:14px;min-height:90vh;display:flex}.page-loader.in-page{min-height:430px}.notice{border:1px solid;border-radius:8px;justify-content:space-between;align-items:center;gap:14px;margin-bottom:14px;padding:10px 15px;font-size:12px;display:flex}.notice.error{color:#945d41;background:#fff4ef;border-color:#eddbc9}.notice.success{color:#477047;background:#edf5e9;border-color:#dbe8d2}.notice.info{color:#536c7e;background:#f0f4f7;border-color:#dfe7ef}.topbar{background:#fff;border-bottom:1px solid #e6eae1;justify-content:space-between;align-items:center;min-height:64px;padding:12px 20px;display:flex}.brand{align-items:center;gap:10px;display:flex}.brand-icon{color:var(--green);justify-content:center;align-items:center;display:flex}.brand strong{letter-spacing:1px;font-size:20px;line-height:1.5;display:block}.brand small{letter-spacing:2px;color:#94a38f;font-size:8px;font-weight:500;display:block}.version-tag{color:#77906c;border:1px solid #dce3d7;border-radius:4px;align-self:flex-start;margin-top:6px;margin-left:3px;padding:1px 5px;font-size:9px}.header-actions{color:#627268;align-items:center;gap:15px;display:flex}.header-divider{background:#e4e9e0;width:1px;height:24px;margin:0 5px}.count{background:#eef2e9;border-radius:4px;padding:1px 5px;font-size:9px}.avatar{color:#638059;background:#e6eddf;border-radius:50%;justify-content:center;align-items:center;width:29px;height:29px;font-size:12px;display:flex}.user-name{margin-left:-8px;font-size:12px}.app-shell main{max-width:1700px;margin:auto;padding:20px 20px 12px}.workspace-title{justify-content:space-between;align-items:center;margin-bottom:24px;display:flex}.workspace-title h1{letter-spacing:.2px;margin:4px 0;font-size:27px;line-height:1.7}.workspace-title p{color:#8a968b;font-size:12px}.title-dot{color:#b8c59f}.workspace-title>.secondary{margin-top:9px}.environment-strip{color:#91957f;background:#f0f2e8;border:1px solid #e4e7d8;border-radius:7px;justify-content:space-between;align-items:center;gap:15px;margin-bottom:21px;padding:10px 14px;font-size:10px;display:flex}.environment-strip>div{align-items:center;gap:8px;display:flex}.environment-strip strong{color:#7f8268;font-weight:500}.status-dot{background:#6b956d;border-radius:50%;flex-shrink:0;width:6px;height:6px;display:inline-block}.status-dot.amber{background:#baab70}.workspace-grid{grid-template-columns:294px minmax(350px,1fr) 290px;align-items:start;gap:20px;display:grid}.panel{border:1px solid var(--line);border-radius:var(--radius);background:#fff;overflow:hidden;box-shadow:0 2px 5px #274c2402}.panel-heading{justify-content:space-between;align-items:center;gap:9px;padding:22px 23px 0;display:flex}.panel-heading h2{letter-spacing:.3px;text-overflow:ellipsis;white-space:nowrap;max-width:320px;margin-top:4px;font-size:17px;overflow:hidden}.panel-heading>svg{color:#a6b49b}.source-panel .panel-heading{margin-bottom:3px}.source-section{border-bottom:1px solid #edf0e9;padding:21px 22px}.source-section:last-of-type{border:0}.section-label{justify-content:space-between;align-items:center;margin-bottom:12px;display:flex}.section-label h3{font-size:13px}.section-label>span{color:#a0aa9c;font-size:10px}.two-actions{grid-template-columns:1fr 1fr;gap:9px;display:grid}.two-actions .secondary{padding:9px 5px;font-size:11px}.selected-patterns{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:13px;display:grid}.pattern-tile .checker{background-color:#f9fbf5;border:1px solid #e8ece4;border-radius:7px;justify-content:center;align-items:center;height:64px;padding:10px;display:flex;position:relative}.checker{background-image:linear-gradient(45deg,#e9ede31a 25%,#0000 25%),linear-gradient(-45deg,#e9ede333 25%,#0000 25%),linear-gradient(45deg,#0000 75%,#e9ede333 75%),linear-gradient(-45deg,#0000 75%,#e9ede333 75%);background-position:0 0,0 6px,6px -6px,-6px 0;background-size:12px 12px}.pattern-tile img{object-fit:contain;width:46px;height:46px}.pattern-tile>span{text-align:center;white-space:nowrap;text-overflow:ellipsis;color:#677b68;margin-top:6px;font-size:10px;display:block;overflow:hidden}.remove-asset{color:#73906e;background:#fff;border:0;border-radius:50%;justify-content:center;align-items:center;width:17px;height:17px;padding:0;font-size:14px;line-height:1;display:flex;position:absolute;top:3px;right:3px}.remove-asset:hover{background:#e2ebda}.empty-patterns{color:#9aaa91;background:#fafcf7;border:1px dashed #d8e2d1;border-radius:8px;flex-direction:column;align-items:center;gap:6px;width:100%;margin-top:13px;padding:18px 8px;display:flex}.empty-patterns span{font-size:10px}.empty-patterns small{color:#b0baaa;font-size:9px}.template-grid{grid-template-columns:1fr 1fr;gap:9px;display:grid}.template-card{background:#fff;border:1px solid #e2e8df;border-radius:7px;min-width:0;padding:6px;position:relative;overflow:hidden}.template-card img{object-fit:cover;opacity:.85;border-radius:3px;width:100%;height:42px}.template-card>span{color:#82927d;justify-content:center;align-items:center;gap:6px;padding:6px 0 2px;font-size:11px;display:flex}.template-card.selected{background:#fbfcf8;border-color:#648666;box-shadow:inset 0 0 0 1px #648666}.template-card.selected>span{color:#3d6546;font-weight:600}.template-card:hover:not(:disabled){border-color:#719774}.background-selected{background:#f4f7ee;border:1px solid #e3e9db;border-radius:7px;align-items:center;gap:10px;margin-top:12px;padding:9px;display:flex}.background-selected img{object-fit:cover;border-radius:4px;width:39px;height:34px}.background-selected>div{flex:1;min-width:0}.background-selected strong{white-space:nowrap;text-overflow:ellipsis;font-size:11px;font-weight:500;display:block;overflow:hidden}.background-selected small{color:#95a28d;margin-top:2px;font-size:9px;display:block}.background-selected>svg{color:#799371}.empty-background{color:#a3ac9c;text-align:center;padding:17px 4px 0;font-size:10px}.background-section .microcopy{margin-top:9px}.selection-warning{color:#aa8650;background:#fff6e8;border-radius:7px;margin:0 15px 18px;padding:10px;font-size:11px;line-height:1.8}.center-column{flex-direction:column;gap:17px;min-width:0;display:flex}.preview-panel{padding-bottom:22px}.preview-panel .panel-heading{padding:22px 24px 20px}.state-pill{color:#7c9672;white-space:nowrap;background:#f1f6ec;border-radius:5px;align-items:center;gap:5px;padding:5px 8px;font-size:9px;display:inline-flex}.state-pill.working{color:#a58c55;background:#f6f2e6}.state-pill.working .status-dot{background:#bfa363}.preview-stage{background-color:#f5f7ef;background-image:linear-gradient(#e7ebdf55 5%,#eff2e700 5%),linear-gradient(90deg,#eff2e700 95%,#e7ebdf55 95%);background-position:0 0;background-repeat:repeat;background-size:20px 20px;background-attachment:scroll;background-origin:padding-box;background-clip:border-box;border:1px solid #e6eadd;border-radius:10px;flex-direction:column;min-height:330px;margin:0 23px;display:flex;position:relative;overflow:hidden}.stage-topline,.stage-bottomline{color:#a4b095;justify-content:space-between;align-items:center;padding:14px 15px;font-size:9px;display:flex}.stage-topline>span:first-child{color:#899f79;font-size:10px}.stage-bottomline{letter-spacing:1px;margin-top:auto;font-size:8px}.stage-bottomline>span:first-child{letter-spacing:.2px}.preview-stage.is-filled{min-height:0}.ribbon-display{scrollbar-width:thin;scrollbar-color:#cfd8c2 transparent;flex:1;align-items:center;min-height:0;padding:18px 0;display:flex;overflow:auto hidden}.ribbon-display::-webkit-scrollbar{height:6px}.ribbon-display::-webkit-scrollbar-thumb{background:#cfd8c2;border-radius:3px}.ribbon-display img{border-radius:2px;flex:none;display:block;box-shadow:0 7px 12px #3351350a}.ribbon-display.detail img{width:auto;max-width:none;height:168px}.ribbon-display.fit img{width:100%;height:auto;max-height:none}.ribbon-tools{color:#94a385;align-items:center;gap:12px;padding:0 15px 14px;font-size:10px;display:flex}.ribbon-zoom{border:1px solid #dfe5d5;border-radius:6px;flex:none;display:inline-flex;overflow:hidden}.ribbon-zoom button{color:#7d8f6f;cursor:pointer;background:#fff;border:0;padding:4px 10px;font-size:10px}.ribbon-zoom button.is-active{color:#4e6343;background:#eef2e6;font-weight:500}.ribbon-metrics{font-variant-numeric:tabular-nums;letter-spacing:.2px;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}.ribbon-hint{white-space:nowrap;color:#b0bc9f;margin-left:auto}.preview-stage.is-empty{min-height:330px}.empty-canvas{text-align:center;flex-direction:column;flex:1;justify-content:center;align-items:center;padding:10px 15px 15px;display:flex}.empty-symbol{color:#98ad7f;background:#e9efdf;border-radius:18px;justify-content:center;align-items:center;width:56px;height:56px;margin-bottom:12px;display:flex}.empty-canvas h3{color:#839575;font-size:14px;font-weight:500}.empty-canvas p{color:#a6b09a;margin-top:7px;font-size:10px;line-height:1.9}.template-peek{color:#a1af90;border-top:1px solid #e2e9d9;align-items:center;gap:8px;margin-top:15px;padding-top:12px;font-size:9px;display:flex}.template-peek img{object-fit:cover;opacity:.65;border-radius:3px;width:85px;height:24px}.processing-overlay{-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);background:#f8faf1d9;flex-direction:column;justify-content:center;align-items:center;gap:10px;display:flex;position:absolute;inset:0}.processing-overlay strong{font-size:13px;font-weight:500}.processing-overlay>span:last-child{color:#91a086;font-size:10px}.preview-caption{color:#a4af9a;justify-content:space-between;align-items:center;padding:11px 24px 0;font-size:9px;display:flex}.preview-caption>span:first-child{align-items:center;gap:5px;display:flex}.result-actions{grid-template-columns:1fr 1fr;gap:12px;padding:19px 23px 0;display:grid}.result-actions .primary,.result-actions .secondary{padding:12px 8px;font-size:12px}.generate-area{padding:20px 23px 0}.generate-area>.primary{font-size:13px}.generate-area>.primary svg:last-child{margin-left:auto}.generate-area>.primary svg:first-child{margin-right:auto}.generate-area>small{text-align:center;color:#9eaa94;padding-top:10px;font-size:10px;display:block}.history-hint{color:#9caa90;padding:12px 24px 0;font-size:10px}.history-hint button{color:#507644;background:0 0;border:0;padding:0 0 0 5px;font-size:10px;text-decoration:underline}.history-panel{padding:20px 22px 21px}.history-heading{justify-content:space-between;align-items:center;gap:7px;margin-bottom:16px;display:flex}.history-heading h3{font-size:13px}.history-heading>span{color:#a9b19f;font-size:9px}.version-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;display:grid}.version-card{text-align:left;background:#fff;border:1px solid #e5eadf;border-radius:8px;min-width:0;padding:8px}.version-card.selected{background:#fcfdf9;border-color:#7a9969;box-shadow:inset 0 0 0 1px #7a9969}.version-card>img{object-fit:cover;background:#f4f6ed;border-radius:3px;width:100%;height:46px}.version-card>div{justify-content:space-between;align-items:center;gap:5px;margin-top:8px;display:flex}.version-card strong{font-size:11px;font-weight:500}.version-card>div>small{color:#a9b19d;font-size:9px}.version-card .tiny-pill{padding:1px 5px;font-size:8px}.version-parent{white-space:nowrap;text-overflow:ellipsis;color:#a8b29c;margin-top:5px;font-size:8px;display:block;overflow:hidden}.empty-history{color:#aab69f;justify-content:center;align-items:center;gap:12px;min-height:63px;font-size:10px;display:flex}.history-line{background:#e2e9d9;width:25px;height:1px}.handoff-note{color:#9baa92;align-items:center;gap:11px;padding:1px 9px;display:flex}.note-icon{color:#94a681;background:#eaf0e2;border-radius:50%;flex-shrink:0;justify-content:center;align-items:center;width:34px;height:34px;display:flex}.handoff-note strong{color:#91a180;font-size:10px;font-weight:500;display:block}.handoff-note span:not(.note-icon){margin-top:2px;font-size:9px;display:block}.refinement-panel .panel-heading{padding:22px 22px 21px}.quota-card{background:#edf3e5;border:1px solid #e6eddc;border-radius:9px;margin:0 21px;padding:15px 17px 12px}.quota-card>div:first-child{justify-content:space-between;align-items:center;display:flex}.quota-card>div:first-child>span{color:#749263;font-size:11px}.quota-card strong{color:#547944;font-size:27px;font-weight:500;line-height:1}.quota-card strong small{color:#a1b48d;font-size:12px;font-weight:400}.quota-dots{gap:5px;margin-top:13px;display:flex}.quota-dots>span{background:#dfe8d5;border-radius:2px;flex:1;height:3px}.quota-dots>span.available{background:#9fbb83}.quota-card.exhausted{background:#f2f1eb;border-color:#eae8de}.refinement-body{padding:24px 21px 18px}.refinement-body>label{font-size:13px;font-weight:600}.refinement-body>p{color:#a0ac95;margin:7px 0 14px;font-size:10px;line-height:1.9}.refinement-body textarea{resize:vertical;background:#fcfdf9;border-color:#e2e9da;border-radius:8px;min-height:150px;padding:13px;font-size:11px;line-height:2.1}.refinement-body textarea::placeholder{color:#b1bba6}.refinement-body textarea:disabled{background:#f8faf4}.text-limit{text-align:right;color:#aeb9a1;margin-top:4px;font-size:8px}.suggestions{flex-direction:column;align-items:start;gap:6px;margin-top:15px;display:flex}.suggestions>span{color:#a6b099;margin-bottom:2px;font-size:9px}.suggestions>button{color:#97a587;text-align:left;background:#fcfdf9;border:1px solid #e8eddf;border-radius:5px;justify-content:space-between;align-items:center;gap:4px;width:100%;padding:6px 8px;font-size:9px;display:flex}.suggestions>button:hover:not(:disabled){color:#52753f;background:#f0f5e7;border-color:#bace9d}.refine-button{margin-top:22px;font-size:12px}.refinement-body p.refine-help{text-align:center;color:#a9b39c;margin:10px 0 0;font-size:9px;line-height:1.8}.refine-footer{background:#fdfefb;border-top:1px solid #edf0e7;padding:20px 22px}.refine-footer>div{color:#93a380;align-items:center;gap:6px;display:flex}.refine-footer strong{font-size:10px;font-weight:500}.refine-footer p{color:#a6b199;margin-top:7px;font-size:9px;line-height:1.9}.refine-footer .test-limit{color:#a8a88b;border-top:1px dashed #e7eddf;padding-top:10px}.page-footer{color:#b2bba7;justify-content:space-between;align-items:center;margin-top:29px;font-size:9px;display:flex}.page-footer>span:first-child{letter-spacing:1px}.page-footer>span:nth-child(2){letter-spacing:2px}.modal-scrim{-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);z-index:20;background:#16392a55;justify-content:center;align-items:center;padding:24px;display:flex;position:fixed;inset:0}.modal{background:#fff;border-radius:18px;width:520px;max-width:100%;max-height:90vh;padding:27px 30px;overflow:auto;box-shadow:0 20px 80px #142f2733}.modal-wide{width:840px}.modal-heading{justify-content:space-between;align-items:center;margin-bottom:25px;display:flex}.modal-heading h2{margin-top:5px;font-size:23px}.modal-heading .eyebrow{font-size:8px}.modal-footer{border-top:1px solid var(--line);justify-content:space-between;align-items:center;gap:15px;margin-top:22px;padding-top:20px;display:flex}.modal-footer>span{color:#8fa180;font-size:11px}.modal-footer>.primary{padding:10px 17px;font-size:12px}.library-toolbar{gap:12px;display:flex}.library-toolbar>input{flex:1;font-size:12px}.upload-label{cursor:pointer;font-size:12px}.upload-label.disabled{opacity:.5;pointer-events:none}.checkbox-line{color:#859775;align-items:center;gap:8px;margin:12px 0;font-size:11px;display:flex!important}.library-note{margin:15px 0;font-size:11px}.library-grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:15px;display:grid}.library-card{text-align:left;background:#fff;border:1px solid #e2e9da;border-radius:9px;width:100%;padding:7px;overflow:hidden}.library-card.selected{background:#fafcf6;border-color:#7b9a67;box-shadow:inset 0 0 0 1px #7b9a67}.library-image{background-color:#f7f9f1;border-radius:5px;justify-content:center;align-items:center;height:100px;display:flex;position:relative}.library-image img{object-fit:contain;width:100%;max-height:100%;padding:8px}.library-image:not(.checker) img{object-fit:cover;height:100%;padding:0}.check-mark{color:#fff;background:#3b6c41;border-radius:50%;justify-content:center;align-items:center;width:20px;height:20px;display:flex;position:absolute;top:6px;right:6px}.library-card strong{text-overflow:ellipsis;white-space:nowrap;margin:9px 4px 4px;font-size:12px;font-weight:500;display:block;overflow:hidden}.library-card>span{color:#a0ad92;margin:0 4px 5px;font-size:9px;display:block}.hide-asset{color:#a5af9c;background:0 0;border:0;padding:5px 3px;font-size:9px}.hide-asset:hover{color:#a2765c}.empty-library{text-align:center;color:#9fae91;padding:45px 10px;font-size:12px}.design-library{flex-direction:column;gap:10px;display:flex}.design-list-item{text-align:left;background:#fff;border:1px solid #e4eadc;border-radius:9px;align-items:center;gap:15px;padding:15px;display:flex}.design-list-item.selected{background:#f6f9ef;border-color:#afc299}.design-list-item>div{flex:1}.design-list-item strong{font-size:13px;font-weight:500;display:block}.design-list-item small{color:#a0ae90;margin-top:4px;font-size:10px;display:block}.design-list-icon{color:#95ae79;background:#edf3e4;border-radius:10px;justify-content:center;align-items:center;width:42px;height:42px;display:flex}.design-list-item>svg{color:#a5b890}.admin-tabs{border-bottom:1px solid #e5eadf;gap:8px;margin-bottom:18px;padding-bottom:15px;display:flex}.admin-tabs button{color:#899a7b;background:0 0;border:0;border-radius:7px;padding:9px 15px;font-size:12px}.admin-tabs button.active{color:#50713a;background:#eaf2df}.admin-intro{color:#91a17f;justify-content:space-between;align-items:center;margin-bottom:16px;font-size:12px;display:flex}.table-scroll{max-height:450px;overflow:auto}.table-scroll table{border-collapse:collapse;width:100%;font-size:11px}.table-scroll th{text-align:left;color:#95a582;white-space:nowrap;background:#f5f8ed;font-size:10px;font-weight:500}.table-scroll th,.table-scroll td{border-bottom:1px solid #e9efdf;padding:12px 10px}.table-scroll td{word-break:break-word;color:#7e936a;max-width:240px}.table-scroll td strong{font-size:10px;font-weight:500;display:block}.table-scroll td small{color:#a2b48c;margin-top:4px;font-size:9px;display:block}.job-status{background:#f3f4ec;border-radius:4px;padding:3px 5px;font-size:9px}.job-status.succeeded{background:#ebf3e0}.job-status.failed{color:#a88463;background:#fff1e6}.admin-columns{grid-template-columns:1fr 1fr;gap:28px;display:grid}.admin-columns h3{margin-bottom:14px}.admin-form label{color:#849970;margin-bottom:15px;font-size:11px;display:block}.admin-form label input,.admin-form label select,.admin-form label textarea{margin-top:6px;font-size:12px}.admin-form>small{color:#a0b18a;margin-top:-8px;margin-bottom:15px;font-size:9px;display:block}.admin-form>.primary{width:100%;margin-top:12px;font-size:12px}.admin-form>.text-button{justify-content:center;width:100%;margin-top:7px;font-size:10px}.admin-form .checkbox-line input{margin:0}.code-input{font-family:Consolas,monospace}.admin-existing{max-height:530px;overflow:auto}.admin-template{text-align:left;background:#fff;border:1px solid #e4ecd9;border-radius:7px;align-items:center;gap:10px;width:100%;margin-bottom:9px;padding:9px;display:flex}.admin-template.selected{background:#f5f9ec;border-color:#acc58d}.admin-template img{object-fit:cover;border-radius:4px;width:87px;height:35px}.admin-template>div{flex:1}.admin-template strong{font-size:11px;font-weight:500;display:block}.admin-template small{color:#a4b58e;margin-top:3px;font-size:9px;display:block}.admin-template>svg{color:#a5b58e}.profile-item{border:1px solid #e6eddb;border-radius:8px;margin-top:10px;padding:13px 10px}.profile-item strong{justify-content:space-between;align-items:center;gap:7px;font-size:12px;font-weight:500;display:flex}.profile-item small,.profile-item>span{color:#a1b28a;margin-top:5px;font-size:10px;display:block}.form-two{grid-template-columns:1fr 1fr;gap:12px;display:grid}.admin-intro+.table-scroll+.microcopy{margin-top:15px}.login-page{grid-template-columns:1.1fr 1fr;min-height:100vh;display:grid}.login-illustration{background:#edf2e5;flex-direction:column;justify-content:space-between;padding:50px 9%;display:flex;position:relative;overflow:hidden}.login-illustration>div:nth-child(2){margin:60px 0 30px}.login-illustration h1{letter-spacing:1px;color:#385b36;margin:17px 0 20px;font-size:49px;font-weight:550;line-height:1.5}.login-illustration p{color:#92a77f;font-size:13px;line-height:2.1}.login-illustration .eyebrow{color:#8da478;letter-spacing:1px;font-size:11px}.decorative-ribbon{background:#dce9ca;border-top:1px solid #cfdfbd;border-bottom:1px solid #cfdfbd;justify-content:space-around;align-items:center;gap:20px;width:140%;margin-left:-20%;padding:28px 23px;display:flex;transform:rotate(-8deg);box-shadow:0 15px 30px #6e855518}.decorative-ribbon span{color:#9caf76;font-size:45px}.decorative-ribbon span:nth-child(3n+1){color:#d3aa7d;font-size:54px}.decorative-ribbon span:nth-child(3n+2){color:#cebf7c}.login-illustration>small{letter-spacing:3px;color:#a3b58f;margin-top:60px;font-size:9px}.login-form-wrap{background:#fff;justify-content:center;align-items:center;padding:40px;display:flex}.login-form{width:350px;max-width:100%}.login-form>h2{margin:9px 0 12px;font-size:27px}.login-form>.muted{margin-bottom:30px;font-size:12px}.login-form>label{color:#6e8563;margin-bottom:19px;font-size:12px;display:block}.login-form>label>input{margin-top:8px;padding:12px 14px}.login-form>.primary{justify-content:space-between;margin-top:10px}.login-demo{color:#a0af91;border-top:1px solid #e9efdf;margin-top:30px;padding-top:20px;font-size:11px}.login-demo strong{margin-bottom:8px;font-size:10px;font-weight:500;display:block}.login-demo span{margin:3px 0;font-size:10px;display:block}.login-demo small{color:#b0bda3;margin-top:12px;font-size:9px;display:block}@media (width>=1500px){.workspace-grid{grid-template-columns:315px minmax(480px,1fr) 310px;gap:24px}.source-section{padding:23px}.preview-stage{min-height:380px}.refinement-body textarea{min-height:185px}.template-card img{height:48px}.empty-canvas{min-height:280px}.panel-heading{padding-top:25px}.preview-stage.is-empty{min-height:380px}}@media (width<=1200px){.workspace-grid{grid-template-columns:260px minmax(300px,1fr) 255px;gap:14px}.app-shell main{padding:25px 2.5% 20px}.topbar{padding:0 2.5%}.source-section{padding:20px 17px}.panel-heading,.refinement-panel .panel-heading{padding-left:18px;padding-right:18px}.quota-card{margin-left:17px;margin-right:17px}.refinement-body{padding-left:17px;padding-right:17px}.preview-panel .panel-heading{padding:22px 17px 19px}.preview-stage{margin:0 17px}.result-actions{padding-left:17px;padding-right:17px}.panel-heading h2{max-width:190px;font-size:15px}.preview-stage{min-height:310px}.state-pill{font-size:8px}.stage-topline,.stage-bottomline{padding:11px}.refine-footer{padding:18px}.preview-caption{padding-left:17px;padding-right:17px}.history-panel{padding:18px 16px}.history-heading>span{font-size:8px}.template-card>span{font-size:10px}.selected-patterns{gap:7px}.pattern-tile .checker{height:59px;padding:7px}.template-card img{height:38px}.source-section .section-label>span{font-size:9px}.brand strong{font-size:18px}}@media (width<=1000px){.workspace-grid{grid-template-columns:250px minmax(360px,1fr);gap:18px}.refinement-panel{grid-area:2/2}.source-panel{grid-row:span 2}.center-column{grid-column:2}.refinement-panel .refinement-body{grid-template-columns:1fr 1fr;column-gap:15px;display:grid}.refinement-body>label,.refinement-body>p,.refinement-body textarea,.refinement-body>.text-limit{grid-column:1/-1}.refinement-body .suggestions{grid-column:1}.refinement-body>.refine-button{grid-area:5/2;align-self:center;height:45px}.refinement-body>.refine-help{grid-area:6/2}.refinement-body textarea{min-height:100px}.refinement-panel .panel-heading{padding-bottom:15px}.quota-card{padding:12px 17px}.quota-card>div:first-child>span{font-size:12px}.quota-dots{margin-top:8px}.refine-footer{padding:15px 20px}.refine-footer .test-limit{margin-top:7px}.environment-strip>div>span:last-child{display:none}.workspace-title h1{font-size:23px}.page-footer>span:nth-child(2){display:none}.login-illustration h1{font-size:38px}}@media (width<=700px){.topbar{height:70px;padding:0 18px}.brand strong{font-size:16px}.brand small{letter-spacing:1.5px;font-size:6px}.brand-icon svg{width:20px}.version-tag{display:none}.header-actions{gap:5px}.header-actions>.text-button{gap:0;padding:8px;font-size:0}.header-actions>.text-button .count,.header-divider,.user-name{display:none}.avatar{width:25px;height:25px;margin-left:5px}.app-shell main{padding:22px 16px 18px}.workspace-title{align-items:start;gap:10px}.workspace-title h1{margin:7px 0;font-size:21px;line-height:1.6}.workspace-title p{max-width:240px;font-size:10px;line-height:1.8}.workspace-title .eyebrow{font-size:8px}.workspace-title>.secondary{gap:0;margin-top:20px;padding:10px;font-size:0}.workspace-grid{grid-template-columns:1fr;gap:17px}.source-panel,.center-column,.refinement-panel{grid-area:auto/1}.source-panel{overflow:visible}.source-section{padding:18px}.source-panel .panel-heading{padding:20px 18px 0}.source-section:first-of-type .two-actions{max-width:300px}.selected-patterns{flex-wrap:wrap;gap:10px;display:flex}.pattern-tile{width:65px}.empty-patterns{padding:12px}.template-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}.template-card img{height:34px}.template-card>span{font-size:10px}.template-card{padding:5px}.environment-strip{gap:7px;padding:9px 10px;font-size:9px}.environment-strip strong{font-size:9px}.outline-pill{padding:3px 5px;font-size:8px}.environment-strip>div{gap:6px}.background-section .two-actions,.background-selected{max-width:300px}.preview-stage{min-height:285px}.preview-stage.is-empty{min-height:300px}.preview-panel .panel-heading h2{max-width:225px}.history-panel{padding:20px 18px}.refinement-panel .refinement-body{display:block}.refinement-body textarea{min-height:130px}.suggestions{display:flex}.suggestions>button,.refine-footer p{font-size:10px}.page-footer{gap:12px;font-size:8px}.modal-scrim{padding:10px}.modal{border-radius:12px;max-height:94vh;padding:22px 18px}.modal-heading{margin-bottom:20px}.modal-heading h2{font-size:21px}.library-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.library-image{height:80px}.library-card strong{font-size:10px}.library-card>span{font-size:8px}.library-toolbar{gap:7px}.upload-label{padding:10px;font-size:10px}.library-toolbar input{min-width:0;font-size:11px}.modal-footer{gap:10px}.modal-footer>span{font-size:10px}.modal-footer>.primary{padding:10px 12px;font-size:11px}.admin-columns{grid-template-columns:1fr}.admin-existing{max-height:240px}.login-page{flex-direction:column;min-height:100vh;display:flex}.login-illustration{min-height:320px;padding:25px 30px 30px}.login-illustration>div:nth-child(2){margin:30px 0 0}.login-illustration h1{margin:10px 0 14px;font-size:30px;line-height:1.4}.login-illustration h1 br{display:none}.login-illustration p{font-size:11px}.decorative-ribbon,.login-illustration>small{display:none}.login-form-wrap{flex:1;padding:35px 30px 40px}.login-form>h2{font-size:24px}.login-form>.eyebrow{font-size:8px}.login-demo{margin-top:23px}.notice{font-size:11px}}@media (prefers-reduced-motion:reduce){*{transition:none!important;animation-duration:.01ms!important}}@container (width<=950px){.workspace-grid{grid-template-columns:250px minmax(0,1fr);gap:16px}.source-panel{grid-row:span 2}.center-column{grid-column:2}.refinement-panel{grid-area:2/2}.refinement-body textarea{min-height:120px}.topbar{flex-wrap:wrap;gap:12px}.workspace-title h1{font-size:22px}}@container (width<=700px){.workspace-grid{grid-template-columns:minmax(0,1fr)}.source-panel,.center-column,.refinement-panel{grid-area:auto/1}.topbar,.app-shell main{padding:14px}.workspace-title,.environment-strip{flex-wrap:wrap}.header-actions>.text-button{gap:5px;font-size:12px}.workspace-title>.secondary{margin-top:0;font-size:12px}}.template-option{flex-direction:column;gap:3px;min-width:0;display:flex}.template-option>.template-card{width:100%}.more-layouts{border-top:1px solid var(--line);margin-top:12px}.more-layouts-toggle{color:#345e45;background:0 0;border:0;justify-content:space-between;align-items:center;width:100%;min-height:40px;padding:9px 2px;font-size:13px;font-weight:600;display:flex}.more-layouts-toggle:hover{background:#edf3e9}.layout-selection-help,.layout-selection-issue{margin-top:12px;font-size:12px;line-height:1.7}.layout-selection-help{color:#526a5d}.layout-selection-issue{color:#9e4634}.template-rules-help{color:#526a5d;font-size:12px;line-height:1.7;display:block}.template-example-button,.template-examples-all{color:#345e45;text-underline-offset:3px;background:0 0;border:0;font-size:12px;font-weight:500;line-height:1.5;text-decoration:underline}.template-example-button{min-height:30px;padding:4px 6px}.template-examples-all{padding:4px 0 4px 8px}.template-example-button:hover,.template-examples-all:hover{color:#193f29;background:#edf3e9}.template-example-button:focus-visible,.template-examples-all:focus-visible{outline-offset:2px;outline:2px solid #507857}.layout-examples-modal{width:1160px}.layout-examples-modal .modal-heading{z-index:2;background:#fff;margin-top:-12px;margin-bottom:14px;padding-top:12px;padding-bottom:12px;position:sticky;top:-27px}.layout-examples-intro{margin-bottom:22px}.layout-mode-summary{color:#284a36;margin:0 0 8px;font-size:16px;line-height:1.65}.layout-mode-note{color:#455b49;background:#f2f6ee;border-left:3px solid #90a77f;margin:8px 0 12px;padding:10px 13px;font-size:14px;line-height:1.7}.layout-examples-tools{flex-wrap:wrap;align-items:center;gap:14px;display:flex}.layout-examples-tools>button{min-height:34px;font-size:13px}.layout-examples-loading,.layout-examples-error{color:#37513d;flex-wrap:wrap;align-items:center;gap:14px;min-height:140px;display:flex}.layout-examples-error{padding:20px 0;display:block}.layout-examples-error>p{margin:0 0 16px;font-size:15px;line-height:1.7}.layout-examples-list{flex-direction:column;gap:22px;display:flex}.layout-example{border-top:1px solid #dbe5d7;min-width:0;padding-top:18px}.layout-example-heading{flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:12px;display:flex}.layout-example-heading h3{color:#284a36;margin:0;font-size:19px;line-height:1.5}.layout-example-heading>div{flex-wrap:wrap;align-items:center;gap:12px;display:flex}.layout-example-code{color:#50624d;font-variant-numeric:tabular-nums;font-size:13px}.layout-reference-tag{color:#6b5828;background:#f4f1e6;border-radius:4px;padding:3px 7px;font-size:12px}.layout-example-description{color:#304f3a;margin:8px 0 0;font-size:15px;line-height:1.7}.layout-example-image-tools{align-items:center;gap:12px;min-height:38px;display:flex}.layout-example-image-tools>button{color:#335c40;min-height:34px;padding:5px 0;font-size:13px}.layout-example-image-tools>span{color:#53644d;font-size:12px}.layout-example-viewport{background:#f7f9f5;border:1px solid #e3e9df;border-radius:5px;overflow:auto hidden}.layout-example-viewport>img{width:100%;max-width:none;height:auto;display:block}.layout-example-viewport.is-zoomed>img{width:max(100%, var(--example-width))}.layout-example-viewport:focus-visible{outline-offset:3px;outline:2px solid #507857}.layout-example-look{color:#3e5941;margin:10px 0 0;font-size:14px;line-height:1.7}.layout-example-look strong{font-weight:600}.layout-example-reference{color:#6b5828;margin:8px 0 0;font-size:13px;line-height:1.7}.layout-example-unavailable{color:#465d48;background:#f7f9f5;border:1px dashed #b8c7b1;border-radius:5px;margin-top:14px;padding:18px;font-size:14px;line-height:1.7}.layout-example-unavailable p{margin:0}.layout-example-unavailable button{margin-top:12px;font-size:13px}.layout-examples-source{color:#53644d;border-top:1px solid #dbe5d7;margin:20px 0 0;padding-top:14px;font-size:12px;line-height:1.8}.background-prompt-label{color:var(--ink);margin:12px 0 6px;font-size:13px;font-weight:600;display:block}.background-prompt{box-sizing:border-box;border:1px solid var(--line);width:100%;min-height:66px;color:var(--ink);font:inherit;resize:vertical;background:#fff;border-radius:6px;padding:9px 10px;font-size:13px;line-height:1.65;display:block}.background-prompt:focus{outline-offset:2px;outline:2px solid #91a88a}.model-help,.model-edit-boundary{color:#4c634f;font-size:13px;line-height:1.7}.refinement-body .model-edit-boundary{border-left:2px solid #b4c6ab;margin:0 0 12px;padding-left:9px}.model-workflow-help{color:#4c634f;margin-bottom:16px;font-size:13px;line-height:1.7}.model-workflow-help summary{cursor:pointer;font-weight:600}.model-workflow-help p{margin:8px 0 0}@media (width<=600px){.layout-examples-modal .modal-heading{top:-20px}.layout-examples-modal .modal-heading h2{font-size:20px}.layout-mode-summary{font-size:15px}.layout-example-heading h3{font-size:17px}.layout-example-heading{gap:4px}}.background-tone-control{color:#42584b;align-items:center;gap:8px;margin-top:12px;font-size:13px;display:flex}.background-tone-control input[type=checkbox]{accent-color:#386b43;width:16px;height:16px;margin:0}.density-control{align-items:center;gap:12px;margin-top:12px;font-size:13px;display:flex}.density-control select{color:#203c2a;background:#fff;border:1px solid #d7dfd6;border-radius:6px;flex:1;min-width:0;padding:6px 10px}";
 // src/embed.tsx
-function he(e, t) {
+function ge(e, t) {
 	let n = e.shadowRoot || e.attachShadow({ mode: "open" }), r = document.createElement("style");
-	r.textContent = me;
+	r.textContent = he;
 	let i = document.createElement("div");
 	n.replaceChildren(r, i), m(t);
-	let a = (0, u.createRoot)(i), o = !0, s = "ribbon", c = () => a.render(/* @__PURE__ */ (0, x.jsx)(fe, {
+	let a = (0, u.createRoot)(i), o = !0, s = "ribbon", c = () => a.render(/* @__PURE__ */ (0, x.jsx)(pe, {
 		active: o,
 		view: s
 	}));
@@ -11064,4 +11119,4 @@ function he(e, t) {
 		}
 	};
 }
-export { he as mount };
+export { ge as mount };

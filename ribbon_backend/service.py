@@ -37,6 +37,9 @@ EXTENDED_MODES = frozenset({'bordered', 'scene', 'fullwidth', 'alternating', 'en
 NON_REPEATING_MODES = frozenset({'fullwidth', 'ends_open'})
 ASSET_PREVIEW_VERSION = 'asset-preview-v1'
 ASSET_PREVIEW_SIZE = (640, 640)
+LAYOUT_ENGINE = 'design-rhythm-v1'
+BACKGROUND_TONES = frozenset({'soft', 'original'})
+DESIGN_DENSITIES = frozenset({'airy', 'balanced', 'rich'})
 TERMINAL = ('SUCCEEDED', 'FAILED')
 
 
@@ -62,6 +65,27 @@ def file_digest(path):
         for block in iter(lambda: stream.read(1024 * 1024), b''):
             value.update(block)
     return value.hexdigest()
+
+
+@memory_bounded_operation
+def same_rgba_pixels(first, second):
+    """Compare the saved result, rather than just parameters or PNG encoding.
+
+    Keep the comparison under the renderer's allocation guard and convert only
+    narrow bands. Metadata/compression changes alone are not a new refinement.
+    """
+    with Image.open(first) as before, Image.open(second) as after:
+        if before.size != after.size:
+            return False
+        before.load()
+        after.load()
+        for top in range(0, before.height, 64):
+            box = (0, top, before.width, min(before.height, top + 64))
+            with before.crop(box) as before_band, after.crop(box) as after_band:
+                with before_band.convert('RGBA') as a, after_band.convert('RGBA') as b:
+                    if a.tobytes() != b.tobytes():
+                        return False
+    return True
 
 
 def leased_operation(method):
@@ -592,7 +616,20 @@ class Service:
             raise ServiceError(422, '请选择可用的排版模式')
         self.validate_layout_selection(template['mode'], ids)
         profile = profile or json.loads(db.execute('SELECT profile_json FROM output_profiles WHERE active=1').fetchone()[0])
-        result = copy.deepcopy(base) if base else dict(schema_version=1, seed=secrets.randbelow(2**31), params=dict(scale=1.0, spacing=1.0, rotation=0.0, offset_x=0.0, offset_y=0.0, background_color=None))
+        result = copy.deepcopy(base) if base else dict(schema_version=1, layout_engine=LAYOUT_ENGINE,
+                    seed=secrets.randbelow(2**31), params=dict(scale=1.0, spacing=1.0, rotation=0.0, offset_x=0.0, offset_y=0.0, background_color=None))
+        default_tone = 'soft' if result.get('layout_engine') == LAYOUT_ENGINE else 'original'
+        tone = selection.get('background_tone', result.get('background_tone', default_tone))
+        if not isinstance(tone, str) or tone not in BACKGROUND_TONES:
+            raise ServiceError(422, '底纹显示方式请选择柔和或原色')
+        result['background_tone'] = tone
+        density = selection.get('design_density', result.get('design_density', 'balanced'))
+        if not isinstance(density, str) or density not in DESIGN_DENSITIES:
+            raise ServiceError(422, '排列疏密请选择疏朗、均衡或丰富')
+        if result.get('layout_engine') == LAYOUT_ENGINE:
+            result['design_density'] = density
+        elif density != 'balanced':
+            raise ServiceError(422, '旧版作品保留原排版方式；如需选择疏密，请新建作品')
         result.update(asset_refs=ids, background_ref=selection['background_id'], template_id=template['id'], template_version=template['version'], template_mode=template['mode'], template_rules=json.loads(template['rules_json']), output_profile=profile)
         result.pop('composite_ref', None)
         return result
@@ -826,7 +863,9 @@ class Service:
         before = json.loads(row['snapshot_json'])
         fields = ('asset_refs', 'background_ref', 'template_id', 'template_version',
                   'template_mode', 'template_rules', 'composite_ref')
-        return any(before.get(key) != snapshot.get(key) for key in fields)
+        tone_changed = before.get('background_tone', 'original') != snapshot.get('background_tone', 'original')
+        density_changed = before.get('design_density', 'balanced') != snapshot.get('design_density', 'balanced')
+        return tone_changed or density_changed or any(before.get(key) != snapshot.get(key) for key in fields)
 
     def build_artifact(self, job, directory):
         from .imaging import render, validate_image
@@ -997,6 +1036,14 @@ class Service:
             new_ids = {asset['id'] for asset in artifact['assets']}
             for asset_id in self.snapshot_asset_ids(artifact['snapshot']) - new_ids:
                 self.verified_asset_path(job['owner_id'], asset_id)
+        if job['kind'] == 'refine':
+            # Also applies to a recovered immutable artifact. A numeric edit
+            # may quantise to the same raster, or a model may return a copy.
+            # Neither may create a version or consume the successful quota.
+            from .providers import ClarificationNeeded
+            original = self.version_file(job['owner_id'], job['base_version_id'])
+            if same_rgba_pixels(original, master):
+                raise ClarificationNeeded('本次结果与原图像素相同，未保存新版本，也未扣精修次数；请调整幅度或说明具体修改要求')
         with self.db.transaction() as db:
             actual = db.execute('SELECT * FROM jobs WHERE id=?', (job['id'],)).fetchone()
             if actual['attempt'] != job['attempt'] or actual['status'] not in ('RUNNING', 'RECONCILING'):

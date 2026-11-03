@@ -114,6 +114,9 @@ def _safe_plan_input(prompt, snapshot, assets, *, provider='openai'):
         'params': snapshot.get('params', {}), 'asset_refs': snapshot.get('asset_refs', []),
         'composite_ref': bool(snapshot.get('composite_ref')),
         'template_mode': snapshot.get('template_mode', ''), 'template_rules': safe_rules,
+        'layout_engine': snapshot.get('layout_engine', 'legacy'),
+        'background_tone': snapshot.get('background_tone', 'original'),
+        'design_density': snapshot.get('design_density', 'balanced'),
         'editing': workflow_editing(provider, snapshot),
         'output_profile': {k: profile[k] for k in ('width', 'height') if k in profile}},
         'assets': [{'position': position + 1, 'id': asset_id,
@@ -368,6 +371,11 @@ Never silently substitute a background edit for an unsupported whole-picture req
 Use template_mode, template_rules and ordered assets for context. fullwidth and ends_open do not use spacing;
 bordered uses the first asset as its central motif, the rest as border motifs; split/stacked use the first half then the second half;
 scene repeats the selected group; opposed rotates alternate motifs 180 degrees, never mirrors text.
+design-rhythm-v1 fits complete visible motifs proportionally and balances repeat groups using their actual widths.
+The program, not this text-only planner, measures content bounds, spacing, safety margins and repeat closure.
+Never claim that you observed artwork colors, visual weight or text legibility. Ask when an image-specific design choice cannot be inferred from text.
+background_tone is an employee-selected presentation setting (soft or original), not an editable model parameter; do not change it.
+design_density (airy, balanced or rich) is selected by the employee for design-rhythm-v1 only; never change it or emit it as a parameters operation.
 Preserve all unrequested content. Explain uncertainty using clarification and an empty operations array.
 Available operations: parameters (absolute new values, omitted fields as null), edit_asset (one asset's content),
 edit_background (background content only), edit_composite (the entire saved current artwork, flattened afterward).
@@ -488,7 +496,10 @@ class OpenAIProvider:
         result, request_id = self._post("images/generations", payload={
             "model": self.image_model,
             "prompt": "Create one square background texture tile for ribbon pattern design, no text, no watermark, no logos. "
-                      "Keep texture subtle; align opposite edges as seamlessly as possible. User preference: "+user_prompt,
+                      "It is a supporting background behind separately supplied complete motifs, not the main illustration. "
+                      "Do not invent foreground characters, objects, labels or decorative focal subjects. "
+                      "Keep small-scale texture subtle and low contrast; align opposite edges as seamlessly as possible. "
+                      "Follow explicit requested colors; do not replace the user's palette merely to make it softer. User preference: "+user_prompt,
             "size": "1024x1024", "quality": self.quality, "output_format": "png", "n": 1,
         })
         return self._decode_image(result, output_path, request_id)
@@ -693,7 +704,8 @@ class DeepSeekSeedreamProvider:
         if not isinstance(prompt, str) or len(prompt) > 4000:
             raise ClarificationNeeded('底图要求不超过 4000 字。')
         return self._image({'model': self.image_model, 'prompt':
-            '生成一张正方形丝带底纹，配色柔和，纹理低对比。四边尽量连续，背景铺满。不要文字、水印、标志或具体人物。用户要求：' + (prompt or '随机柔和配色'),
+            '生成一张正方形丝带底纹。底纹用于衬托另外叠放的完整主图，不是主插画；细小纹理低对比、背景铺满，四边尽量连续。'
+            '不新增人物、独立主体、文字、水印或标志，不做抢眼的大图案。遵守用户明确指定的配色，不擅自换色；未指定时用柔和协调的配色。用户要求：' + (prompt or '随机柔和配色'),
             'size': '2048x2048', 'output_format': 'png', 'response_format': 'b64_json', 'watermark': False}, output_path,
             expected_size=(2048, 2048))
 
