@@ -228,7 +228,10 @@ def periodize_background(background: Image.Image, unit_width: int, height: int, 
     _dimensions(cover_width, height)
     opaque, alpha_bbox, alpha_coverage = _opaque(background, background_color)
     ratio = max(cover_width / background.width, height / background.height)
-    source_width, source_height = cover_width / ratio, height / ratio
+    # A dimension which should equal the source can exceed it by one ULP.
+    # Pillow rejects even a microscopic negative origin.
+    source_width = min(background.width, cover_width / ratio)
+    source_height = min(background.height, height / ratio)
     left = (background.width - source_width) / 2
     top = (background.height - source_height) / 2
     box = (left, top, left + source_width, top + source_height)

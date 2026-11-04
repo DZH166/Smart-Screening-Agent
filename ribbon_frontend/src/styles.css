@@ -2368,7 +2368,7 @@ small {
 .loop-view-heading strong { font-size: 13px; font-weight: 600; }
 .loop-view-heading > span { font-size: 10px; font-variant-numeric: tabular-nums; }
 .loop-unit-view { display: flex; align-items: center; justify-content: center; min-height: 150px; padding: 14px 0; }
-.loop-unit-view > img { display: block; max-width: 100%; width: auto; height: auto; max-height: 220px; box-shadow: 0 5px 14px #33513514; }
+.loop-unit-view .target-layer > img { display: block; max-width: 100%; width: auto; height: auto; max-height: 220px; box-shadow: 0 5px 14px #33513514; }
 .loop-continuity { min-width: 0; padding: 14px 0; }
 .loop-unit-view[hidden], .loop-continuity[hidden] { display: none; }
 .loop-continuity-track { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: stretch; }
@@ -2396,7 +2396,30 @@ small {
 @media (max-width: 600px) {
   .loop-preview { padding-right: 10px; padding-left: 10px; }
   .loop-unit-view { min-height: 110px; }
-  .loop-unit-view > img { max-height: 170px; }
+  .loop-unit-view .target-layer > img { max-height: 170px; }
   .loop-view-heading { display: block; }
   .loop-view-heading > span { display: block; margin-top: 3px; }
 }
+
+.target-layer { position:relative; max-width:100%; }
+.target-overlay { position:absolute; inset:0; width:100%; height:100%; overflow:hidden; pointer-events:none; }
+.target-overlay rect { fill:rgba(60,129,102,.12); stroke:#16674d; stroke-width:2; }
+.optional-layers,.target-picker { padding:12px 0; }
+.optional-layers summary { cursor:pointer; font-weight:600; }
+.optional-layers > div,.target-picker { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.optional-layers > div { margin-top:8px; }
+.target-picker select { flex:1; min-width:0; max-width:100%; }
+
+.compact-status.environment-strip { min-height:0; justify-content:flex-start; flex-wrap:wrap; padding:7px 12px; margin:8px 0; color:#485c4d; }
+.compact-status.environment-strip span { display:inline; font-size:12px; }
+.workspace-grid { margin-top:12px; }
+.remaining-edits { margin:0 20px 4px; font-size:14px; color:#375646; }
+.refinement-body .target-picker { padding:8px 0; }
+.panel-heading h2 { margin:0; }
+.refine-footer p { color:#42584b; }
+@media(min-width:850px) {
+  .workspace-grid.draft-workspace { grid-template-columns:minmax(232px,300px) minmax(0,1fr); }
+}
+
+.history-panel summary { cursor:pointer; color:#344b3e; font-size:14px; font-weight:600; }
+.suggestions { margin-top:12px; }

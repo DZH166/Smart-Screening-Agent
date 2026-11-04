@@ -28,6 +28,29 @@ EXCLUDED = frozenset({'tests/sample_visual_reference.json'})
 EXCLUDED_DIRECTORIES = frozenset({'docs/preview'})
 DEMO_SVG_FILES = frozenset('tools/material_demo/assets/' + name + '.svg' for name in
     ('orange-bear', 'mint-cat', 'sunshine', 'flower', 'rocket', 'cherry', 'source-sheet'))
+# Only these public previews made by tools/ribbon_layout_thumbnails.py are
+# release assets. Byte pinning prevents a private image renamed to a known mode.
+LAYOUT_WEBP_SHA256 = {
+    'alternating': '982509e810ef027d7edce8be14e76c5219f956a1801e7945ffc8b724cd7f4339',
+    'bordered': '2ca747adeaea9bdac06493c9a18a13e0155bb8b93134e1af0a8cf287be9a60a2',
+    'ends': '5439637471b3b3a064d29e328c566ed3615f26df30611af74a5901a4ff9a17df',
+    'ends_open': '21c355ac0f45cad3e20f8d941b1de58ba9263f95e2674efc4fb8f0ef95203c95',
+    'fullwidth': 'c37858433fcb581adb1c2653efe207fbf83bc6393476654042f6deb6263d04cb',
+    'grid': 'b74d6203efd3a3b4ac4c51ac5baf4bf5390c1678b69f9abb2c72e217f9817048',
+    'opposed': '7e29814305aeecf8d436e4d2e93189f2f4389ec0f98a0db98b3b98b52fc2b08e',
+    'panels': '97856eea16088e9ff12b06ad71732add1313b813867a1eaf46b657d3633b0514',
+    'scatter': '74889731b34f5fdf84f8c07fcfb4ac8092a1280e9c7d58825be24b62b12327bc',
+    'scene': 'a5f4c3bfe4c15c5af02f475326888aed1566d8d61c104e3368cbfe998cd1c17b',
+    'single': '32c3a6eca5118b5844b3df22491cf474a5ac2cf22a321437cf428c2c3d353483',
+    'split': 'a9969daf674cf8fc7482659b41aa15f0fc117e281bd0e14f5107d0f0f8f477cf',
+    'stacked': 'bf527670d32dc2c8d2cbb5000acb0f198980c7abba8a1d1f2d2c7ee17a8b3252',
+    'stagger': '5db5bb26f3fdfa0c42dbb5edcea2ac44eb2117b07dc83caac92304bb6cb0ae6d',
+}
+PUBLIC_THUMBNAILS = {
+    prefix + mode + '.webp': sha
+    for prefix in ('hsd_tool/static/ribbon/layout-v2/', 'ribbon_frontend/public/layout-v2/')
+    for mode, sha in LAYOUT_WEBP_SHA256.items()
+}
 ROOT_FILES = frozenset({'.gitignore', '.gitattributes', 'AGENTS.md', 'README.md', 'CONTRACTS.md',
     'CHANGELOG.md', '使用说明.txt', 'requirements.txt', 'requirements-dev.txt',
     'requirements-cloud.txt', 'build.ps1', 'launch.py', 'pytest.ini', 'HSD图号助手.spec'})
@@ -109,7 +132,7 @@ REQUIRED_FILES = frozenset({'hsd_tool/__init__.py', 'hsd_tool/cloud_server.py',
     'deploy/nginx-hsd.conf.example', 'deploy/hsd-storage.mount.example',
     'deploy/hsd-healthcheck.sh', 'deploy/hsd-healthcheck.service', 'deploy/hsd-healthcheck.timer',
     'deploy/backup.sh', '.gitattributes', 'README.md', 'AGENTS.md', 'CONTRACTS.md',
-    'tools/material_demo/index.html', 'tools/material_demo/demo.js', 'tools/material_demo/demo.css'}) | DEMO_SVG_FILES
+    'tools/material_demo/index.html', 'tools/material_demo/demo.js', 'tools/material_demo/demo.css'}) | DEMO_SVG_FILES | frozenset(PUBLIC_THUMBNAILS)
 
 
 def require(condition, message):
@@ -134,6 +157,8 @@ def public_name(name):
     require(path.name.casefold() not in PRIVATE_NAMES and not path.name.casefold().startswith(
         ('.env', 'ai_observations_', '.ai-settings-', '.ai-usage-', '.material-settings-', '.ribbon-settings-')),
         'Private or runtime source filename refused')
+    if name in PUBLIC_THUMBNAILS:
+        return
     require(path.suffix.casefold() not in FORBIDDEN_SUFFIXES, 'Binary or business attachment refused')
     require(path.suffix.casefold() != '.json' or name in JSON_FILES, 'JSON is outside the exact release whitelist')
     ribbon_backend = len(path.parts) == 2 and path.parts[0] == 'ribbon_backend' and path.suffix == '.py'
@@ -145,6 +170,10 @@ def public_name(name):
 
 def scan(name, value):
     public_name(name)
+    if name in PUBLIC_THUMBNAILS:
+        require(isinstance(value, bytes) and digest(value) == PUBLIC_THUMBNAILS[name],
+                'Synthetic thumbnail differs from the reviewed bytes: ' + name)
+        return
     require(isinstance(value, bytes) and b'\0' not in value, 'Non-text source refused: ' + name)
     try:
         value.decode('utf-8-sig')

@@ -167,7 +167,6 @@ export function Modal({
       >
         <div className="modal-heading">
           <div>
-            <span className="eyebrow">RIBBON STUDIO</span>
             <h2>{title}</h2>
           </div>
           <button
@@ -198,9 +197,7 @@ function Brand() {
       </span>
       <div>
         <strong>丝带设计助手</strong>
-        <small>RIBBON DESIGN STUDIO</small>
       </div>
-      <span className="version-tag">V1</span>
     </div>
   );
 }
@@ -229,13 +226,16 @@ const layoutHints: Record<string, string> = {
   stacked: "至少选择 2 个图案，前半组放上方，后半组放下方。",
   opposed: "相邻图案正向、倒置交替，旋转 180°，不会镜像翻字。",
 };
-function layoutSelectionIssue(mode: string | undefined, count: number) {
+const zoneNames: Record<string,string> = { left:"左区", center:"中区", right:"右区", top:"上区", bottom:"下区" };
+const zonesByMode: Record<string,string[]> = { panels:["left","center","right"], split:["left","right"], stacked:["top","bottom"] };
+const advancedHints: Record<string,string> = { scatter:"完整图案以不同角度和大小错落分布，整个单元循环。", bordered:"中央重复主图，上下为连续边线，可选独立边饰。", panels:"左、中、右三区各自排放图案，可分别选择底纹。" };
+function layoutSelectionIssue(mode: string | undefined, count: number, modern = false) {
   if (!count) return "";
   if (mode === "fullwidth" && count !== 1)
     return "整幅定位只使用 1 个完整图案，请移除多余图案。";
   if (mode === "ends_open" && count > 2)
     return "两端留白最多使用 2 个图案，请保留 1–2 个。";
-  if (mode && ["bordered", "split", "stacked"].includes(mode) && count < 2)
+  if (mode && (!modern && mode === "bordered" || ["split", "stacked"].includes(mode)) && count < 2)
     return "这类排版至少需要 2 个图案，请再选择一个。";
   return "";
 }
@@ -259,11 +259,15 @@ function recommendedSelection(
 
 function restoreSelection(value: Selection, version?: Version): Selection {
   const snapshot = version?.snapshot;
-  const modern = !version || ["design-rhythm-v1", "design-rhythm-v2", "seamless-unit-v1"].includes(snapshot?.layout_engine || "");
+  const modern = !version || ["design-rhythm-v1", "design-rhythm-v2", "seamless-unit-v1", "seamless-unit-v2"].includes(snapshot?.layout_engine || "");
   const next: Selection = {
     ...value,
     background_tone: value.background_tone ?? snapshot?.background_tone ?? (modern ? "soft" : "original"),
   };
+  if (version && snapshot?.layout_engine !== "seamless-unit-v2") {
+    delete next.zone_background_refs;
+    delete next.border_ref;
+  }
   if (modern) {
     next.design_density = value.design_density ?? snapshot?.design_density ?? "balanced";
   } else {
@@ -273,7 +277,37 @@ function restoreSelection(value: Selection, version?: Version): Selection {
   return next;
 }
 
-function LoopPreview({ version, sizeLabel }: { version: Version; sizeLabel: string }) {
+function TargetOverlay({version, target}: {version:Version; target:string}) {
+  const loop = version.snapshot.loop!;
+  if (target === "layout" || !target) return null;
+  const {width:w,height:h} = loop;
+  const zones = zonesByMode[version.snapshot.template_mode] || [];
+  const ix = zones.indexOf(target.slice(5));
+  let boxes: number[][] = [];
+  const zoneBoxes = (index:number): number[][] => {
+    if (version.snapshot.template_mode === "stacked") return [[0,index*h/zones.length,w,h/zones.length]];
+    const offset = Math.round(Number(version.snapshot.params.offset_x || 0));
+    const x = ((index*w/zones.length + offset)%w+w)%w;
+    return [[x,0,w/zones.length,h],[x-w,0,w/zones.length,h]];
+  };
+  if (target === "background") {
+    boxes = zones.length ? zones.flatMap((zone,i)=>(version.snapshot.zone_background_refs?.[zone] || version.snapshot.zone_colors?.[zone]) ? [] : zoneBoxes(i)) : [[0,0,w,h]];
+  } else if (target === "border") boxes = [[0,.08*h,w,.115*h],[0,.805*h,w,.115*h]];
+  else if (target.startsWith("zone:") && ix >= 0) boxes = zoneBoxes(ix);
+  else {
+    for (const t of version.snapshot.object_transforms || []) {
+      if (t.slot_id !== target) continue;
+      const left = t.x-t.width/2, top = t.y-t.height/2;
+      boxes.push([left,top,t.width,t.height]);
+      if (left<0) boxes.push([left+w,top,t.width,t.height]);
+      if (left+t.width>w) boxes.push([left-w,top,t.width,t.height]);
+    }
+  }
+  return <svg className="target-overlay" viewBox={`0 0 ${w} ${h}`} aria-label="精修范围">
+    {boxes.map(([x,y,width,height],i)=><rect key={i} {...{x,y,width,height}} vectorEffect="non-scaling-stroke"/>)}
+  </svg>;
+}
+function LoopPreview({ version, sizeLabel, target }: { version: Version; sizeLabel: string; target:string }) {
   const [continuous, setContinuous] = useState(false);
   const [seams, setSeams] = useState(false);
   const loop = version.snapshot.loop!;
@@ -284,14 +318,14 @@ function LoopPreview({ version, sizeLabel }: { version: Version; sizeLabel: stri
       <span>{continuous ? "同一单元横向重复 3 次" : sizeLabel}</span>
     </div>
     <div className="loop-unit-view" hidden={continuous}>
-      <img src={version.preview_url} decoding="async" alt={`${versionName(version)}的循环单元预览`} />
+      <div className="target-layer"><img src={version.preview_url} decoding="async" alt={`${versionName(version)}的循环单元预览`} />{!continuous && <TargetOverlay version={version} target={target}/>}</div>
     </div>
     {/* Keep the same URLs mounted: changing the view only changes visibility,
         never requests a new master or a separately rendered long-strip file. */}
     <div className="loop-continuity" hidden={!continuous}>
       <div className={`loop-continuity-track ${seams ? "show-seams" : ""}`}>
         {[0, 1, 2].map(index => <div className="loop-repeat" key={index}>
-          <img src={version.preview_url} decoding="async" alt={index === 0 ? `${versionName(version)}的三次连续效果预览` : ""} />
+          <img src={version.preview_url} decoding="async" alt={index === 0 ? `${versionName(version)}的三次连续效果预览` : ""} />{continuous && <TargetOverlay version={version} target={target}/>}
         </div>)}
       </div>
     </div>
@@ -304,17 +338,18 @@ function LoopPreview({ version, sizeLabel }: { version: Version; sizeLabel: stri
         <input type="checkbox" checked={seams} onChange={event => setSeams(event.target.checked)} />显示接缝位置
       </label>}
     </div>
-    <p className="loop-preview-note">页面展示缩小预览；下载为一个原尺寸循环单元，连续效果仅供查看。</p>
-    <div className={`loop-check ${loop.status === "checked" ? "checked" : "needs-review"}`}>
-      <strong>{loop.status === "checked" ? "工程循环检查通过" : "循环效果需要复核"}</strong>
-      {loop.status === "checked" && <span>画面与印刷效果仍需人工确认。</span>}
+    {loop.status === "needs_review" && <div className="loop-check needs-review">
+      <strong>接缝提示</strong>
+
       {!!loop.issues?.length && <ul aria-label="循环检查提示">
         {loop.issues.map((issue, index) => <li key={`${issue.code}:${index}`} className={issue.severity}>{issue.message}</li>)}
       </ul>}
-    </div>
+    </div>}
     {loop.mode_notice && <p className="loop-mode-notice">{loop.mode_notice}</p>}
     <details className="loop-technical-details">
-      <summary>技术详情</summary>
+      <summary>输出详情</summary>
+      {loop.status==="checked" && <strong>工程循环检查通过</strong>}
+      <p>下载为一个原尺寸循环单元。工程检查只核对排版和接缝，印刷效果需另行核样。</p>
       <dl>
         <div><dt>下载尺寸</dt><dd>{sizeLabel || `${loop.width}×${loop.height}px`}</dd></div>
         <div><dt>循环方式</dt><dd>{loop.kind === "panel" ? "定位区段循环" : "图案序列循环"}</dd></div>
@@ -398,6 +433,9 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
     [pending, setPending] = useState<Pending | null>(() =>
       loadLocal(prefix + "pending", null),
     );
+  const [editTarget,setEditTarget] = useState("layout");
+  const [libraryRole,setLibraryRole] = useState("");
+  useEffect(() => { if (modal !== "pattern" && modal !== "background") setLibraryRole(""); }, [modal]);
   const [search, setSearch] = useState(""),
     [uploading, setUploading] = useState(false),
     [uploadProgress, setUploadProgress] = useState<{ completed: number; total: number } | null>(null),
@@ -450,7 +488,8 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
     locked = busy || processing || !!pending || uploading || !!designTarget;
   const isHistory = !!selected && selected.id !== design?.current_version_id;
   const shownProfile = selected?.snapshot?.output_profile;
-  const selectedLoop = selected?.snapshot.loop?.engine === "seamless-unit-v1";
+  const selectedLoop = ["seamless-unit-v1","seamless-unit-v2"].includes(selected?.snapshot.loop?.engine || "");
+  const modern = !current || current.snapshot.layout_engine === "seamless-unit-v2";
   const sizeLabel =
     shownProfile?.width && shownProfile?.height && shownProfile?.dpi
       ? `${shownProfile.width}×${shownProfile.height}px · ${shownProfile.dpi} DPI · ` +
@@ -464,7 +503,8 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
     return result;
   }, [assets]);
   const template = templates.find((t) => t.id === selection.template_id);
-  const layoutIssue = layoutSelectionIssue(template?.mode, selection.asset_ids.length);
+  const zones = modern ? zonesByMode[template?.mode || ""] || [] : [];
+  const layoutIssue = layoutSelectionIssue(template?.mode, selection.asset_ids.length, modern);
   const ready =
     selection.asset_ids.length > 0 &&
     !!selection.background_id &&
@@ -476,6 +516,8 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
       JSON.stringify(selection.asset_ids) ||
       current.snapshot.background_ref !== selection.background_id ||
       current.snapshot.template_id !== selection.template_id ||
+      (current.snapshot.border_ref || "") !== (selection.border_ref || "") ||
+      zones.some(key=>current.snapshot.zone_background_refs?.[key] !== selection.zone_background_refs?.[key]) ||
       (current.snapshot.background_tone || "original") !== (selection.background_tone || "original") ||
       (current.snapshot.design_density || "balanced") !== (selection.design_density || "balanced"));
   const selectedPatterns = selection.asset_ids
@@ -503,19 +545,22 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
     ? { ...savedEditing,
         allowed_operations: ["parameters", "edit_asset", "edit_background", ...(savedEditing.composite_edit ? ["edit_composite"] : [])],
         allowed_parameters: ["scale", "rotation", "offset_x", "offset_y", "background_color",
-          ...(["fullwidth", "ends_open"].includes(template?.mode || "") ? [] : ["spacing"])],
+          ...(modern || !["fullwidth", "ends_open"].includes(template?.mode || "") ? ["spacing"] : [])],
       }
     : savedEditing;
   const aiRefinementUnavailable = !selectionOnly && (!aiAvailable || editing?.allowed_operations.length === 0);
   const canPlanOperation = (kind: string) => !editing || editing.allowed_operations.includes(kind);
-  const spacingAvailable = template?.mode !== "fullwidth" && template?.mode !== "ends_open" &&
+  const spacingAvailable = (modern || (template?.mode !== "fullwidth" && template?.mode !== "ends_open")) &&
     (!editing || editing.allowed_parameters.includes("spacing"));
-  const suggestions = [
+  const suggestions = editTarget !== "layout" ? (editTarget.startsWith("zone:") || editTarget === "background" ? ["添加细小波点"] : ["缩小一点", "向右移动10像素"]) : [
     ...(canPlanOperation("parameters") ? [spacingAvailable ? "图案缩小一些，间距拉开一点" : "图案缩小一些"] : []),
     ...(canPlanOperation("edit_background") ? ["背景添加波点"] : []),
     ...(canPlanOperation("edit_asset") ? ["给第一个图案添加星光"] : []),
     ...(canPlanOperation("edit_composite") ? ["给画面添加星光"] : []),
   ];
+  function templateImage(t: Template) {
+    return modern && t.id === t.mode && t.version===1 ? `/static/ribbon/layout-v2/${t.mode}.webp` : t.thumbnail_url;
+  }
   function templateOption(t: Template) {
     return (
       <div key={t.id} className="template-option">
@@ -525,7 +570,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
           aria-pressed={selection.template_id === t.id}
           onClick={() => updateSelection({ ...selection, template_id: t.id })}
         >
-          <img src={t.thumbnail_url} alt={`${t.name}样式图`} loading="lazy" decoding="async" />
+          <img src={templateImage(t)} alt={`${t.name}样式图`} loading="lazy" decoding="async" />
           <span>{t.name}{selection.template_id === t.id && <Icon name="check" size={14} />}</span>
         </button>
         <button
@@ -539,7 +584,12 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
   }
 
   function updateSelection(value: Selection) {
-    if (value.template_id !== selection.template_id) setAiDraftReference(null);
+    if (value.template_id !== selection.template_id) {
+      setAiDraftReference(null);
+      delete value.zone_background_refs;
+      delete value.border_ref;
+    }
+    if (editTarget !== "layout") setEditTarget("layout");
     setSelection(value);
     saveLocal(prefix + "selection", {
       design_id: designRef.current?.id || null,
@@ -554,6 +604,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
     saveLocal(prefix + "design", d.id);
     setDesigns((prev) => [d, ...prev.filter((p) => p.id !== d.id)]);
     if (force || changedVersion) {
+      setEditTarget("layout");
       const v = d.versions?.find((x) => x.id === d.current_version_id);
       // Show both ends on the first view of a work or newly saved version.
       // Same-version polling must preserve the employee's zoom choice.
@@ -573,8 +624,9 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                 asset_ids: v.snapshot.asset_refs,
                 background_id: v.snapshot.background_ref,
                 template_id: v.snapshot.template_id,
+                zone_background_refs: v.snapshot.zone_background_refs, border_ref:v.snapshot.border_ref,
                 background_tone: v.snapshot.background_tone || "original",
-                ...(["design-rhythm-v1", "design-rhythm-v2", "seamless-unit-v1"].includes(v.snapshot.layout_engine || "") ? {design_density: v.snapshot.design_density || "balanced"} : {}),
+                ...(["design-rhythm-v1", "design-rhythm-v2", "seamless-unit-v1", "seamless-unit-v2"].includes(v.snapshot.layout_engine || "") ? {design_density: v.snapshot.design_density || "balanced"} : {}),
               }
             : emptySelection;
       setSelection(restoreSelection(next, v));
@@ -898,6 +950,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
         body: {
           idempotency_key: crypto.randomUUID(),
           base_version_id: current.id,
+          ...(modern && editTarget !== "layout" ? {edit_target:editTarget} : {}),
           prompt: prompt.trim() || (changed ? "应用所选配置" : ""),
           ...(changed ? { selection } : {}),
         },
@@ -1138,8 +1191,10 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
       updateSelection({
         ...selection,
         asset_ids: selection.asset_ids.filter((id) => id !== asset.id),
-        background_id:
-          selection.background_id === asset.id ? "" : selection.background_id,
+        background_id: selection.background_id === asset.id ? "" : selection.background_id,
+        border_ref: selection.border_ref === asset.id ? undefined : selection.border_ref,
+        zone_background_refs: selection.zone_background_refs && Object.fromEntries(
+          Object.entries(selection.zone_background_refs).filter(([,id])=>id!==asset.id)) ,
       });
     });
   }
@@ -1171,6 +1226,14 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
       <header className="topbar">
         <Brand />
         <div className="header-actions">
+          <button
+            className="secondary"
+            disabled={busy || !!pending || backgroundProcessing || uploading}
+            onClick={() => void newDesign()}
+          >
+            <Icon name="plus" />
+            新建作品
+          </button>
           <button className="text-button" onClick={() => setModal("designs")}>
             <Icon name="folder" />
             我的作品<span className="count">{designs.length}</span>
@@ -1184,44 +1247,11 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
         </div>
       </header>
       <main>
-        <div className="workspace-title">
-          <div>
-            <h1>选择图案，开始设计</h1>
-            <p>选择图案、排版和底图，生成首稿后可继续精修。</p>
-          </div>
-          <button
-            className="secondary"
-            disabled={busy || !!pending || backgroundProcessing || uploading}
-            onClick={() => void newDesign()}
-          >
-            <Icon name="plus" />
-            新建作品
-          </button>
-        </div>
-        <div className="environment-strip">
-          <div>
-            <span className={`status-dot ${testMode ? "amber" : ""}`} />
-            <strong>
-              {testMode
-                ? "测试模型 · 演示模式"
-                : config?.ai_ready
-                  ? "AI 服务已配置"
-                  : "AI 尚未配置"}
-            </strong>
-            <span>
-              {testMode
-                ? "底图和内容编辑使用明确的测试替身，非真实 AI 效果。"
-                : config?.ai_ready
-                  ? "AI 理解要求并改图，程序按原规格重新排版。"
-                  : "请由内部人员配置模型服务。"}
-            </span>
-          </div>
-          <span className="outline-pill">
-            {config?.output_profile?.is_demo
-              ? "演示输出 · 未经业务验收"
-              : "内部输出配置"}
-          </span>
-        </div>
+        {config && (testMode || !aiAvailable || config.output_profile?.is_demo) && <div className="environment-strip compact-status">
+          {testMode && <span className={current ? undefined : "test-limit"}>测试模型 · 演示模式（测试替身）</span>}
+          {config.output_profile?.is_demo && <span>演示输出 · 未经业务验收</span>}
+          {!aiAvailable && <span>AI 尚未配置，可用已有素材排版。</span>}
+        </div>}
         {notice && (
           <div
             className={`notice ${notice.type}`}
@@ -1260,11 +1290,11 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
             正在恢复作品和素材…
           </div>
         ) : (
-          <div className="workspace-grid">
+          <div className={`workspace-grid ${!current ? "draft-workspace" : ""}`}>
             <aside className="panel source-panel">
               <div className="panel-heading">
                 <div>
-                  <span className="step-label">01 / COMPOSE</span>
+                  
                   <h2>素材与排版</h2>
                 </div>
                 <Icon name="grid" />
@@ -1362,11 +1392,11 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                   <strong>已选：{template.name}</strong>
                   <button type="button" className="template-example-button" onClick={() => setExamplesView({ mode: template.mode, name: template.name })}>查看{template.name}案例</button>
                 </div>}
-                {template && layoutHints[template.mode] && (
-                  <p className="layout-selection-help">{layoutHints[template.mode]}</p>
+                {template && ((modern && advancedHints[template.mode]) || layoutHints[template.mode]) && (
+                  <p className="layout-selection-help">{modern && advancedHints[template.mode] || layoutHints[template.mode]}</p>
                 )}
                 {layoutIssue && <p className="layout-selection-issue" id="ribbon-layout-issue" role="alert">{layoutIssue}</p>}
-                {(!current || ["design-rhythm-v1", "design-rhythm-v2", "seamless-unit-v1"].includes(current.snapshot.layout_engine || "")) && (
+                {(!current || ["design-rhythm-v1", "design-rhythm-v2", "seamless-unit-v1", "seamless-unit-v2"].includes(current.snapshot.layout_engine || "")) && (
                   <label className="density-control">画面密度
                     <select aria-label="画面密度" value={selection.design_density || "balanced"} disabled={locked}
                       onChange={(event) => updateSelection({ ...selection, design_density: event.target.value as Selection["design_density"] })}>
@@ -1377,6 +1407,18 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                   </label>
                 )}
               </section>
+              {modern && (zones.length>0 || template?.mode==="bordered") && <details className="optional-layers" key={template?.mode}>
+                <summary>{zones.length ? "分区底纹" : "独立边饰"}</summary>
+                {(zones.length ? zones : ["border"]).map(key=>{
+                  const ref=key==="border"? selection.border_ref : selection.zone_background_refs?.[key];
+                  return <div key={key}><span>{zoneNames[key] || "上下边饰"}</span><button aria-label={key==="border"?"选择上下边饰":`选择${zoneNames[key]}底纹`} disabled={locked} className="secondary small" onClick={()=>{
+                    setLibraryRole(key);setSearch("");setModal(key==="border"?"pattern":"background");
+                  }}>{(ref && assetIndex.get(ref)?.name) || (key==="border"?"选择边饰":"选择底纹")}</button>{ref && <button disabled={locked} className="text-button" onClick={()=>{
+                    const next={...selection,zone_background_refs:{...selection.zone_background_refs}};
+                    if(key==="border") delete next.border_ref;else delete next.zone_background_refs[key];updateSelection(next);
+                  }}>恢复默认</button>}</div>;
+                })}
+              </details>}
               <section className="source-section background-section">
                 <div className="section-label">
                   <h3>底图</h3>
@@ -1463,7 +1505,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
               <div className="panel preview-panel">
                 <div className="panel-heading">
                   <div>
-                    <span className="step-label">02 / PREVIEW</span>
+                    
                     <h2>{designTarget?.name || design?.name || "设计预览"}</h2>
                   </div>
                   <span className={`state-pill ${processing ? "working" : ""}`}>
@@ -1503,7 +1545,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                       ) : (
                         <Icon name="spark" />
                       )}
-                      {processing ? "正在生成首稿…" : "生成首稿"}
+                      {busy && pending ? "正在提交…" : processing ? "正在生成首稿…" : "生成首稿"}
                       <Icon name="arrow" size={16} />
                     </button>
                     {isFirstDraft && !designTarget && aiDraftAvailable && <div className="ai-draft-options">
@@ -1513,7 +1555,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                         AI搭配底纹与装饰
                       </label>
                       {aiDraftEnabled ? <>
-                        <p>原人物文字不重画；所选案例会发送给Seedream。未选案例则不发送案例图。</p>
+                        <p>按原图保留人物文字。选择的案例会发送给Seedream。</p>
                         {draftReference ? <div className="ai-draft-reference"><span>参考案例：<strong>{draftReference.code}</strong></span><button type="button" disabled={locked} onClick={() => setAiDraftReference(null)}>取消案例参考</button></div> :
                           <button type="button" className="ai-reference-picker" disabled={locked || !template} onClick={() => setExamplesView({ mode: template?.mode || null, name: template?.name || "全部排版案例" })}>选择案例参考</button>}
                       </> : <p>按原素材直接排版，首稿不调用AI搭配。</p>}
@@ -1525,7 +1567,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                           ? "请选择一种排版模式"
                           : !selection.background_id
                             ? "请选择或生成底图"
-                            : layoutIssue || "素材已就绪 · 首稿不占用精修次数"}
+                            : layoutIssue || "首稿不占用精修次数"}
                     </small>
                   </div>
                 )}
@@ -1549,7 +1591,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                       {designTarget.loading ? <><span className="spinner" /><h3>正在打开作品…</h3><p>正在读取所选作品的版本和素材。</p></> : <><h3>作品打开失败</h3><p>请重试，或从“我的作品”选择其他作品。</p><button className="secondary" onClick={() => void switchDesign(designTarget.id)}>重试打开作品</button></>}
                     </div>
                   ) : selected && selectedLoop ? (
-                    <LoopPreview key={`${design?.id}:${selected.id}`} version={selected} sizeLabel={sizeLabel} />
+                    <LoopPreview key={`${design?.id}:${selected.id}`} version={selected} sizeLabel={sizeLabel} target={isHistory?"layout":editTarget} />
                   ) : selected ? (
                     <>
                       <div className={`ribbon-display ${previewZoom}`}>
@@ -1591,19 +1633,11 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                     </>
                   ) : (
                     <div className="empty-canvas">
-                      <div className="empty-symbol">
-                        <Icon name="spark" size={29} />
-                      </div>
-                      <h3>好设计，从一个图案开始</h3>
-                      <p>
-                        在左侧选择图案、排版与底图
-                        <br />
-                        准备好后，生成你的第一稿。
-                      </p>
+                      <h3>首稿预览</h3>
                       {template && (
                         <div className="template-peek">
                           <img
-                            src={template.thumbnail_url}
+                            src={templateImage(template)}
                             alt="当前排版参考"
                           />
                           <span>{template.name} · 排版参考</span>
@@ -1622,16 +1656,6 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                       <span>完成后自动更新，已有版本仍可下载</span>
                     </div>
                   )}
-                  <div className="stage-bottomline">
-                    <span>
-                      {selected ? "已保存的设计版本" : "图案 · 排版 · 底图"}
-                    </span>
-                    <span>
-                      {selected?.snapshot.output_profile?.is_demo || !selected
-                        ? "DEMO OUTPUT"
-                        : "SAVED DESIGN"}
-                    </span>
-                  </div>
                 </div>
                 {selected ? (
                   <>
@@ -1661,11 +1685,8 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                   null
                 )}
               </div>
-              <div className="panel history-panel">
-                <div className="history-heading">
-                  <h3>版本记录</h3>
-                  <span>每一步灵感，都有迹可循</span>
-                </div>
+              {!!design?.versions?.length && <details className="panel history-panel" key={design.id}>
+                <summary className="history-heading">版本记录（{design.versions.length}）</summary>
                 {design?.versions?.length ? (
                   <div className="version-grid">
                     {design.versions.map((v) => (
@@ -1705,48 +1726,28 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                     <span className="history-line" />
                   </div>
                 )}
-              </div>
-              <div className="handoff-note">
-                <span className="note-icon">
-                  <Icon name="download" size={17} />
-                </span>
-                <div>
-                  <strong>设计完成后，交给我们继续实现</strong>
-                  <span>下载所选保存版本，由内部人员对接后续制作流程。</span>
-                </div>
-              </div>
+              </details>}
             </section>
-            <aside className="panel refinement-panel">
+            {current && <aside className="panel refinement-panel">
               <div className="panel-heading">
                 <div>
-                  <span className="step-label">03 / REFINE</span>
+                  
                   <h2>文字精修</h2>
                 </div>
                 <Icon name="spark" />
               </div>
-              <div
-                className={`quota-card ${remaining === 0 ? "exhausted" : ""}`}
-              >
-                <div>
-                  <span>剩余精修次数</span>
-                  <strong>
-                    {remaining}
-                    <small> / 2</small>
-                  </strong>
-                </div>
-                <div className="quota-dots">
-                  {[0, 1].map((i) => (
-                    <span
-                      key={i}
-                      className={i < remaining ? "available" : ""}
-                    />
-                  ))}
-                </div>
-              </div>
+              <p className="remaining-edits">本作品还可精修 <strong>{remaining}</strong> 次</p>
               <div className="refinement-body">
                 <label htmlFor="refinement">告诉我们，你想怎么改</label>
-                <p>可写“第一个图案”或图案名称，再说清要改什么。</p>
-                {editing && !editing.composite_edit && <p className="model-edit-boundary">{editing.composite_edit_reason || "当前长条请修改独立图案或底图，再按原规格重新排版。"}</p>}
+
+
+                {modern && current && !isHistory && <label className="target-picker">精修范围
+                  <select aria-label="精修范围" disabled={locked || changed || remaining===0} value={editTarget} onChange={e=>setEditTarget(e.target.value)}>
+                    <option value="layout">整个布局</option><option value="background" disabled={!!zones.length && zones.every(zone=>current.snapshot.zone_background_refs?.[zone] || current.snapshot.zone_colors?.[zone])}>共用底纹</option>
+                    {(current.snapshot.pattern_slots || []).map((slot,i)=><option key={slot} value={slot}>{`图案 ${i+1} · ${assetIndex.get(current.snapshot.asset_refs[i])?.name || "已保存图案"}（全部副本）`}</option>)}
+                    {(zonesByMode[current.snapshot.template_mode] || []).map(zone=><option key={zone} value={`zone:${zone}`}>{zoneNames[zone]}底纹</option>)}
+                    {current.snapshot.border_ref && <option value="border">上下边饰</option>}
+                  </select></label>}
                 <textarea
                   id="refinement"
                   value={prompt}
@@ -1758,23 +1759,6 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                     : "例如：把图案缩小一些，间距拉开一点，保留现在的底色。"}
                 />
                 <div className="text-limit">{prompt.length} / 2000</div>
-                <div className="suggestions">
-                  <span>
-                    {testMode ? "可试试这些测试指令" : "给灵感一点提示"}
-                  </span>
-                  {suggestions.map((text) => (
-                    <button
-                      key={text}
-                      disabled={
-                        !current || locked || remaining === 0 || isHistory || !aiAvailable
-                      }
-                      onClick={() => setPrompt(text)}
-                    >
-                      {text}
-                      <Icon name="plus" size={13} />
-                    </button>
-                  ))}
-                </div>
                 <button
                   className="primary full refine-button"
                   aria-describedby={layoutIssue ? "ribbon-layout-issue" : undefined}
@@ -1794,7 +1778,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                   ) : (
                     <Icon name="spark" />
                   )}
-                  {processing
+                  {busy && pending ? "正在提交…" : processing
                     ? "正在处理…"
                     : remaining === 0
                       ? "精修次数已用完"
@@ -1815,19 +1799,32 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                           ? "本次将同时应用左侧的素材与排版选择。"
                           : "成功完成后计一次，系统失败不扣次。"}
                 </p>
+                <div className="suggestions">
+                  <span>
+                    {testMode ? "测试示例" : "可用示例"}
+                  </span>
+                  {suggestions.map((text) => (
+                    <button
+                      key={text}
+                      disabled={
+                        !current || locked || remaining === 0 || isHistory || !aiAvailable
+                      }
+                      onClick={() => setPrompt(text)}
+                    >
+                      {text}
+                      <Icon name="plus" size={13} />
+                    </button>
+                  ))}
+                </div>
               </div>
               <div className="refine-footer">
                 <details className="model-workflow-help">
-                  <summary>AI 怎么参与</summary>
+                  <summary>精修说明</summary>
+                  {editing && !editing.composite_edit && <p className="model-edit-boundary">{editing.composite_edit_reason}</p>}
                   <p>DeepSeek 根据文字和所选图案的名称、顺序理解要求；当前不把图片发给它审图。对象不明确时请补充说明。</p>
                   <p>Seedream 负责生成底图、修改图案或底图；程序负责原尺寸排版、版本与下载。首稿使用原素材，不由模型重画。</p>
-                  <p>模型配置齐全不等于效果已验收。实际生成的颜色、文字和细节仍请核对。</p>
+                  <p>每次成功精修计一次。回退到父版本保留累计次数。</p>
                 </details>
-                <div>
-                  <Icon name="back" size={16} />
-                  <strong>放心尝试，保留每个版本</strong>
-                </div>
-                <p>回退到当前版本的父版本；回退不会返还已使用的精修次数。</p>
                 {testMode && (
                   <p className="test-limit">
                     测试替身仅支持已列明的参数与内容示例。其他要求会提示补充说明，真实
@@ -1835,12 +1832,10 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                   </p>
                 )}
               </div>
-            </aside>
+            </aside>}
           </div>
         )}
         <footer className="page-footer">
-          <span>丝带设计助手 · V1</span>
-          <span>{config?.output_profile?.name || "正在读取输出配置"}</span>
           <span>个人作品与素材保留 {config?.retention_hours ?? 50} 小时，请及时下载。</span>
         </footer>
       </main>
@@ -1877,7 +1872,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
       )}
       {(modal === "pattern" || modal === "background") && (
         <Modal
-          title={modal === "pattern" ? "图案素材库" : "底图素材库"}
+          title={libraryRole==="border" ? "选择边饰" : libraryRole ? zoneNames[libraryRole]+"底纹" : modal === "pattern" ? "图案素材库" : "底图素材库"}
           onClose={() => setModal(null)}
           wide
           className="asset-library-modal"
@@ -1889,7 +1884,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
-            <label
+            {!libraryRole && <label
               className={`secondary upload-label ${uploading ? "disabled" : ""}`}
             >
               <Icon name="upload" />
@@ -1903,7 +1898,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                 disabled={uploading || locked}
                 onChange={(e) => void upload(e.target.files, modal)}
               />
-            </label>
+            </label>}
           </div>
           {isAdmin && (
             <label className="checkbox-line">
@@ -1924,7 +1919,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
           </p>
           <div className="library-grid">
             {libraryItems.map((a) => {
-              const picked =
+              const picked = libraryRole ? (libraryRole==="border" ? selection.border_ref : selection.zone_background_refs?.[libraryRole])===a.id :
                 modal === "pattern"
                   ? selection.asset_ids.includes(a.id)
                   : selection.background_id === a.id;
@@ -1935,6 +1930,8 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                     disabled={locked}
                     aria-pressed={picked}
                     onClick={() =>
+                      libraryRole === "border" ? updateSelection({...selection,border_ref:a.id}) :
+                      libraryRole ? updateSelection({...selection,zone_background_refs:{...selection.zone_background_refs,[libraryRole]:a.id}}) :
                       modal === "pattern"
                         ? togglePattern(a.id)
                         : updateSelection({ ...selection, background_id: a.id })
@@ -1981,7 +1978,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
           </nav>}
           <div className="modal-footer">
             <span>
-              {modal === "pattern"
+              {libraryRole ? (libraryRole==="border"?"选择一个完整边饰":"选择该区域的底纹") : modal === "pattern"
                 ? `已选 ${selection.asset_ids.length} 个图案`
                 : background
                   ? `已选：${background.name}`

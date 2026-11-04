@@ -87,6 +87,22 @@ def test_only_reviewed_demo_svg_names_and_safe_svg_content():
             release.scan(path, value)
 
 
+def test_reviewed_layout_previews_are_bound_to_public_paths_and_exact_bytes():
+    name = 'hsd_tool/static/ribbon/layout-v2/scatter.webp'
+    source = 'ribbon_frontend/public/layout-v2/scatter.webp'
+    reviewed = (release.ROOT / name).read_bytes()
+    assert len(release.PUBLIC_THUMBNAILS) == 28
+    for path in release.PUBLIC_THUMBNAILS:
+        release.scan(path, (release.ROOT / path).read_bytes())
+    assert (release.ROOT / source).read_bytes() == reviewed
+    for invalid_name, invalid_value in [
+        (name, reviewed + b'changed'), ('hsd_tool/static/ribbon/layout-v2/private.webp', reviewed),
+        ('docs/scatter.webp', reviewed),
+    ]:
+        with pytest.raises(RuntimeError):
+            release.scan(invalid_name, invalid_value)
+
+
 def files():
     return {'hsd_tool/__init__.py': ('100644', b'__version__ = "9.8.7"\n'),
             'README.md': ('100644', b'Synthetic public source\n'),

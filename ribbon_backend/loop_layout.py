@@ -81,14 +81,14 @@ def _integer_period(value):
     return int(number)
 
 
-def _configuration(snapshot, specs):
+def _configuration(snapshot, specs, *, independent_border=False):
     from .imaging import PARAM_DEFAULTS, _profile
     refs = snapshot.get('asset_refs', [])
     mode = snapshot.get('template_mode', 'stagger')
     if mode not in MODES or not 1 <= len(refs) <= 12 or len(specs) != len(refs):
         raise ValueError('排版模式、图案数量或尺寸记录不正确')
     n = len(refs)
-    if mode == 'bordered' and n < 2:
+    if mode == 'bordered' and n < 2 and not independent_border:
         raise ValueError('上下边饰至少选择两个图案')
     if mode == 'fullwidth' and n != 1:
         raise ValueError('整幅定位需要一张完整设计图')
@@ -416,12 +416,18 @@ def estimate(snapshot):
 
 def compose(canvas, snapshot, resolve_asset, master_path):
     """Render complete source content; phase wrapping occurs only at unit seam."""
-    from .imaging import read_image, _save_png, MAX_PIXELS
     if canvas.size != (snapshot['output_profile']['width'], snapshot['output_profile']['height']):
         raise ValueError('循环画布与已保存版本尺寸不一致')
     refs = snapshot['asset_refs']
     specs = read_specs(refs, resolve_asset)
     placements = plan(snapshot, specs)
+    return paint(canvas, snapshot, resolve_asset, master_path, specs, placements, ENGINE)
+
+
+def paint(canvas, snapshot, resolve_asset, master_path, specs, placements, engine):
+    """Paint a verified version-specific plan using the original source pixels."""
+    from .imaging import read_image, _save_png, MAX_PIXELS
+    refs = snapshot['asset_refs']
     Path(master_path).parent.mkdir(parents=True, exist_ok=True)
     result = []
     with tempfile.TemporaryDirectory(prefix='ribbon-loop-', dir=Path(master_path).parent) as staged:
@@ -473,7 +479,7 @@ def compose(canvas, snapshot, resolve_asset, master_path):
                 result.append(dict(asset_ref=refs[index], x=p['x'], y=y, width=motif.width, height=motif.height,
                                    size=max(motif.size), rotation=p['rotation'], layer=layer, role=p['role'],
                                    group=p['group'], row=p['row'], content_bbox=specs[index]['bbox'],
-                                   source_size=specs[index]['source_size'], layout_engine=ENGINE,
+                                   source_size=specs[index]['source_size'], layout_engine=engine,
                                    design_density=snapshot.get('design_density', 'balanced'),
                                    safe_region=list(p['region']), horizontal_wrap=True, repetition=p['repetition']))
     return result

@@ -136,7 +136,7 @@ class Workflow:
 
 
 @pytest.fixture
-def env(tmp_path):
+def workflow(tmp_path):
     provider = CountingSyntheticProvider()
     service = Service(Settings(data_dir=tmp_path, provider='test', auth_mode='demo'),
                       provider_factory=lambda *args: provider)
@@ -145,6 +145,60 @@ def env(tmp_path):
     with TestClient(create_app(service.settings, service=service)) as client:
         owner = ok(client.post('/api/auth/login', json=dict(username='demo', password='demo12345')))['id']
         yield Workflow(service, client, owner, provider)
+
+
+@pytest.fixture
+def env(workflow, monkeypatch):
+    # Exercise the original v1 contract against current production recovery,
+    # download, ownership and worker paths, as retained employee works do.
+    make_snapshot = workflow.service.selection_snapshot
+
+    def historical_snapshot(db, owner, selection, profile=None, base=None):
+        snapshot = make_snapshot(db, owner, selection, profile, base)
+        if not base:
+            snapshot['layout_engine'] = ENGINE
+            for field in (
+                'pattern_slots',
+                'slot_params',
+                'zone_background_refs',
+                'zone_colors',
+                'border_ref',
+            ):
+                snapshot.pop(field, None)
+        return snapshot
+
+    monkeypatch.setattr(workflow.service, 'selection_snapshot', historical_snapshot)
+    return workflow
+
+
+@pytest.mark.parametrize('height,dpi', ((240, 96), (520, 300)))
+def test_new_engine_worker_binds_inputs_to_saved_download_and_preserves_parent(workflow, height, dpi):
+    from ribbon_backend import loop_pipeline_v2
+
+    workflow.service.save_profile(
+        dict(name='v2 worker', width=1280, height=height, dpi=dpi, format='PNG', is_demo=True)
+    )
+    initial = workflow.generate()
+    first = current(initial)
+    data = workflow.download(first)
+    snapshot = first['snapshot']
+    assert snapshot['layout_engine'] == loop_pipeline_v2.ENGINE
+    loop_pipeline_v2.validate_binding(snapshot, hashlib.sha256(data).hexdigest())
+    with Image.open(BytesIO(data)) as png_file:
+        assert png_file.size == (snapshot['loop_layout']['period_px'], height)
+        assert abs(png_file.info['dpi'][0] - dpi) < 1
+    assert [item['id'] for item in snapshot['loop']['inputs']] == [
+        *snapshot['asset_refs'],
+        snapshot['background_ref'],
+    ]
+    selection = {**workflow.selection, 'design_density': 'airy'}
+    done, current_design = workflow.refine(initial, selection=selection, prompt='应用所选配置')
+    assert done['status'] == 'SUCCEEDED', done
+    assert current_design['successful_refinement_count'] == 1
+    newer = current(current_design)
+    assert newer['parent_version_id'] == first['id']
+    assert workflow.download(first) == data
+    assert workflow.download(newer) != data
 
 
 def assert_bound(env, version, *, height, dpi):

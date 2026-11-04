@@ -40,8 +40,8 @@ def registry_for(root):
 
 
 def _references(snapshot):
-    return {str(x) for x in snapshot.get('asset_refs', [])} | {
-        str(snapshot[k]) for k in ('background_ref', 'composite_ref') if snapshot.get(k)
+    return {str(x) for x in snapshot.get('asset_refs', [])} | set(snapshot.get('zone_background_refs', {}).values()) | {
+        str(snapshot[k]) for k in ('background_ref', 'composite_ref', 'border_ref') if snapshot.get(k)
     }
 
 

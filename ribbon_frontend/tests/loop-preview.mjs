@@ -17,7 +17,7 @@ const fixture = "/api/ribbon/synthetic-loop.svg";
 const svg = (width = 1200, height = 520) => `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><rect width="100%" height="100%" fill="#e5eee0"/><circle cx="${width * .2}" cy="${height * .5}" r="${height * .25}" fill="#a9c68e"/><text x="${width * .4}" y="${height * .55}" font-size="${height * .1}">SYNTHETIC ONLY</text></svg>`;
 const assets = ["flower", "star"].map(name => ({ id: `demo-${name}`, name: `合成图案 ${name}`, kind: "pattern", source: "synthetic", is_demo: true, shared: true, url: fixture, thumbnail_url: fixture }));
 assets.push({ id: "demo-bg-sage", name: "合成底图", kind: "background", source: "synthetic", is_demo: true, shared: true, url: fixture, thumbnail_url: fixture });
-const templates = ["stagger", "ends"].map(mode => ({ id: mode, name: mode, mode, version: 1, enabled: true, rules: {}, thumbnail_url: fixture }));
+const templates = ["stagger", "ends", "split", "bordered"].map(mode => ({ id: mode, name: mode, mode, version: 1, enabled: true, rules: {}, thumbnail_url: fixture }));
 const makeVersion = (id, sequence, parent, engine = "seamless-unit-v1", mode = "stagger") => ({
   id, design_id: "LOOP", sequence, parent_version_id: parent, prompt: sequence ? "合成精修" : "", render_kind: "parameters", provider: "test", created_at: "2026-11-04", editing,
   preview_url: `${fixture}?version=${id}`, view_url: `/api/ribbon/versions/${id}/view`, download_url: `/api/ribbon/versions/${id}/download`,
@@ -30,6 +30,25 @@ const loopWork = makeDesign("LOOP", makeVersion("loop-0", 0, null));
 const legacyV1 = makeDesign("V1", makeVersion("old-v1", 0, null, "design-rhythm-v1", "ends"));
 const legacyV2 = makeDesign("V2", makeVersion("old-v2", 0, null, "design-rhythm-v2", "stagger"));
 const works = [loopWork, legacyV1, legacyV2, makeDesign("SLOW", makeVersion("slow-0", 0, null)), makeDesign("EMPTY", null)];
+const targeted = makeVersion("target-0",0,null);
+targeted.snapshot.layout_engine = targeted.snapshot.loop.engine = "seamless-unit-v2";
+targeted.snapshot.pattern_slots = ["stable-flower","stable-star"];
+targeted.snapshot.object_transforms = [
+  { slot_id:"stable-star", x:300, y:260, width:120, height:200 },
+  { slot_id:"stable-star", x:800, y:260, width:120, height:200 },
+  { slot_id:"stable-flower", x:500, y:260, width:90, height:120 }
+];
+works.push(makeDesign("TARGET",targeted));
+const bordered = structuredClone(targeted);
+bordered.id="border-0";
+bordered.snapshot.template_id=bordered.snapshot.template_mode="bordered";
+bordered.snapshot.asset_refs=["demo-flower"];
+bordered.snapshot.pattern_slots=["stable-flower"];
+works.push(makeDesign("BORDER",bordered));
+const zoned = structuredClone(targeted);
+zoned.id="zones-0";
+zoned.snapshot.template_id=zoned.snapshot.template_mode="split";
+works.push(makeDesign("ZONES",zoned));
 const jobs = new Map(), writes = [], requests = [], errors = [];
 let releaseSlow;
 const server = createServer(async (req, res) => {
@@ -141,9 +160,11 @@ try {
   await page.getByRole("button", { name: "开始精修", exact: true }).click();
   await page.waitForFunction(() => document.querySelector("#ribbon-mount").shadowRoot.querySelector('a[download]')?.getAttribute("href") === "/api/ribbon/versions/loop-1/download");
   await assertUnit("loop-1");
+  await page.locator(".loop-technical-details summary").click();
   assert.equal(await page.getByText("工程循环检查通过", { exact: true }).isVisible(), true);
-  assert.equal(await page.getByText("画面与印刷效果仍需人工确认。", { exact: true }).isVisible(), true);
+  assert.match(await page.locator(".loop-technical-details").innerText(),/印刷效果需另行核样/);
   assert.equal(await page.locator(".loop-check ul").count(), 0);
+  await page.locator(".history-panel summary").click();
   await page.locator(".version-card").first().click();
   assert.equal(await page.getByRole("link", { name: "下载所选版本", exact: true }).getAttribute("href"), "/api/ribbon/versions/loop-0/download");
   assert.equal(await page.getByText("合成提示：请复核接缝附近的留白。", { exact: true }).isVisible(), true);
@@ -173,6 +194,37 @@ try {
   await choose("V2");
   await page.locator(".ribbon-display.detail img").waitFor();
   assert.equal(await page.locator(".ribbon-display img").getAttribute("src"), "/api/ribbon/versions/old-v2/view", "legacy detail still uses its own full-resolution file");
+  await choose("BORDER");
+  await page.getByText("独立边饰",{exact:true}).click();
+  await page.getByRole("button",{name:"选择上下边饰"}).click();
+  const borders=page.getByRole("dialog",{name:"选择边饰",exact:true});
+  await borders.locator(".library-card").filter({hasText:"合成图案 star"}).click();
+  await borders.getByRole("button",{name:"完成选择"}).click();
+  await page.getByRole("button",{name:"开始精修",exact:true}).click();
+  await page.locator('a[download][href="/api/ribbon/versions/loop-1/download"]').waitFor();
+  assert.equal(writes.at(-1).data.selection.border_ref,"demo-star");
+  assert.deepEqual(writes.at(-1).data.selection.asset_ids,["demo-flower"]);
+  await choose("ZONES");
+  await page.getByText("分区底纹",{exact:true}).click();
+  await page.getByRole("button",{name:"选择左区底纹",exact:true}).click();
+  const sources=page.getByRole("dialog",{name:"左区底纹",exact:true});
+  await sources.locator(".library-card").first().click();
+  await sources.getByRole("button",{name:"完成选择"}).click();
+  await page.getByRole("button",{name:"开始精修",exact:true}).click();
+  await page.locator('a[download][href="/api/ribbon/versions/loop-1/download"]').waitFor();
+  assert.deepEqual(writes.at(-1).data.selection.zone_background_refs,{left:"demo-bg-sage"});
+  await choose("TARGET");
+  const target = page.getByLabel("精修范围",{exact:true}).and(page.locator("select"));
+  await target.selectOption("stable-star");
+  assert.equal(await page.locator(".loop-unit-view .target-overlay rect").count(),2);
+  const imageBounds = await page.locator(".loop-unit-view img").boundingBox();
+  const targetBounds = await page.locator(".loop-unit-view .target-overlay").boundingBox();
+  for(const key of ["x","y","width","height"]) assert.ok(Math.abs(imageBounds[key]-targetBounds[key])<=1, `highlight matches displayed pixels: ${key}`);
+  await page.locator("#refinement").fill("向右移动10像素");
+  await page.getByRole("button",{name:"开始精修",exact:true}).click();
+  await page.locator('a[download][href="/api/ribbon/versions/loop-1/download"]').waitFor();
+  assert.equal(writes.at(-1).data.edit_target,"stable-star");
+  assert.equal(writes.at(-1).data.base_version_id,"target-0");
   await choose("EMPTY");
   await page.getByRole("button", { name: "生成首稿", exact: true }).waitFor();
   assert.equal(await page.locator(".loop-preview, a[download]").count(), 0);

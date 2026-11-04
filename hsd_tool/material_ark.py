@@ -30,6 +30,8 @@ import urllib.request
 import warnings
 
 from PIL import Image, ImageOps
+
+from .provider_diagnostics import from_http
 try:
     from PIL import ImageCms
 except ImportError:  # An ICC-bearing image must fail closed without colour CMS.
@@ -77,8 +79,9 @@ class ArkProviderError(Exception):
     """A static, secret-free error with honest submission settlement metadata."""
 
     def __init__(self, code: str, message: str, *, retryable=False, safe_retry=None, settled=True,
-                 usage=None, request_id=""):
+                 usage=None, request_id="", diagnostic=None):
         super().__init__(message)
+        self.diagnostic = diagnostic
         self.code = code
         self.message = message
         self.retryable = bool(retryable if safe_retry is None else safe_retry)
@@ -438,7 +441,8 @@ class ArkMaterialProvider:
             # Neither a JSON error nor a missing image proves it was unbilled.
             raise ArkProviderError(code, message, retryable=definite and reply.status == 429
                                    and error.get("code") in _RETRYABLE_RATE_CODES,
-                                   settled=definite, usage=usage, request_id=request_id)
+                                   settled=definite, usage=usage, request_id=request_id,
+                                   diagnostic=from_http(reply.status, error.get("code") if isinstance(error, dict) else None))
         if _cancelled(check_cancel):
             # The synchronous POST returned. Do not prematurely abort its socket
             # before receiving settlement/known usage just to make Stop look fast.

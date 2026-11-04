@@ -462,7 +462,9 @@ try {
   await setPatterns(["demo-flower"]);
   assert.equal(await generateButton.isEnabled(), true);
   assert.match(await page.locator(".layout-selection-help").innerText(), /整幅作为一个单元重复/);
-  for (const mode of ["bordered", "split", "stacked"]) {
+  await selectLayout("bordered");
+  assert.equal(await generateButton.isEnabled(), true, "new continuous border supports a single central motif");
+  for (const mode of ["split", "stacked"]) {
     await selectLayout(mode);
     assert.match(await page.locator(".layout-selection-issue").innerText(), /至少需要 2 个/);
     assert.equal(await generateButton.isEnabled(), false, `${mode} requires two patterns`);
@@ -737,11 +739,11 @@ try {
   modelReady = true;
   await page.reload();
   await text.waitFor();
+  await page.locator(".model-workflow-help summary").click();
   await page.locator(".model-edit-boundary").waitFor();
   assert.match(await page.locator(".model-edit-boundary").innerText(), /修改图案或底图/);
   assert.equal(await page.getByRole("button", { name: "给画面添加星光", exact: true }).count(), 0, "unsupported whole-strip edits are not encouraged");
   assert.match(await page.locator(".pattern-tile > span").first().innerText(), /^1\. /, "selected pattern order is visible");
-  await page.locator(".model-workflow-help summary").click();
   assert.match(await page.locator(".model-workflow-help").innerText(), /不把图片发给它审图/);
   await page.locator(".model-workflow-help summary").click();
   const backgroundText = page.getByLabel("底图要求（可不填）", { exact: true });
@@ -798,6 +800,7 @@ try {
     composite_edit: true, composite_edit_reason: "" };
   await page.evaluate(() => localStorage.removeItem("ribbon:synthetic-b:selection"));
   await page.reload();
+  await page.locator(".model-workflow-help summary").click();
   await page.locator(".model-edit-boundary").waitFor();
   await selectLayout("grid");
   assert.equal(await page.getByRole("button", { name: "给画面添加星光", exact: true }).count(), 0, "old long-strip work does not gain whole-image editing from the new global square profile");

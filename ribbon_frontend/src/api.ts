@@ -48,6 +48,8 @@ export type Editing = {
 };
 export type Selection = {
   asset_ids: string[];
+  zone_background_refs?: Record<string,string>;
+  border_ref?: string;
   background_id: string;
   template_id: string;
   background_tone?: "soft" | "original";
@@ -59,7 +61,7 @@ export type GenerateRequest = Selection & {
   reference_code: string | null;
 };
 export type Loop = {
-  engine: "seamless-unit-v1";
+  engine: "seamless-unit-v1" | "seamless-unit-v2";
   width: number;
   height: number;
   status: "checked" | "needs_review";
@@ -69,6 +71,11 @@ export type Loop = {
 };
 export type Snapshot = {
   asset_refs: string[];
+  zone_background_refs?: Record<string,string>;
+  border_ref?: string;
+  zone_colors?: Record<string,string>;
+  pattern_slots?: string[];
+  object_transforms?: {slot_id?: string; x:number; y:number; width:number; height:number}[];
   background_ref: string;
   template_id: string;
   template_mode: string;
@@ -123,7 +130,19 @@ export type Design = {
   active_job: Job | null;
   deleted_at?: number | null;
 };
+export type ProviderCall = {
+  id: string;
+  job_id: string;
+  operation: string;
+  status: string;
+  model?: string;
+  request_id?: string;
+  elapsed_ms: number;
+  error?: string;
+  diagnostic?: { category: string; stage: string; http_status: number | null; upstream_code: string | null };
+};
 export type Overview = {
+  provider_calls?: ProviderCall[];
   jobs: Job[];
   templates: Template[];
   output_profiles: Profile[];

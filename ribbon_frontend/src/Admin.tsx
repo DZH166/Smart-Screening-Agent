@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api, post, type Overview, type Template } from "./api";
+import { api, post, type Overview, type ProviderCall, type Template } from "./api";
 import { Icon, Modal } from "./App";
 
 const modeNames: Record<string, string> = {
@@ -19,6 +19,36 @@ const modeNames: Record<string, string> = {
   opposed: "正倒交替",
 };
 const basicModes = new Set(["grid", "stagger", "scatter", "single", "ends", "panels"]);
+const operationNames: Record<string, string> = {
+  design_background: "首稿底纹", generate_background: "生成底图", plan: "理解修改要求",
+  edit_asset: "修改图案", edit_background: "修改底纹", edit_composite: "修改整幅",
+};
+const callStates: Record<string, string> = {
+  STARTED: "等待结果", SUCCEEDED: "已返回", FAILED: "失败", UNKNOWN: "结果未确认",
+};
+const callStages: Record<string, string> = {
+  prepare: "准备", provider: "服务响应", transport: "网络传输", validation: "结果校验",
+  complete: "结束", recovery: "任务恢复", unknown: "历史未记录",
+};
+function CallDetails({ calls }: { calls: ProviderCall[] | undefined }) {
+  if (!calls?.length) return null;
+  return (
+    <details>
+      <summary>调用详情（{calls.length}）</summary>
+      <ul>{calls.map(call => (
+        <li key={call.id}>
+          <strong>{operationNames[call.operation] || "模型调用"} · {callStates[call.status] || call.status}</strong>
+          {call.error && <small>{call.error}</small>}
+          {call.diagnostic && <small>{callStages[call.diagnostic.stage] || "未知阶段"}
+            {call.diagnostic.http_status && ` · HTTP ${call.diagnostic.http_status}`}
+            {call.diagnostic.upstream_code && ` · ${call.diagnostic.upstream_code}`}</small>}
+          {call.request_id && <small>请求编号 {call.request_id}</small>}
+        </li>
+      ))}</ul>
+    </details>
+  );
+}
+
 export default function Admin({
   onClose,
   onChanged,
@@ -41,6 +71,12 @@ export default function Admin({
     [height, setHeight] = useState(300),
     [dpi, setDpi] = useState(150),
     [demo, setDemo] = useState(true);
+  const callsByJob = new Map<string, ProviderCall[]>();
+  for (const call of data?.provider_calls ?? []) {
+    const calls = callsByJob.get(call.job_id);
+    if (calls) calls.push(call);
+    else callsByJob.set(call.job_id, [call]);
+  }
   async function load() {
     try {
       setData(await api<Overview>("/admin/overview"));
@@ -181,6 +217,7 @@ export default function Admin({
                         j.result_version_id?.slice(0, 12) ||
                         j.result_asset_id?.slice(0, 12) ||
                         "—"}
+                      <CallDetails calls={callsByJob.get(j.id)} />
                     </td>
                   </tr>
                 ))}

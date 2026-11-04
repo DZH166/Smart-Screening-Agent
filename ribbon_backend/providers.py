@@ -23,12 +23,16 @@ import urllib.request
 import httpx
 from PIL import Image, ImageDraw
 
+from hsd_tool.provider_diagnostics import MESSAGES, diagnostic, from_http
 from .imaging import MAX_PIXELS, PARAM_DEFAULTS, _save_png, _star_points, read_image, memory_bounded_operation
 
 
 class ProviderError(RuntimeError):
-    def __init__(self, message: str, *, request_id: str | None = None, uncertain_result: bool = False, usage=None):
+    def __init__(self, message: str, *, request_id: str | None = None, uncertain_result: bool = False, usage=None, details=None):
         super().__init__(message)
+        self.diagnostic = details or diagnostic(
+            "unknown_result" if uncertain_result else "unclassified",
+            "transport" if uncertain_result else "prepare")
         self.request_id = request_id
         self.uncertain_result = uncertain_result
         self.usage = _safe_usage(usage)
@@ -86,12 +90,12 @@ def workflow_editing(provider, snapshot):
                          and width * height <= 3840 * 2160 and max(width, height) <= 3840)
         reason = '当前长条母版不在本项目OpenAI适配器可直接编辑的尺寸范围内；请修改独立图案或底图。'
     parameters = list(PARAM_DEFAULTS)
-    if snapshot.get('layout_engine') == 'seamless-unit-v1':
+    if snapshot.get('layout_engine') in ('seamless-unit-v1', 'seamless-unit-v2'):
         # A whole-image redraw loses source layers and invalidates the saved
         # geometric period; independent content edits are recomposed instead.
         composite = False
         reason = '循环短图由原图案和底纹组合；请修改独立图案、底纹或间距，程序会重新计算完整循环。'
-    if snapshot.get('template_mode') in ('fullwidth', 'ends_open') and snapshot.get('layout_engine') != 'seamless-unit-v1':
+    if snapshot.get('template_mode') in ('fullwidth', 'ends_open') and snapshot.get('layout_engine') not in ('seamless-unit-v1', 'seamless-unit-v2'):
         parameters.remove('spacing')
     operations = ['parameters', 'edit_asset', 'edit_background']
     if snapshot.get('composite_ref'):
@@ -100,6 +104,13 @@ def workflow_editing(provider, snapshot):
             reason += ' 当前版本已合并图层；如需重新分层，请明确重新选择图案、底图和排版。'
     if composite:
         operations.append('edit_composite')
+    target = snapshot.get('target_kind')
+    if target == 'pattern':
+        operations, parameters = ['parameters', 'edit_asset'], ['scale','rotation','offset_x','offset_y']
+    elif target == 'border':
+        operations, parameters = ['edit_asset'], []
+    elif target == 'background':
+        operations, parameters = ['parameters','edit_background'], ['background_color']
     if name not in ('test', 'openai', 'deepseek_seedream'):
         operations, parameters = [], []
     return dict(allowed_operations=operations, allowed_parameters=parameters,
@@ -121,17 +132,19 @@ def _safe_plan_input(prompt, snapshot, assets, *, provider='openai'):
         'template_mode': snapshot.get('template_mode', ''), 'template_rules': safe_rules,
         'layout_engine': snapshot.get('layout_engine', 'legacy'),
         'background_tone': snapshot.get('background_tone', 'original'),
+        'target': snapshot.get('target_id', 'layout'), 'target_kind': snapshot.get('target_kind', 'layout'),
+        'actual_geometry': (snapshot.get('loop_layout') or {}).get('metrics', {}),
         'design_density': snapshot.get('design_density', 'balanced'),
         'editing': workflow_editing(provider, snapshot),
         'output_profile': {k: profile[k] for k in ('width', 'height') if k in profile}},
-        'assets': [{'position': position + 1, 'id': asset_id,
+        'assets': [{'position': snapshot.get('target_ordinal', position + 1), 'id': asset_id,
                     'name': str(by_id[asset_id].get('name', ''))[:200], 'kind': by_id[asset_id].get('kind')}
                    for position, asset_id in enumerate(selected) if asset_id in by_id]}
 
 
 def _normalise_plan(plan, provider, snapshot, *, request_id=None, usage=None):
     """Validate the real model's contract before any image call is possible."""
-    error_meta = dict(request_id=request_id, usage=usage)
+    error_meta = dict(request_id=request_id, usage=usage, details=diagnostic('invalid_result', 'validation'))
     if (not isinstance(plan, dict) or set(plan) != {'summary', 'clarification', 'operations'}
             or not isinstance(plan['summary'], str)
             or plan['clarification'] is not None and not isinstance(plan['clarification'], str)
@@ -494,22 +507,22 @@ Follow snapshot.editing.allowed_operations and allowed_parameters exactly; retur
 Do not use edit_composite when composite_edit is false. Explain composite_edit_reason and ask for a supported target instead.
 Never silently substitute a background edit for an unsupported whole-picture request if that would change the user's intended scope.
 Use template_mode, template_rules and ordered assets for context. Legacy fullwidth and ends_open do not use spacing;
-seamless-unit-v1 supports spacing in every mode and recalculates its complete horizontal period after edits.
+seamless-unit-v1 and seamless-unit-v2 support spacing in every mode and recalculates its complete horizontal period after edits.
 bordered uses the first asset as its central motif, the rest as border motifs; split/stacked use the first half then the second half;
 scene repeats the selected group; opposed rotates alternate motifs 180 degrees, never mirrors text.
 design-rhythm-v1 fits complete visible motifs proportionally and balances repeat groups using their actual widths.
 The program, not this text-only planner, measures content bounds, spacing, safety margins and repeat closure.
 Never claim that you observed artwork colors, visual weight or text legibility. Ask when an image-specific design choice cannot be inferred from text.
 background_tone is an employee-selected presentation setting (soft or original), not an editable model parameter; do not change it.
-design_density (airy, balanced or rich) is selected by the employee for design-rhythm-v1 only; never change it or emit it as a parameters operation.
+design_density (airy, balanced or rich) is selected by the employee for modern layouts; never change it or emit it as a parameters operation.
 Preserve all unrequested content. Explain uncertainty using clarification and an empty operations array.
 Available operations: parameters (absolute new values, omitted fields as null), edit_asset (one asset's content),
 edit_background (background content only), edit_composite (the entire saved current artwork, flattened afterward).
 Parameter bounds: scale .2..2.5, spacing .4..3, rotation -360..360, offset_x +/- output width,
 offset_y +/- output height, background_color #RRGGBB.
 scale is a factor relative to template default; spacing increases gap and reduces density. Use snapshot current values.
-Parameters affect ALL motifs, not a named motif only. If a user needs one motif's position or size, clarify this limitation.
-Only use IDs in asset_refs for edit_asset. Never invent assets or use paths/URLs. Changes of selection are handled separately.
+For target_kind=layout, geometry parameters affect ALL motifs; if a request asks for only one motif's position or size, ask the employee to select it. For target_kind=pattern, parameters edit only the selected pattern and all its repeats. Use its geometry metrics and slot limits; refuse a saturated adjustment.
+The selected target is binding. For a pattern use parameters for its placement or edit_asset for content; a border supports edit_asset only. For a selected background use edit_background for texture or background_color for a solid colour. Plan no changes outside the selected target. Only use IDs in asset_refs for edit_asset. Never invent assets or use paths/URLs. Changes of selection are handled separately.
 If composite_ref is set, independent layers no longer exist: only edit_composite is permitted, or request explicit new selection.
 Never mix edit_composite with any other operation. For region editing describe the region and explicit preservation in prompt.
 No operation is allowed for merely preserving or praising a design. Return clarification if the requested target is unclear.
@@ -550,7 +563,7 @@ class OpenAIProvider:
                     if not isinstance(request_id, str) or not re.fullmatch(r'[A-Za-z0-9._:-]{1,160}', request_id) or self.api_key in request_id:
                         request_id = None
                     if not 200 <= response.status_code < 300:
-                        raise ProviderError(f"OpenAI 请求失败（HTTP {response.status_code}）；原版本保留，请由内部人员检查账号、模型权限或服务状态", request_id=request_id, uncertain_result=not 400 <= response.status_code < 500)
+                        raise ProviderError(f"OpenAI 请求失败（HTTP {response.status_code}）；原版本保留，请由内部人员检查账号、模型权限或服务状态", request_id=request_id, uncertain_result=not 400 <= response.status_code < 500, details=from_http(response.status_code))
                     limit = 2 * 1024 * 1024 if endpoint == 'responses' else 96 * 1024 * 1024
                     length = response.headers.get('content-length')
                     if length and (not length.isascii() or not length.isdigit() or int(length) > limit):
@@ -613,7 +626,7 @@ class OpenAIProvider:
                 image = source.convert("RGBA")
             _save_png(image, output_path)
         except (ValueError, KeyError, TypeError, OSError, Image.DecompressionBombError) as exc:
-            raise ProviderError("图像模型输出未通过解码和基本文件检查；未提交结果", request_id=request_id, usage=result.get('usage')) from exc
+            raise ProviderError("图像模型输出未通过解码和基本文件检查；未提交结果", request_id=request_id, usage=result.get('usage'), details=diagnostic('invalid_result','validation')) from exc
         return {**_meta(self.image_model, request_id=request_id, usage=result.get("usage")),
                 "width": image.width, "height": image.height, "is_demo": False}
 
@@ -760,7 +773,8 @@ class DeepSeekSeedreamProvider:
             accounting._record_tokens(parsed, usage)
             if not 200 <= reply.status < 300:
                 code = {401: 'authentication', 403: 'authentication', 402: 'insufficient_balance', 429: 'rate_limit'}.get(reply.status, 'provider_error')
-                raise ProviderError('DeepSeek 暂未完成编辑计划，请检查服务状态；原版本保留。', request_id=request_id,
+                details = from_http(reply.status)
+                raise ProviderError(MESSAGES[details['category']], request_id=request_id, details=details,
                     uncertain_result=not 400 <= reply.status < 500, usage=parsed.get('usage'))
             choices = parsed.get('choices')
             try:
@@ -772,7 +786,8 @@ class DeepSeekSeedreamProvider:
                 plan = _strict_json(content.replace(credential['api_key'], '[已隐藏]'))
             except (ValueError, KeyError, TypeError, AttributeError, RecursionError):
                 code = 'invalid_decision'
-                raise ProviderError('语言模型没有返回完整可执行的编辑计划；未修改原版本。', request_id=request_id, usage=parsed.get('usage')) from None
+                raise ProviderError('语言模型没有返回完整可执行的编辑计划；未修改原版本。', request_id=request_id,
+                                    usage=parsed.get('usage'), details=diagnostic('invalid_result','validation')) from None
             code = 'ok'
             try:
                 plan = _normalise_plan(plan, self.name, snapshot, request_id=request_id, usage=parsed.get('usage'))
@@ -806,6 +821,14 @@ class DeepSeekSeedreamProvider:
             image = None
             try:
                 data = parsed.get('data')
+                # Ark may return an item-level rejection inside a successful HTTP reply.
+                if isinstance(data, list) and len(data) == 1 and isinstance(data[0], dict):
+                    item_error = data[0].get('error')
+                    if isinstance(item_error, dict):
+                        details = from_http(None, item_error.get('code'))
+                        if details['upstream_code']:
+                            raise ProviderError(MESSAGES[details['category']], request_id=request_id,
+                                                usage=usage, details=details)
                 if not isinstance(data, list) or len(data) != 1 or not isinstance(data[0], dict) or 'error' in data[0]:
                     raise ValueError()
                 image = _decode(_image_field(data[0]), output=True)
@@ -817,14 +840,20 @@ class DeepSeekSeedreamProvider:
                 actual_size = image.size
                 _save_png(image, output_path)
             except (ValueError, TypeError, KeyError, OSError, ArkProviderError):
-                raise ProviderError('图片结果未通过尺寸或透明背景检查；原版本保留。', request_id=request_id, usage=usage) from None
+                raise ProviderError('图片结果未通过尺寸或透明背景检查；原版本保留。', request_id=request_id,
+                                    usage=usage, details=diagnostic('invalid_result', 'validation')) from None
             finally:
                 if image is not None:
                     image.close()
             return {**_meta(self.image_model, request_id=request_id, usage=usage),
                     'width': actual_size[0], 'height': actual_size[1], 'is_demo': False}
         except ArkProviderError as error:
-            raise ProviderError(error.message, request_id=error.request_id, uncertain_result=not error.settled, usage=error.usage) from None
+            details = error.diagnostic or diagnostic('unknown_result' if not error.settled else 'unclassified', 'transport')
+            message = MESSAGES[details['category']] if error.diagnostic else error.message
+            if not error.settled and error.diagnostic:
+                message += '本次结果未确认，请先核对记录。'
+            raise ProviderError(message, request_id=error.request_id, uncertain_result=not error.settled,
+                                usage=error.usage, details=details) from None
 
     def generate_background(self, prompt, output_path):
         if not isinstance(prompt, str) or len(prompt) > 4000:
