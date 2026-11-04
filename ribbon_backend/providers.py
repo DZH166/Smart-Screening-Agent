@@ -86,7 +86,12 @@ def workflow_editing(provider, snapshot):
                          and width * height <= 3840 * 2160 and max(width, height) <= 3840)
         reason = '当前长条母版不在本项目OpenAI适配器可直接编辑的尺寸范围内；请修改独立图案或底图。'
     parameters = list(PARAM_DEFAULTS)
-    if snapshot.get('template_mode') in ('fullwidth', 'ends_open'):
+    if snapshot.get('layout_engine') == 'seamless-unit-v1':
+        # A whole-image redraw loses source layers and invalidates the saved
+        # geometric period; independent content edits are recomposed instead.
+        composite = False
+        reason = '循环短图由原图案和底纹组合；请修改独立图案、底纹或间距，程序会重新计算完整循环。'
+    if snapshot.get('template_mode') in ('fullwidth', 'ends_open') and snapshot.get('layout_engine') != 'seamless-unit-v1':
         parameters.remove('spacing')
     operations = ['parameters', 'edit_asset', 'edit_background']
     if snapshot.get('composite_ref'):
@@ -286,7 +291,7 @@ def _draft_background_inputs(pattern_paths, background_path, reference_bytes, *,
         '只生成一张正方形丝带搭配底纹和细小辅助装饰，输出不是最终丝带成稿。'
         '上传的完整人物、文字和主体将由程序保持原样、完整等比叠放；本次不要重绘、复制或新增这些主体与文字。'
         + ''.join(roles) + f'最终排版为：{_DRAFT_MODES[mode]}；疏密：{density_text}。'
-        '底纹低对比、铺满，四边尽量连续；按该布局给后续主体区域留出安静空间，'
+        '底纹低对比、铺满、横向纹理节奏自然，避免跨边的大主体或文字；程序随后会做周期化和接缝检查。按该布局给后续主体区域留出安静空间，'
         '可用细小花、点、线等辅助装饰丰富空隙，不能放抢眼的大焦点。'
         '不新增文字、水印、logo或标志。遵守用户明确配色；用户补充只用于底纹、配色和辅助装饰：'
         + (prompt.strip() or '按所选图案与参考的色彩和风格协调搭配。'))
@@ -488,7 +493,8 @@ You receive text and structured configuration only, not artwork images. Never cl
 Follow snapshot.editing.allowed_operations and allowed_parameters exactly; return at most 8 operations.
 Do not use edit_composite when composite_edit is false. Explain composite_edit_reason and ask for a supported target instead.
 Never silently substitute a background edit for an unsupported whole-picture request if that would change the user's intended scope.
-Use template_mode, template_rules and ordered assets for context. fullwidth and ends_open do not use spacing;
+Use template_mode, template_rules and ordered assets for context. Legacy fullwidth and ends_open do not use spacing;
+seamless-unit-v1 supports spacing in every mode and recalculates its complete horizontal period after edits.
 bordered uses the first asset as its central motif, the rest as border motifs; split/stacked use the first half then the second half;
 scene repeats the selected group; opposed rotates alternate motifs 180 degrees, never mirrors text.
 design-rhythm-v1 fits complete visible motifs proportionally and balances repeat groups using their actual widths.

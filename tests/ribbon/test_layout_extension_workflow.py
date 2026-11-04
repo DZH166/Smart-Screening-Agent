@@ -177,9 +177,19 @@ def test_switching_from_legacy_layout_binds_new_selection_without_rewriting_old_
 
 
 @pytest.mark.parametrize('mode', ('fullwidth', 'ends_open'))
-def test_non_repeating_spacing_request_does_not_fake_a_success_or_charge(service, mode):
+def test_legacy_non_repeating_spacing_request_does_not_fake_a_success_or_charge(service, monkeypatch, mode):
     owner = actor(service)['id']
-    original = generate(service, owner, mode)
+    original_selection = service.selection_snapshot
+    def legacy(*args, **kwargs):
+        snapshot = original_selection(*args, **kwargs)
+        snapshot['layout_engine'] = 'design-rhythm-v2'
+        for key in ('loop', 'loop_layout', 'output_profile_source'):
+            snapshot.pop(key, None)
+        return snapshot
+    with monkeypatch.context() as patch:
+        patch.setattr(service, 'selection_snapshot', legacy)
+        original = generate(service, owner, mode)
+    assert original['versions'][0]['snapshot']['layout_engine'] == 'design-rhythm-v2'
     content = service.version_file(owner, original['current_version_id']).read_bytes()
     job, latest = refine(service, owner, original, '图案间距拉大一点')
     assert job['status'] == 'FAILED' and job['needs_clarification']

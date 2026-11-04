@@ -58,6 +58,15 @@ export type GenerateRequest = Selection & {
   ai_assisted: boolean;
   reference_code: string | null;
 };
+export type Loop = {
+  engine: "seamless-unit-v1";
+  width: number;
+  height: number;
+  status: "checked" | "needs_review";
+  issues: { code: string; message: string; severity: "warning" | "error" }[];
+  kind: "sequence" | "panel";
+  mode_notice?: string;
+};
 export type Snapshot = {
   asset_refs: string[];
   background_ref: string;
@@ -65,6 +74,8 @@ export type Snapshot = {
   template_mode: string;
   template_version: number;
   output_profile: Profile;
+  output_profile_source?: Profile;
+  loop?: Loop;
   params: Record<string, unknown>;
   layout_engine?: string;
   background_tone?: "soft" | "original";

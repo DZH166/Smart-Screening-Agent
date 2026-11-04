@@ -70,6 +70,20 @@ def state(api, work, response):
     return service.job(owner, response.json()['id']), service.design(owner, work['id'])
 
 
+def assert_loop_output(snapshot):
+    """The selected config supplies height/DPI; the unit owns its actual width."""
+    assert snapshot['layout_engine'] == 'seamless-unit-v1'
+    loop, profile, source = snapshot['loop'], snapshot['output_profile'], snapshot['output_profile_source']
+    assert loop['engine'] == 'seamless-unit-v1'
+    assert loop['production_verified'] is False
+    assert profile['width'] == loop['width'] and profile['width'] > 0
+    assert profile['height'] == loop['height'] == source['height'] == 240
+    assert profile['dpi'] == source['dpi'] == 96
+    assert source['width'] == 1080
+    assert {key: value for key, value in profile.items() if key != 'width'} == {
+        key: value for key, value in source.items() if key != 'width'}
+
+
 def install_synthetic_reference(api, monkeypatch):
     output = BytesIO()
     with Image.new('RGB', (48, 24), '#ccbb99') as image:
@@ -122,7 +136,8 @@ def test_old_client_payload_never_reads_reference_or_acquires_provider(api):
     job, final = state(api, work, response)
     saved = final['versions'][0]['snapshot']
     assert job['status'] == 'SUCCEEDED' and final['successful_refinement_count'] == 0
-    assert saved['layout_engine'] == 'design-rhythm-v2' and 'ai_draft' not in saved
+    assert_loop_output(saved)
+    assert 'ai_draft' not in saved
     assert saved['background_ref'] == choice['background_id']
 
 
@@ -147,6 +162,7 @@ def test_ai_draft_calls_once_keeps_original_patterns_and_binds_download_provenan
     assert call['background'] == source[choice['background_id']] and call['reference'] == value
     assert call['options'] == dict(mode='grid', density='balanced', prompt='')
     version = final['versions'][0]; snapshot = version['snapshot']
+    assert_loop_output(snapshot)
     assert snapshot['asset_refs'] == choice['asset_ids'] and snapshot['background_ref'] != choice['background_id']
     assert snapshot['ai_draft']['original_background_ref'] == choice['background_id']
     assert snapshot['ai_draft']['reference_code'] == code
@@ -165,6 +181,9 @@ def test_ai_draft_calls_once_keeps_original_patterns_and_binds_download_provenan
     assert final['successful_refinement_count'] == 0
     downloaded = client.get(version['download_url'])
     assert downloaded.status_code == 200 and downloaded.content == service.version_file(owner, version['id']).read_bytes()
+    with Image.open(BytesIO(downloaded.content)) as image:
+        assert image.size == (snapshot['loop']['width'], snapshot['loop']['height'])
+        assert image.info['dpi'] == pytest.approx((96, 96), abs=.02)
 
 
 @pytest.mark.parametrize('corruption', ['reference_bytes', 'reference_spec', 'last_pattern', 'background_identity'])
@@ -269,6 +288,9 @@ def test_historical_v1_defaults_and_density_edit_keep_the_saved_engine_and_downl
     original = service.selection_snapshot
     def historical(*args, **kwargs):
         snapshot = original(*args, **kwargs)
+        snapshot['output_profile'] = snapshot.pop('output_profile_source', snapshot['output_profile'])
+        snapshot.pop('loop', None)
+        snapshot.pop('loop_layout', None)
         snapshot['layout_engine'] = 'design-rhythm-v1'
         snapshot.pop('background_tone', None)
         snapshot.pop('design_density', None)
@@ -287,6 +309,8 @@ def test_historical_v1_defaults_and_density_edit_keep_the_saved_engine_and_downl
     assert job['status'] == 'SUCCEEDED'
     latest = final['versions'][-1]['snapshot']
     assert latest['layout_engine'] == 'design-rhythm-v1' and latest['design_density'] == 'airy'
+    assert 'loop' not in latest and 'output_profile_source' not in latest
+    assert latest['output_profile'] == previous['snapshot']['output_profile']
     assert latest['background_tone'] == 'soft' and final['successful_refinement_count'] == 1
     assert final['versions'][0] == previous and service.version_file(owner, previous['id']).read_bytes() == content
     assert provider.calls == []

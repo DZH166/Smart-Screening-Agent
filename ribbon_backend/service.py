@@ -37,8 +37,8 @@ EXTENDED_MODES = frozenset({'bordered', 'scene', 'fullwidth', 'alternating', 'en
 NON_REPEATING_MODES = frozenset({'fullwidth', 'ends_open'})
 ASSET_PREVIEW_VERSION = 'asset-preview-v1'
 ASSET_PREVIEW_SIZE = (640, 640)
-LAYOUT_ENGINE = 'design-rhythm-v2'
-QUALITY_LAYOUT_ENGINES = frozenset({'design-rhythm-v1', LAYOUT_ENGINE})
+LAYOUT_ENGINE = 'seamless-unit-v1'
+QUALITY_LAYOUT_ENGINES = frozenset({'design-rhythm-v1', 'design-rhythm-v2', LAYOUT_ENGINE})
 BACKGROUND_TONES = frozenset({'soft', 'original'})
 DESIGN_DENSITIES = frozenset({'airy', 'balanced', 'rich'})
 TERMINAL = ('SUCCEEDED', 'FAILED')
@@ -797,6 +797,8 @@ class Service:
         elif density != 'balanced':
             raise ServiceError(422, '旧版作品保留原排版方式；如需选择疏密，请新建作品')
         result.update(asset_refs=ids, background_ref=selection['background_id'], template_id=template['id'], template_version=template['version'], template_mode=template['mode'], template_rules=json.loads(template['rules_json']), output_profile=profile)
+        if result.get('layout_engine') == LAYOUT_ENGINE:
+            result.setdefault('output_profile_source', copy.deepcopy(profile))
         result.pop('composite_ref', None)
         return result
 
@@ -958,9 +960,10 @@ class Service:
         with self.db.transaction() as db:
             db.execute("UPDATE jobs SET phase=?,updated_at=? WHERE id=? AND attempt=? AND status='RUNNING'", (message, now(), job['id'], job['attempt']))
 
-    def call_provider(self, job, operation, fn):
+    def call_provider(self, job, operation, fn, *, render_snapshot=None):
         payload = json.loads(job['payload_json'])
-        expected = estimate_render_space(payload['snapshot']) if payload.get('snapshot') else 0
+        bound_render = render_snapshot if render_snapshot is not None else payload.get('snapshot')
+        expected = estimate_render_space(bound_render) if bound_render else 0
         # Native model result plus an atomic/adapted copy. Recheck for every
         # operation; other HSD tasks may consume space while a model is waiting.
         self.check_space(self.root / 'jobs' / job['id'] / str(job['attempt']),
@@ -1066,7 +1069,7 @@ class Service:
                 effective = []
         if not effective and not selection_changed:
             message = '本次没有可执行的修改，请说明需要改变的大小、位置、底图或图案内容'
-            if snapshot.get('template_mode') in NON_REPEATING_MODES:
+            if snapshot.get('template_mode') in NON_REPEATING_MODES and snapshot.get('layout_engine') != LAYOUT_ENGINE:
                 message += '；该排版不使用重复间距'
             raise ClarificationNeeded(message)
         return effective
@@ -1113,6 +1116,18 @@ class Service:
                     return self.verified_file(asset['path'], asset['sha256'], '本次派生素材')
             return self.verified_asset_path(job['owner_id'], asset_id)
 
+        def prepared_loop(value):
+            from .loop_pipeline import resolve as resolve_loop
+            try:
+                return resolve_loop(value, resolve)
+            except ValueError as error:
+                # These are local bounded geometry checks, not provider bodies.
+                raise ServiceError(422, str(error)) from None
+
+        def call_model(operation, fn):
+            bound = prepared_loop(snapshot) if snapshot.get('layout_engine') == LAYOUT_ENGINE else snapshot
+            return self.call_provider(job, operation, fn, render_snapshot=bound)
+
         if job['kind'] == 'background':
             self.phase(job, '正在生成底图')
             path = directory / 'background.png'
@@ -1128,6 +1143,9 @@ class Service:
         if not (job['kind'] == 'generate' and payload.get('ai_assisted') is True):
             for asset_id in self.snapshot_asset_ids(snapshot):
                 resolve(asset_id)
+        if snapshot.get('layout_engine') == LAYOUT_ENGINE:
+            # Geometry/resource errors should precede any paid generation.
+            snapshot = prepared_loop(snapshot)
         prompt, render_kind = '', 'layered'
         if job['kind'] == 'generate' and payload.get('ai_assisted') is True:
             inputs = payload.get('ai_draft_inputs') or {}
@@ -1144,7 +1162,7 @@ class Service:
                 reference_bytes = self.verified_draft_reference(code, snapshot['template_mode'], payload['reference_sha256'])
             self.phase(job, '正在生成搭配底纹与辅助装饰，原图案保持不变')
             output = directory / 'draft-background.png'
-            self.call_provider(job, 'design_background', lambda: provider.generate_draft_background(
+            call_model('design_background', lambda: provider.generate_draft_background(
                 pattern_paths, background_path, reference_bytes, output,
                 mode=snapshot['template_mode'], density=snapshot.get('design_density', 'balanced'), prompt=''))
             with Image.open(output) as native:
@@ -1169,7 +1187,7 @@ class Service:
             if payload.get('selection') and prompt.strip() in ('应用所选配置', '应用新的素材与排版'):
                 plan = {'operations': [], 'summary': '应用所选配置'}
             else:
-                plan = self.call_provider(job, 'plan', lambda: provider.plan(prompt, snapshot, assets))
+                plan = call_model('plan', lambda: provider.plan(prompt, snapshot, assets))
             selection_changed = self.refinement_selection_changed(job, payload, snapshot)
             operations = self.effective_edit_operations(job['provider'], snapshot, plan, selection_changed)
             plan = {**plan, 'operations': operations}
@@ -1231,7 +1249,7 @@ class Service:
                         render(snapshot, resolve, source, directory / f'before-preview-{index}.png')
                         original, asset_kind = snapshot.get('composite_ref'), 'composite'
                     output = directory / f'edited-{index}.png'
-                    self.call_provider(job, kind, lambda: provider.edit_image(edit_prompt, source, output, kind.removeprefix('edit_')))
+                    call_model(kind, lambda: provider.edit_image(edit_prompt, source, output, kind.removeprefix('edit_')))
                     replacement = derived(output, asset_kind, '精修派生素材', original)
                     if kind == 'edit_asset':
                         snapshot['asset_refs'] = [replacement if a == original else a for a in snapshot['asset_refs']]
@@ -1245,9 +1263,22 @@ class Service:
                     raise ServiceError(422, '编辑计划包含不支持的操作')
             snapshot['edit_plan'] = plan
         render_kind = 'composite' if snapshot.get('composite_ref') else 'layered'
-        self.phase(job, '正在合成并检查保存文件')
+        self.phase(job, '正在合成并检查循环单元' if snapshot.get('layout_engine') == LAYOUT_ENGINE else '正在合成并检查保存文件')
+        if snapshot.get('layout_engine') == LAYOUT_ENGINE:
+            # New backgrounds, content proportions and numeric edits can all
+            # change the complete period. Never reuse a parent's old width.
+            snapshot = prepared_loop(snapshot)
         master, preview = directory / 'master.png', directory / 'preview.png'
-        metadata = render(snapshot, resolve, master, preview)
+        try:
+            metadata = render(snapshot, resolve, master, preview)
+        except ValueError as error:
+            if snapshot.get('layout_engine') == LAYOUT_ENGINE:
+                raise ServiceError(422, str(error)) from None
+            raise
+        if snapshot.get('layout_engine') == LAYOUT_ENGINE:
+            snapshot['loop'] = metadata['loop']
+            snapshot['loop']['output_sha256'] = file_digest(master)
+            snapshot['loop']['inputs'] = [dict(id=a, sha256=file_digest(resolve(a))) for a in [*snapshot['asset_refs'], snapshot['background_ref']]]
         snapshot['object_transforms'] = metadata.get('object_transforms', [])
         snapshot['local_patches'] = []
         capabilities = {'parameters': 'parameters', 'edit_asset': 'asset_edit',
@@ -1283,6 +1314,9 @@ class Service:
             if digest(master.read_bytes()) != artifact['master_sha256']:
                 raise ServiceError(422, '保存结果校验失败')
             validate_image(master, artifact['snapshot']['output_profile'])
+            if artifact['snapshot'].get('layout_engine') == LAYOUT_ENGINE:
+                from .loop_pipeline import validate_binding
+                validate_binding(artifact['snapshot'], artifact['master_sha256'])
             preview = self.safe_path(artifact['preview_path'])
             if not artifact.get('preview_sha256') or file_digest(preview) != artifact['preview_sha256']:
                 raise ServiceError(422, '保存预览校验失败')
@@ -1293,6 +1327,18 @@ class Service:
             new_ids = {asset['id'] for asset in artifact['assets']}
             for asset_id in self.snapshot_asset_ids(artifact['snapshot']) - new_ids:
                 self.verified_asset_path(job['owner_id'], asset_id)
+            saved = artifact['snapshot']
+            if saved.get('layout_engine') == LAYOUT_ENGINE:
+                identities = {a['id']: a['sha256'] for a in artifact['assets']}
+                with self.db.connect() as db:
+                    bound = []
+                    for a in [*saved['asset_refs'], saved['background_ref']]:
+                        sha = identities.get(a)
+                        if sha is None:
+                            sha = self.accessible_asset(db, a, job['owner_id'])['sha256']
+                        bound.append(dict(id=a, sha256=sha))
+                if saved['loop'].get('inputs') != bound:
+                    raise ServiceError(422, '循环素材来源与保存版本不一致')
         if job['kind'] == 'refine':
             # Also applies to a recovered immutable artifact. A numeric edit
             # may quantise to the same raster, or a model may return a copy.

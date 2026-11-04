@@ -46,6 +46,22 @@ def generate(service):
     return identity, service.design(identity, design['id'])
 
 
+def legacy_generate(service, monkeypatch):
+    """Exercise saved v2 whole-image capabilities without changing new drafts."""
+    selection_snapshot = service.selection_snapshot
+
+    def legacy(*args, **kwargs):
+        saved = selection_snapshot(*args, **kwargs)
+        saved['layout_engine'] = 'design-rhythm-v2'
+        for key in ('output_profile_source', 'loop', 'loop_layout'):
+            saved.pop(key, None)
+        return saved
+
+    with monkeypatch.context() as patch:
+        patch.setattr(service, 'selection_snapshot', legacy)
+        return generate(service)
+
+
 def refine(service, identity, design, prompt='合成修改请求', choice=None):
     body = dict(idempotency_key=str(uuid4()), base_version_id=design['current_version_id'], prompt=prompt)
     if choice is not None:
@@ -68,11 +84,13 @@ def assert_unchanged(service, identity, original, latest, content):
     assert service.version_file(identity, original['current_version_id']).read_bytes() == content
 
 
-def test_config_and_historical_version_project_current_provider_without_rewriting_snapshot(service):
+def test_config_and_historical_version_project_current_provider_without_rewriting_snapshot(service, monkeypatch):
     service.save_profile(dict(name='合成可整幅尺寸', width=1024, height=1024,
                               dpi=96, format='PNG', is_demo=True))
-    identity, design = generate(service)
+    identity, design = legacy_generate(service, monkeypatch)
     version = design['versions'][0]
+    assert version['snapshot']['layout_engine'] == 'design-rhythm-v2'
+    assert version['snapshot']['output_profile']['width'] == version['snapshot']['output_profile']['height'] == 1024
     content = service.version_file(identity, version['id']).read_bytes()
     with service.db.connect() as db:
         stored = db.execute('SELECT snapshot_json FROM versions WHERE id=?', (version['id'],)).fetchone()[0]
@@ -196,8 +214,10 @@ def test_formal_composite_is_rejected_before_flatten_or_image_request(service, m
     monkeypatch.setattr(SyntheticProvider, 'edit_image', lambda *args: pytest.fail('unsupported composite called model'))
     job, latest = refine(service, identity, original)
     assert job['status'] == 'FAILED' and job['needs_clarification']
-    assert '长条' in job['error']
+    assert '循环' in job['error']
     assert_unchanged(service, identity, original, latest, content)
+    with service.db.connect() as db:
+        assert db.execute("SELECT COUNT(*) FROM provider_calls WHERE job_id=? AND operation IN ('edit_asset','edit_background','edit_composite','design_background','generate_background')", (job['id'],)).fetchone()[0] == 0
 
 
 @pytest.mark.parametrize('later', [
@@ -249,7 +269,7 @@ def test_fresh_claim_and_recovery_use_distinct_truthful_phases(service):
     ('edit_composite', '正在修改整幅画面'),
 ])
 def test_image_target_phase_is_visible_before_synthetic_editor(service, monkeypatch, operation, expected_phase):
-    identity, original = generate(service)
+    identity, original = legacy_generate(service, monkeypatch) if operation == 'edit_composite' else generate(service)
     op = dict(type=operation, prompt='添加星光' if operation != 'edit_background' else '添加波点')
     if operation == 'edit_asset':
         op['asset_id'] = original['versions'][0]['snapshot']['asset_refs'][0]
@@ -340,6 +360,7 @@ def test_input_precheck_uses_visible_opaque_override_of_transparent_background(s
     first = service.submit(identity, 'generate', dict(idempotency_key=str(uuid4()), **choice), work['id'])
     assert service.run_once() and service.job(identity, first['id'])['status'] == 'SUCCEEDED'
     original = service.design(identity, work['id'])
+    assert original['versions'][0]['snapshot']['layout_engine'] == 'seamless-unit-v1'
     plan(monkeypatch, [dict(type='parameters', values={'background_color': '#345678'}),
                        dict(type='edit_background', prompt='添加波点')])
     events = []

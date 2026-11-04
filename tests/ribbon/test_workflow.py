@@ -104,6 +104,24 @@ class Harness:
         return response.content
 
 
+def legacy_generate(env, monkeypatch):
+    """Keep old composite contracts bound to their original v2 engine."""
+    selection_snapshot = env.service.selection_snapshot
+
+    def legacy(*args, **kwargs):
+        saved = selection_snapshot(*args, **kwargs)
+        saved['layout_engine'] = 'design-rhythm-v2'
+        for key in ('output_profile_source', 'loop', 'loop_layout'):
+            saved.pop(key, None)
+        return saved
+
+    with monkeypatch.context() as patch:
+        patch.setattr(env.service, 'selection_snapshot', legacy)
+        design = env.generate()
+    assert design['versions'][0]['snapshot']['layout_engine'] == 'design-rhythm-v2'
+    return design
+
+
 @pytest.fixture
 def env(tmp_path):
     settings = Settings(data_dir=tmp_path / "data", provider="test", start_worker=False)
@@ -353,8 +371,8 @@ def test_pattern_content_edit_preserves_original_and_unrequested_asset(env):
     assert env.download(latest["id"]) != env.download(first["id"])
 
 
-def test_whole_image_after_parameter_edit_flattens_actual_current_master(env):
-    design = env.refined(env.generate(), "图案缩小一些")
+def test_whole_image_after_parameter_edit_flattens_actual_current_master(env, monkeypatch):
+    design = env.refined(legacy_generate(env, monkeypatch), "图案缩小一些")
     before = env.download(design["current_version_id"])
     modified = env.refined(design, "整体添加星光")
     latest = next(v for v in modified["versions"] if v["id"] == modified["current_version_id"])
@@ -365,8 +383,8 @@ def test_whole_image_after_parameter_edit_flattens_actual_current_master(env):
     assert env.download(latest["id"]) != before
 
 
-def test_flattened_version_rejects_fake_layer_adjustment_without_charging(env):
-    design = env.refined(env.generate(), "整体添加星光")
+def test_flattened_version_rejects_fake_layer_adjustment_without_charging(env, monkeypatch):
+    design = env.refined(legacy_generate(env, monkeypatch), "整体添加星光")
     failed = env.work(ok(env.refine(design, "图案缩小一些")))
     assert failed["status"] == "FAILED" and failed["needs_clarification"]
     saved = env.get(design)
@@ -530,7 +548,15 @@ def test_admin_configuration_creates_new_versions_without_rewriting_history(env)
     new = env.generate(selection=selection)
     new_version = new["versions"][0]
     assert new_version["snapshot"]["output_profile"]["version"] == profile["version"]
-    assert Image.open(io.BytesIO(env.download(new_version["id"]))).size == (1200, 300)
+    snapshot = new_version["snapshot"]
+    assert snapshot["layout_engine"] == "seamless-unit-v1"
+    assert snapshot["output_profile_source"] == profile
+    assert snapshot["output_profile_source"]["width"] == 1200
+    assert snapshot["output_profile_source"]["height"] == snapshot["output_profile"]["height"] == 300
+    assert snapshot["loop"]["width"] == snapshot["output_profile"]["width"]
+    with Image.open(io.BytesIO(env.download(new_version["id"]))) as image:
+        assert image.size == (snapshot["output_profile"]["width"], 300)
+        assert abs(image.info["dpi"][0] - 144) < 1
 
 
 @pytest.mark.parametrize("failure_at", ["provider", "render", "file_save"])
@@ -716,8 +742,8 @@ def test_failed_provider_call_preserves_reported_usage_without_charging_refineme
 
 
 @pytest.mark.parametrize('source_kind', ['pattern', 'background', 'composite'])
-def test_changed_source_is_rejected_before_paid_planning_or_quota_charge(env, source_kind):
-    design = env.generate()
+def test_changed_source_is_rejected_before_paid_planning_or_quota_charge(env, source_kind, monkeypatch):
+    design = legacy_generate(env, monkeypatch) if source_kind == 'composite' else env.generate()
     if source_kind == 'composite':
         design = env.refined(design, '整体添加星光')
     before = env.download(design['current_version_id'])

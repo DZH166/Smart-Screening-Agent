@@ -259,7 +259,7 @@ function recommendedSelection(
 
 function restoreSelection(value: Selection, version?: Version): Selection {
   const snapshot = version?.snapshot;
-  const modern = !version || ["design-rhythm-v1", "design-rhythm-v2"].includes(snapshot?.layout_engine || "");
+  const modern = !version || ["design-rhythm-v1", "design-rhythm-v2", "seamless-unit-v1"].includes(snapshot?.layout_engine || "");
   const next: Selection = {
     ...value,
     background_tone: value.background_tone ?? snapshot?.background_tone ?? (modern ? "soft" : "original"),
@@ -271,6 +271,58 @@ function restoreSelection(value: Selection, version?: Version): Selection {
     delete next.design_density;
   }
   return next;
+}
+
+function LoopPreview({ version, sizeLabel }: { version: Version; sizeLabel: string }) {
+  const [continuous, setContinuous] = useState(false);
+  const [seams, setSeams] = useState(false);
+  const loop = version.snapshot.loop!;
+  const source = version.snapshot.output_profile_source;
+  return <div className="loop-preview">
+    <div className="loop-view-heading">
+      <strong>{continuous ? "连续效果预览" : "循环单元"}</strong>
+      <span>{continuous ? "同一单元横向重复 3 次" : sizeLabel}</span>
+    </div>
+    <div className="loop-unit-view" hidden={continuous}>
+      <img src={version.preview_url} decoding="async" alt={`${versionName(version)}的循环单元预览`} />
+    </div>
+    {/* Keep the same URLs mounted: changing the view only changes visibility,
+        never requests a new master or a separately rendered long-strip file. */}
+    <div className="loop-continuity" hidden={!continuous}>
+      <div className={`loop-continuity-track ${seams ? "show-seams" : ""}`}>
+        {[0, 1, 2].map(index => <div className="loop-repeat" key={index}>
+          <img src={version.preview_url} decoding="async" alt={index === 0 ? `${versionName(version)}的三次连续效果预览` : ""} />
+        </div>)}
+      </div>
+    </div>
+    <div className="loop-preview-tools">
+      <button type="button" className="loop-view-button" aria-pressed={continuous}
+        onClick={() => setContinuous(value => !value)}>
+        {continuous ? "返回循环单元" : "查看连续效果"}
+      </button>
+      {continuous && <label className="loop-seam-toggle">
+        <input type="checkbox" checked={seams} onChange={event => setSeams(event.target.checked)} />显示接缝位置
+      </label>}
+    </div>
+    <p className="loop-preview-note">页面展示缩小预览；下载为一个原尺寸循环单元，连续效果仅供查看。</p>
+    <div className={`loop-check ${loop.status === "checked" ? "checked" : "needs-review"}`}>
+      <strong>{loop.status === "checked" ? "工程循环检查通过" : "循环效果需要复核"}</strong>
+      {loop.status === "checked" && <span>画面与印刷效果仍需人工确认。</span>}
+      {!!loop.issues?.length && <ul aria-label="循环检查提示">
+        {loop.issues.map((issue, index) => <li key={`${issue.code}:${index}`} className={issue.severity}>{issue.message}</li>)}
+      </ul>}
+    </div>
+    {loop.mode_notice && <p className="loop-mode-notice">{loop.mode_notice}</p>}
+    <details className="loop-technical-details">
+      <summary>技术详情</summary>
+      <dl>
+        <div><dt>下载尺寸</dt><dd>{sizeLabel || `${loop.width}×${loop.height}px`}</dd></div>
+        <div><dt>循环方式</dt><dd>{loop.kind === "panel" ? "定位区段循环" : "图案序列循环"}</dd></div>
+        <div><dt>检查引擎</dt><dd>{loop.engine}</dd></div>
+        {source && <div><dt>来源配置</dt><dd>{source.name}{source.width && source.height ? ` · ${source.width}×${source.height}px` : ""}</dd></div>}
+      </dl>
+    </details>
+  </div>;
 }
 type Pending = {
   path: string;
@@ -398,6 +450,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
     locked = busy || processing || !!pending || uploading || !!designTarget;
   const isHistory = !!selected && selected.id !== design?.current_version_id;
   const shownProfile = selected?.snapshot?.output_profile;
+  const selectedLoop = selected?.snapshot.loop?.engine === "seamless-unit-v1";
   const sizeLabel =
     shownProfile?.width && shownProfile?.height && shownProfile?.dpi
       ? `${shownProfile.width}×${shownProfile.height}px · ${shownProfile.dpi} DPI · ` +
@@ -521,7 +574,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                 background_id: v.snapshot.background_ref,
                 template_id: v.snapshot.template_id,
                 background_tone: v.snapshot.background_tone || "original",
-                ...(["design-rhythm-v1", "design-rhythm-v2"].includes(v.snapshot.layout_engine || "") ? {design_density: v.snapshot.design_density || "balanced"} : {}),
+                ...(["design-rhythm-v1", "design-rhythm-v2", "seamless-unit-v1"].includes(v.snapshot.layout_engine || "") ? {design_density: v.snapshot.design_density || "balanced"} : {}),
               }
             : emptySelection;
       setSelection(restoreSelection(next, v));
@@ -1313,7 +1366,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                   <p className="layout-selection-help">{layoutHints[template.mode]}</p>
                 )}
                 {layoutIssue && <p className="layout-selection-issue" id="ribbon-layout-issue" role="alert">{layoutIssue}</p>}
-                {(!current || ["design-rhythm-v1", "design-rhythm-v2"].includes(current.snapshot.layout_engine || "")) && (
+                {(!current || ["design-rhythm-v1", "design-rhythm-v2", "seamless-unit-v1"].includes(current.snapshot.layout_engine || "")) && (
                   <label className="density-control">画面密度
                     <select aria-label="画面密度" value={selection.design_density || "balanced"} disabled={locked}
                       onChange={(event) => updateSelection({ ...selection, design_density: event.target.value as Selection["design_density"] })}>
@@ -1434,7 +1487,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                         download
                       >
                         <Icon name="download" size={17} />
-                        {isHistory ? "下载所选版本" : "下载当前图"}
+                        {isHistory ? "下载所选版本" : selectedLoop ? "下载循环单元" : "下载当前图"}
                       </a>
                     </div>
                 ) : (
@@ -1495,6 +1548,8 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                     <div className="empty-canvas design-loading" role="status" aria-live="polite">
                       {designTarget.loading ? <><span className="spinner" /><h3>正在打开作品…</h3><p>正在读取所选作品的版本和素材。</p></> : <><h3>作品打开失败</h3><p>请重试，或从“我的作品”选择其他作品。</p><button className="secondary" onClick={() => void switchDesign(designTarget.id)}>重试打开作品</button></>}
                     </div>
+                  ) : selected && selectedLoop ? (
+                    <LoopPreview key={`${design?.id}:${selected.id}`} version={selected} sizeLabel={sizeLabel} />
                   ) : selected ? (
                     <>
                       <div className={`ribbon-display ${previewZoom}`}>

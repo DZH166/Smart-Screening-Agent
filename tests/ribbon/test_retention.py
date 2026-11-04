@@ -388,11 +388,15 @@ def test_graceful_stop_waits_for_already_accepted_operation(service, monkeypatch
 
 def test_upload_pixel_decode_waits_for_renderer_allocation(service, monkeypatch, tmp_path):
     from ribbon_backend import imaging
+    from ribbon_backend.loop_pipeline import resolve as resolve_loop
     actor = user(service)
     owner = actor['id']
     with service.db.connect() as db:
         snapshot = service.selection_snapshot(db, owner, selection(service, owner))
         paths = {r['id']: Path(r['path']) for r in db.execute('SELECT id,path FROM assets')}
+    # Width/resource preflight precedes the intentionally delayed render read;
+    # the actual render must still hold the shared allocation lock throughout.
+    snapshot = resolve_loop(snapshot, paths.__getitem__)
     first = paths[snapshot['asset_refs'][0]]
     entered, release, upload_started, upload_done = (threading.Event() for _ in range(4))
     real_read = imaging.read_image

@@ -49,15 +49,21 @@ def current(design):
     return next(row for row in design['versions'] if row['id'] == design['current_version_id'])
 
 
-def legacy_generate(env, monkeypatch):
+def legacy_generate(env, monkeypatch, engine=None):
     service, _, _ = env
     original = service.selection_snapshot
 
     def legacy(*args, **kwargs):
         snapshot = original(*args, **kwargs)
-        snapshot.pop('layout_engine', None)
-        snapshot.pop('background_tone', None)
-        snapshot.pop('design_density', None)
+        snapshot['output_profile'] = snapshot.pop('output_profile_source', snapshot['output_profile'])
+        snapshot.pop('loop', None)
+        snapshot.pop('loop_layout', None)
+        if engine is None:
+            snapshot.pop('layout_engine', None)
+            snapshot.pop('background_tone', None)
+            snapshot.pop('design_density', None)
+        else:
+            snapshot['layout_engine'] = engine
         return snapshot
 
     with monkeypatch.context() as patch:
@@ -138,8 +144,12 @@ def test_legacy_tiny_spacing_quantisation_does_not_charge_or_create_a_version(en
         assert db.execute("SELECT COUNT(*) FROM provider_calls WHERE operation='plan'").fetchone()[0] == 1
 
 
-def test_new_repeat_spacing_quantisation_does_not_charge_or_create_a_version(env, monkeypatch):
-    initial = generate(env)
+def test_v2_repeat_spacing_quantisation_does_not_charge_or_create_a_version(env, monkeypatch):
+    # This regression belongs to v2's fixed-width repeat quantisation. New loop
+    # versions calculate their own period and have independent geometry checks.
+    initial = legacy_generate(env, monkeypatch, engine='design-rhythm-v2')
+    assert current(initial)['snapshot']['layout_engine'] == 'design-rhythm-v2'
+    assert current(initial)['snapshot']['output_profile']['width'] == 1080
     monkeypatch.setattr(SyntheticProvider, 'plan', lambda *args: {
         'summary': '合成整周期量化', 'operations': [{'type': 'parameters', 'values': {'spacing': 1.01}}]})
     job, latest = refine(env, initial)
@@ -148,6 +158,7 @@ def test_new_repeat_spacing_quantisation_does_not_charge_or_create_a_version(env
     assert latest['successful_refinement_count'] == 0
     assert latest['current_version_id'] == initial['current_version_id']
     assert len(latest['versions']) == 1
+    assert current(latest)['snapshot'] == current(initial)['snapshot']
 
 
 def test_explicit_legacy_tone_change_is_real_versioned_and_rollback_keeps_original(env, monkeypatch):
