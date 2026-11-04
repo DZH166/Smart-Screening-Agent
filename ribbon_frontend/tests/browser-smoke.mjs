@@ -461,7 +461,7 @@ try {
   assert.equal(await generateButton.isEnabled(), false, "multiple patterns cannot be submitted as a whole fixed design");
   await setPatterns(["demo-flower"]);
   assert.equal(await generateButton.isEnabled(), true);
-  assert.match(await page.locator(".layout-selection-help").innerText(), /重复间距不适用/);
+  assert.match(await page.locator(".layout-selection-help").innerText(), /整幅作为一个单元重复/);
   for (const mode of ["bordered", "split", "stacked"]) {
     await selectLayout(mode);
     assert.match(await page.locator(".layout-selection-issue").innerText(), /至少需要 2 个/);

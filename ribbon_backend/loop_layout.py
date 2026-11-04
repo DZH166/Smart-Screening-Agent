@@ -231,7 +231,11 @@ def _build(snapshot, specs, *, background_period=None, target_period=None):
                           variants=[(i, factors[i], 0., mode) for i in all_ids], baseline=True)], mode)
     elif mode in ('ends', 'ends_open'):
         main = _size(specs[0], h * .84 * .92 * scale, h * .84, angle)
-        other = _size(specs[1 if n == 2 else 0], h * .84 * .92 * scale, h * .84, angle)
+        # Only ends_open assigns a second full-size end design. In ends, the
+        # second selected source is an inner motif, fitted below at the actual
+        # small height; validating it as a large end can reject a valid unit.
+        other = (_size(specs[1], h * .84 * .92 * scale, h * .84, angle)
+                 if mode == 'ends_open' and n == 2 else main)
         gap = max(2., h * .84 * .16 * spacing)
         boundary = max(gap, .35 * max(main[2], other[2] if mode == 'ends_open' else main[2]))
         if mode == 'ends':

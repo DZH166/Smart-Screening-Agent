@@ -259,6 +259,21 @@ def test_padding_and_faint_ornaments_remain_complete(artwork, tmp_path):
     canvas.close(); other.close()
 
 
+def test_two_asset_ends_fits_wide_inner_at_its_real_small_height():
+    # At main height this 50:1 auxiliary design would exceed 16000px. Its
+    # intended small height and the two actual mains fit the full unit safely.
+    resolved = loop.resolve(snapshot('ends', 2), specs=specs(((80, 160), (1000, 20))))
+    rows = loop.plan(resolved)
+    assert [p['role'] for p in rows] == ['left-end', 'inner', 'right-end']
+    assert [p['asset_index'] for p in rows] == [0, 1, 0]
+    assert resolved['output_profile']['height'] == 520
+    assert resolved['output_profile']['width'] < 16000
+    assert rows[1]['planned_width'] > 10000
+    assert rows[1]['planned_height'] < min(rows[0]['planned_height'], rows[2]['planned_height'])
+    assert rows[1]['target_width'] / rows[1]['target_height'] == pytest.approx(50, rel=.01)
+    assert resolved['loop_layout']['verification']['source_coverage_complete'] is True
+
+
 def test_saved_geometry_cannot_silently_drift_or_rewrite_legacy():
     snap = snapshot()
     resolved = loop.resolve(snap, specs=specs())
