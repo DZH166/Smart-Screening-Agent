@@ -91,7 +91,15 @@ def test_added_mode_real_generate_branch_refine_and_pinned_download(service, mod
         refine(service, owner, two)
 
 
-def test_fullwidth_at_safe_box_limit_cannot_fake_enlargement_or_charge(service):
+def test_fullwidth_at_safe_box_limit_cannot_fake_enlargement_or_charge(service, monkeypatch):
+    make_snapshot = service.selection_snapshot
+    def capped_snapshot(*args, **kwargs):
+        snapshot = make_snapshot(*args, **kwargs)
+        # v2 balanced density intentionally leaves room to enlarge. Start this
+        # no-op regression at a verified saturated size, not at its default.
+        snapshot['params']['scale'] = 2.0
+        return snapshot
+    monkeypatch.setattr(service, 'selection_snapshot', capped_snapshot)
     owner = actor(service)['id']
     original = generate(service, owner, 'fullwidth')
     version = original['versions'][0]
@@ -103,7 +111,7 @@ def test_fullwidth_at_safe_box_limit_cannot_fake_enlargement_or_charge(service):
     content = service.version_file(owner, original['current_version_id']).read_bytes()
     job, latest = refine(service, owner, original, '图案放大一些')
     assert job['status'] == 'FAILED' and job['needs_clarification']
-    assert '像素相同' in job['error']
+    assert '达到布局边界' in job['error'] or '实际变化太小' in job['error']
     assert latest['current_version_id'] == original['current_version_id']
     assert latest['successful_refinement_count'] == 0 and len(latest['versions']) == 1
     assert service.version_file(owner, latest['current_version_id']).read_bytes() == content
@@ -112,7 +120,6 @@ def test_fullwidth_at_safe_box_limit_cannot_fake_enlargement_or_charge(service):
 
 
 @pytest.mark.parametrize('mode,count,message', [
-    ('bordered', 1, '至少选择2个'),
     ('fullwidth', 2, '请选择1张完整设计'),
     ('ends_open', 3, '请选择1或2个'),
     ('split', 1, '至少选择2个'),
@@ -130,6 +137,42 @@ def test_invalid_pattern_count_rejects_generate_without_job_or_charge(service, m
         assert db.execute('SELECT COUNT(*) FROM quota_events WHERE design_id=?', (design['id'],)).fetchone()[0] == 0
 
 
+def test_v2_bordered_accepts_one_main_with_real_continuous_line_border(service):
+    owner = actor(service)['id']
+    design = service.create_design(owner, 'Single main with continuous borders')
+    selection = choices(service, owner, 'bordered', 1)
+    job = service.submit(owner, 'generate', dict(idempotency_key=str(uuid4()), **selection), design['id'])
+    assert service.run_once()
+    assert service.job(owner, job['id'])['status'] == 'SUCCEEDED'
+    latest = service.design(owner, design['id'])
+    snapshot = latest['versions'][0]['snapshot']
+    assert snapshot['layout_engine'] == 'seamless-unit-v2'
+    assert snapshot['asset_refs'] == selection['asset_ids']
+    assert snapshot['loop']['background']['border']['style'] == 'continuous_lines'
+    assert snapshot['loop']['background']['border']['source'] is None
+    assert latest['successful_refinement_count'] == 0
+
+
+def test_legacy_bordered_still_requires_two_patterns_on_selection_edit(service, monkeypatch):
+    owner = actor(service)['id']
+    make_snapshot = service.selection_snapshot
+    def historical_snapshot(*args, **kwargs):
+        snapshot = make_snapshot(*args, **kwargs)
+        snapshot['layout_engine'] = 'seamless-unit-v1'
+        return snapshot
+    with monkeypatch.context() as patch:
+        patch.setattr(service, 'selection_snapshot', historical_snapshot)
+        original = generate(service, owner, 'bordered')
+    assert original['versions'][0]['snapshot']['layout_engine'] == 'seamless-unit-v1'
+    before = service.version_file(owner, original['current_version_id']).read_bytes()
+    with pytest.raises(ServiceError, match='至少选择2个'):
+        refine(service, owner, original, selection=choices(service, owner, 'bordered', 1))
+    latest = service.design(owner, original['id'])
+    assert latest['current_version_id'] == original['current_version_id']
+    assert latest['successful_refinement_count'] == 0 and latest['active_job'] is None
+    assert service.version_file(owner, original['current_version_id']).read_bytes() == before
+
+
 @pytest.mark.parametrize('mode,count', [('ends_open', 1), ('split', 2), ('alternating', 1),
                                        ('stacked', 2), ('opposed', 1)])
 def test_new_mode_minimum_pattern_selection_is_rendered_without_dropping_inputs(service, mode, count):
@@ -144,7 +187,7 @@ def test_new_mode_minimum_pattern_selection_is_rendered_without_dropping_inputs(
     assert {item['asset_ref'] for item in saved['object_transforms']} == set(selection['asset_ids'])
 
 
-@pytest.mark.parametrize('mode,count', [('bordered', 1), ('fullwidth', 2), ('ends_open', 3), ('split', 1),
+@pytest.mark.parametrize('mode,count', [('fullwidth', 2), ('ends_open', 3), ('split', 1),
                                        ('stacked', 1)])
 def test_selection_refinement_revalidates_added_mode_counts(service, mode, count):
     owner = actor(service)['id']

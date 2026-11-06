@@ -135,3 +135,42 @@ def test_sampling_only_reads_explicit_white_list_members(tmp_path, monkeypatch):
             assert len(archive.namelist()) == 2
     finally:
         manager.close()
+
+
+@pytest.mark.parametrize("tamper", [False, True], ids=["long-private-path", "changed-record-rejected"])
+def test_private_timing_rewrite_uses_short_atomic_sibling(tmp_path, monkeypatch, tamper):
+    import hashlib
+    import json
+    identifier, export_id = "a"*32, "b"*32
+    suffix = Path("task_records") / identifier / "export_records" / export_id
+    desired_state_length = 219 - len(str(suffix)) - 1
+    padding = desired_state_length - len(str(tmp_path)) - 1
+    if padding < 1:
+        pytest.skip("test temporary root cannot fit the controlled Windows path budget")
+    manager = service.JobManager(tmp_path / ("s"*padding))
+    try:
+        records = manager.record_directory(identifier, "export_records") / export_id
+        records.mkdir()
+        assert len(str(records)) == 219
+        path = records / "处理记录.json"
+        for name, content in (("处理记录.json", b'{"timings": {}}'), ("对应关系.csv", b"map"), ("待处理清单.csv", b"pending")):
+            (records/name).write_bytes(content)
+        manifest = {name: service.sha256(records/name) for name in ("处理记录.json","对应关系.csv","待处理清单.csv")}
+        job = {"id": identifier, "_records_dir":str(records), "_record_manifest":manifest}
+        if tamper:
+            sync = service.os.fsync
+            def changed(fd):
+                path.write_bytes(b'{"untrusted": true}')
+                return sync(fd)
+            monkeypatch.setattr(service.os, "fsync", changed)
+            with pytest.raises(ValueError, match="导出验证记录发生变化"):
+                manager._record_export_timings(job, {"packaging_seconds": .5})
+            assert path.read_bytes() == b'{"untrusted": true}'
+            assert manifest[path.name] != service.sha256(path)
+        else:
+            manager._record_export_timings(job, {"packaging_seconds": .5})
+            assert json.loads(path.read_text("utf8"))["timings"] == {"packaging_seconds": .5}
+            assert manifest[path.name] == hashlib.sha256(path.read_bytes()).hexdigest()
+        assert {p.name for p in records.iterdir()} == {"处理记录.json","对应关系.csv","待处理清单.csv"}
+    finally:
+        manager.close()

@@ -360,7 +360,7 @@ def test_input_precheck_uses_visible_opaque_override_of_transparent_background(s
     first = service.submit(identity, 'generate', dict(idempotency_key=str(uuid4()), **choice), work['id'])
     assert service.run_once() and service.job(identity, first['id'])['status'] == 'SUCCEEDED'
     original = service.design(identity, work['id'])
-    assert original['versions'][0]['snapshot']['layout_engine'] == 'seamless-unit-v1'
+    assert original['versions'][0]['snapshot']['layout_engine'] == 'seamless-unit-v2'
     plan(monkeypatch, [dict(type='parameters', values={'background_color': '#345678'}),
                        dict(type='edit_background', prompt='添加波点')])
     events = []

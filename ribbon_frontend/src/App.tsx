@@ -318,14 +318,14 @@ function LoopPreview({ version, sizeLabel, target }: { version: Version; sizeLab
       <span>{continuous ? "同一单元横向重复 3 次" : sizeLabel}</span>
     </div>
     <div className="loop-unit-view" hidden={continuous}>
-      <div className="target-layer"><img src={version.preview_url} decoding="async" alt={`${versionName(version)}的循环单元预览`} />{!continuous && <TargetOverlay version={version} target={target}/>}</div>
+      <div className="target-layer"><RecoverableImage src={version.preview_url} decoding="async" alt={`${versionName(version)}的循环单元预览`} />{!continuous && <TargetOverlay version={version} target={target}/>}</div>
     </div>
     {/* Keep the same URLs mounted: changing the view only changes visibility,
         never requests a new master or a separately rendered long-strip file. */}
     <div className="loop-continuity" hidden={!continuous}>
       <div className={`loop-continuity-track ${seams ? "show-seams" : ""}`}>
         {[0, 1, 2].map(index => <div className="loop-repeat" key={index}>
-          <img src={version.preview_url} decoding="async" alt={index === 0 ? `${versionName(version)}的三次连续效果预览` : ""} />{continuous && <TargetOverlay version={version} target={target}/>}
+          <RecoverableImage src={version.preview_url} decoding="async" alt={index === 0 ? `${versionName(version)}的三次连续效果预览` : ""} />{continuous && <TargetOverlay version={version} target={target}/>}
         </div>)}
       </div>
     </div>
@@ -358,6 +358,15 @@ function LoopPreview({ version, sizeLabel, target }: { version: Version; sizeLab
       </dl>
     </details>
   </div>;
+}
+function RecoverableImage({src, alt, ...props}: React.ImgHTMLAttributes<HTMLImageElement> & {src:string}) {
+  const [attempt,setAttempt] = useState(0), [failed,setFailed] = useState(false), [loaded,setLoaded] = useState(false);
+  useEffect(() => { setAttempt(0); setFailed(false); setLoaded(false); }, [src]);
+  const actual = attempt ? src + (src.includes("?")?"&":"?") + "retry=" + attempt : src;
+  const retry = () => {setFailed(false);setLoaded(false);setAttempt(a=>a+1);};
+  return <>{!failed && <img {...props} src={actual} alt={alt} onLoad={()=>setLoaded(true)} onError={()=>setFailed(true)} />}
+    {failed ? <span className="image-recovery" role="status"><span>{alt || "图片"}加载失败</span><span role="button" tabIndex={0} className="secondary small" onClick={e=>{e.stopPropagation();retry();}} onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();e.stopPropagation();retry();}}}>重新加载图片</span></span> :
+    !loaded && props.loading !== "lazy" && <span className="image-loading">图片加载中…</span>}</>;
 }
 type Pending = {
   path: string;
@@ -406,6 +415,11 @@ export default function App({ active, view }: WorkspaceProps) {
 
 function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: User; onLogout: () => void }) {
   const prefix = `ribbon:${user.id}:`;
+  const [initRetry,setInitRetry] = useState(0);
+  const [initError,setInitError] = useState("");
+  const [listLoading,setListLoading] = useState(false);
+  const [listError,setListError] = useState("");
+  const listAbort = useRef<AbortController|null>(null);
   const [config, setConfig] = useState<Config | null>(null),
     [assets, setAssets] = useState<Asset[]>([]),
     [templates, setTemplates] = useState<Template[]>([]),
@@ -476,6 +490,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
       uploadAbort.current?.abort();
       designAbort.current?.abort();
       deletedAbort.current?.abort();
+      listAbort.current?.abort();
     };
   }, []);
   const isAdmin = user.role === "admin",
@@ -552,7 +567,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
   const canPlanOperation = (kind: string) => !editing || editing.allowed_operations.includes(kind);
   const spacingAvailable = (modern || (template?.mode !== "fullwidth" && template?.mode !== "ends_open")) &&
     (!editing || editing.allowed_parameters.includes("spacing"));
-  const suggestions = editTarget !== "layout" ? (editTarget.startsWith("zone:") || editTarget === "background" ? ["添加细小波点"] : ["缩小一点", "向右移动10像素"]) : [
+  const suggestions = editTarget !== "layout" ? (editTarget.startsWith("zone:") || editTarget === "background" ? ["添加细小波点"] : editTarget === "border" ? ["保留边饰图案，添加细小星光"] : ["缩小一点", "向右移动10像素"]) : [
     ...(canPlanOperation("parameters") ? [spacingAvailable ? "图案缩小一些，间距拉开一点" : "图案缩小一些"] : []),
     ...(canPlanOperation("edit_background") ? ["背景添加波点"] : []),
     ...(canPlanOperation("edit_asset") ? ["给第一个图案添加星光"] : []),
@@ -570,7 +585,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
           aria-pressed={selection.template_id === t.id}
           onClick={() => updateSelection({ ...selection, template_id: t.id })}
         >
-          <img src={templateImage(t)} alt={`${t.name}样式图`} loading="lazy" decoding="async" />
+          <RecoverableImage src={templateImage(t)} alt={`${t.name}样式图`} loading="lazy" decoding="async" />
           <span>{t.name}{selection.template_id === t.id && <Icon name="check" size={14} />}</span>
         </button>
         <button
@@ -648,23 +663,29 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
   }
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
     async function init() {
+      setLoading(true); setInitError("");
       try {
-        const [a, t, c, list] = await Promise.all([
-          api<Asset[]>("/assets"),
-          api<Template[]>("/templates"),
-          api<Config>("/config"),
-          api<Design[]>("/designs"),
-        ]);
+        const results = await Promise.allSettled([
+          api<Asset[]>("/assets", {signal:controller.signal}),
+          api<Template[]>("/templates", {signal:controller.signal}),
+          api<Config>("/config", {signal:controller.signal}),
+          api<Design[]>("/designs?summary=true", {signal:controller.signal}),
+        ] as const);
         if (cancelled) return;
-        setAssets(a);
-        setTemplates(t);
-        setConfig(c);
-        setDesigns(list);
+        const [ar,tr,cr,dr] = results;
+        if (ar.status==="fulfilled") setAssets(ar.value);
+        if (tr.status==="fulfilled") setTemplates(tr.value);
+        if (cr.status==="fulfilled") setConfig(cr.value);
+        if (dr.status==="fulfilled") setDesigns(dr.value);
+        const failure=results.find(r=>r.status==="rejected");
+        if (failure?.status==="rejected") throw failure.reason;
+        const a=ar.status==="fulfilled"?ar.value:[], t=tr.status==="fulfilled"?tr.value:[], list=dr.status==="fulfilled"?dr.value:[];
         const savedId = loadLocal<string | null>(prefix + "design", null);
         const id = list.find((x) => x.id === savedId)?.id || list[0]?.id;
         if (id) {
-          const d = await api<Design>(`/designs/${id}`);
+          const d = await api<Design>(`/designs/${id}`, {signal:controller.signal});
           if (!cancelled) {
             applyDesign(d, true);
             if (d.active_job_id)
@@ -682,12 +703,12 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
         }
         const bgId = loadLocal<string | null>(prefix + "backgroundJob", null);
         if (bgId) {
-          const bg = await api<Job>(`/jobs/${bgId}`);
+          const bg = await api<Job>(`/jobs/${bgId}`, {signal:controller.signal});
           if (!cancelled) setBackgroundJob(bg);
         }
       } catch (e) {
         if (!cancelled) {
-          setNotice({ text: message(e), type: "error" });
+          setInitError(message(e));
           if (e instanceof ApiError && e.status === 401) onLogout();
         }
       } finally {
@@ -695,10 +716,8 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
       }
     }
     void init();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    return () => { cancelled = true; controller.abort(); };
+  }, [initRetry]);
 
   useEffect(() => {
     if (!active || (!design?.id && !backgroundJob?.id)) return;
@@ -713,6 +732,8 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
       if (inflight || document.hidden) return;
       inflight = true;
       try {
+        if (offline && !design?.id && !running(backgroundJob))
+          await api<Config>("/config", { signal: controller.signal });
         if (design?.id) {
           const d = await api<Design>(`/designs/${design.id}`, { signal: controller.signal });
           if (stale()) return;
@@ -736,36 +757,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
           const updated = await api<Job>(`/jobs/${backgroundJob.id}`, { signal: controller.signal });
           if (stale()) return;
           setBackgroundJob(updated);
-          if (updated.status === "SUCCEEDED" && updated.result_asset_id) {
-            const a = await api<Asset[]>("/assets", { signal: controller.signal });
-            if (stale()) return;
-            setAssets(a);
-            const target = loadLocal<{ design_id: string | null } | null>(
-              prefix + "backgroundTarget",
-              null,
-            );
-            if (!target || target.design_id === (designRef.current?.id || null))
-              setSelection((prev) => {
-                const value = {
-                  ...prev,
-                  background_id: updated.result_asset_id!,
-                };
-                saveLocal(prefix + "selection", {
-                  design_id: designRef.current?.id || null,
-                  base_version_id:
-                    designRef.current?.current_version_id || null,
-                  value,
-                });
-                return value;
-              });
-            saveLocal(prefix + "backgroundJob", null);
-            setNotice({
-              text: testMode
-                ? "测试底图已生成并选中。"
-                : "AI 底图已生成并选中。",
-              type: "success",
-            });
-          } else if (updated.status === "FAILED") {
+          if (updated.status === "FAILED") {
             saveLocal(prefix + "backgroundJob", null);
             setNotice({
               text: updated.error || "底图未能生成，请重试。",
@@ -784,9 +776,9 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
       }
     };
     // Refresh on workspace re-entry and tab focus. Finished work does not poll.
-    void tick();
-    const timer = processing || backgroundProcessing
-      ? window.setInterval(tick, 1200) : undefined;
+    if (!offline) void tick();
+    const timer = processing || backgroundProcessing || offline
+      ? window.setInterval(tick, offline && !processing && !backgroundProcessing ? 2500 : 1200) : undefined;
     document.addEventListener("visibilitychange", tick);
     window.addEventListener("focus", tick);
     return () => {
@@ -798,6 +790,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
     };
   }, [
     active,
+    offline,
     design?.id,
     design?.active_job_id,
     backgroundJob?.id,
@@ -808,23 +801,28 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
 
   // Refresh derived assets after a content edit; the version snapshot owns the selection.
   useEffect(() => {
-    if (!design?.current_version_id) return;
+    const snapshot=design?.versions.find(v=>v.id===design.current_version_id)?.snapshot;
+    if (!snapshot || offline) return;
+    const ids=[...snapshot.asset_refs, snapshot.background_ref, ...Object.values(snapshot.zone_background_refs||{}), ...(snapshot.border_ref?[snapshot.border_ref]:[])];
+    if (ids.every(id=>assets.some(a=>a.id===id))) return;
     const controller = new AbortController();
     const sequence = designLoadSequence.current;
     void api<Asset[]>("/assets", { signal: controller.signal })
       .then(a => { if (!controller.signal.aborted && mounted.current && sequence === designLoadSequence.current) setAssets(a); })
       .catch(() => { if (!controller.signal.aborted && sequence === designLoadSequence.current) setOffline(true); });
     return () => controller.abort();
-  }, [design?.current_version_id]);
+  }, [design?.current_version_id, offline]);
 
   // A completed background job can be recovered even after the browser was closed.
   useEffect(() => {
     if (backgroundJob?.status !== "SUCCEEDED" || !backgroundJob.result_asset_id)
       return;
     const stored = loadLocal<string | null>(prefix + "backgroundJob", null);
-    if (stored !== backgroundJob.id) return;
-    void api<Asset[]>("/assets")
+    if (stored !== backgroundJob.id || offline) return;
+    const controller=new AbortController();
+    void api<Asset[]>("/assets", {signal:controller.signal})
       .then((a) => {
+        if (controller.signal.aborted || !mounted.current) return;
         setAssets(a);
         const target = loadLocal<{ design_id: string | null } | null>(
           prefix + "backgroundTarget",
@@ -846,8 +844,9 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
         saveLocal(prefix + "backgroundJob", null);
         setNotice({ text: "已恢复上次完成的底图。", type: "success" });
       })
-      .catch(() => setOffline(true));
-  }, [backgroundJob?.id, backgroundJob?.status]);
+      .catch(() => {if (!controller.signal.aborted && mounted.current) setOffline(true);});
+    return ()=>controller.abort();
+  }, [backgroundJob?.id, backgroundJob?.status, offline]);
 
   async function executePending(operation: Pending) {
     setPending(operation);
@@ -1028,13 +1027,26 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
       if (e instanceof ApiError && e.status === 401) onLogout();
     }
   }
+  async function openDesigns() {
+    setModal("designs"); setShowDeleted(false); setDeleteTarget(null); setListError("");
+    listAbort.current?.abort();
+    const controller=new AbortController(); listAbort.current=controller; setListLoading(true);
+    try {
+      const list=await api<Design[]>("/designs?summary=true",{signal:controller.signal});
+      if (!controller.signal.aborted && mounted.current) setDesigns(list);
+    } catch(e) {
+      if (!controller.signal.aborted && mounted.current) setListError(message(e));
+    } finally {
+      if (!controller.signal.aborted && mounted.current) setListLoading(false);
+    }
+  }
   async function loadDeletedDesigns() {
     deletedAbort.current?.abort();
     const controller = new AbortController();
     deletedAbort.current = controller;
     setDeletedLoading(true);
     try {
-      const list = await api<Design[]>("/designs?deleted=true", { signal: controller.signal });
+      const list = await api<Design[]>("/designs?deleted=true&summary=true", { signal: controller.signal });
       if (!controller.signal.aborted && mounted.current) setDeletedDesigns(list);
     } catch (e) {
       if (!controller.signal.aborted && mounted.current) setNotice({ text: message(e), type: "error" });
@@ -1234,7 +1246,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
             <Icon name="plus" />
             新建作品
           </button>
-          <button className="text-button" onClick={() => setModal("designs")}>
+          <button className="text-button" onClick={() => void openDesigns()}>
             <Icon name="folder" />
             我的作品<span className="count">{designs.length}</span>
           </button>
@@ -1284,6 +1296,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
             </button>
           </div>
         )}
+        {initError && <div className="notice error" role="alert"><span>工作台读取未完成：{initError}</span><button className="secondary small" onClick={()=>setInitRetry(n=>n+1)}>重新读取工作台</button></div>}
         {loading ? (
           <div className="page-loader in-page">
             <span className="spinner" />
@@ -1341,7 +1354,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                     {selectedPatterns.map((a, index) => (
                       <div className="pattern-tile" key={a.id}>
                         <div className="checker">
-                          <img src={a.thumbnail_url || a.url} alt={a.name} decoding="async" />
+                          <RecoverableImage src={a.thumbnail_url || a.url} alt={a.name} decoding="async" />
                           <button
                             className="remove-asset"
                             disabled={locked}
@@ -1466,7 +1479,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                 {!aiAvailable && <p className="model-help" id="background-ai-unavailable">AI 尚未配置，仍可从底图库选图或上传后生成首稿。</p>}
                 {background ? (
                   <div className="background-selected">
-                    <img src={background.thumbnail_url || background.url} alt="选中的底图" loading="lazy" decoding="async" />
+                    <RecoverableImage src={background.thumbnail_url || background.url} alt="选中的底图" loading="lazy" decoding="async" />
                     <div>
                       <strong>{background.name}</strong>
                       <small>
@@ -1595,7 +1608,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                   ) : selected ? (
                     <>
                       <div className={`ribbon-display ${previewZoom}`}>
-                        <img
+                        <RecoverableImage
                           key={`${design?.id}:${selected.id}:${previewZoom}`}
                           decoding="async"
                           src={
@@ -1636,7 +1649,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                       <h3>首稿预览</h3>
                       {template && (
                         <div className="template-peek">
-                          <img
+                          <RecoverableImage
                             src={templateImage(template)}
                             alt="当前排版参考"
                           />
@@ -1659,15 +1672,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                 </div>
                 {selected ? (
                   <>
-                    <div className="preview-caption">
-                      <span>
-                        <Icon name="check" size={14} />
-                        {isHistory ? "正在查看历史保存版本" : "当前设计已保存"}
-                      </span>
-                      <span>
-                        {selected.provider === "test" ? "测试模式结果" : ""}
-                      </span>
-                    </div>
+                    {(isHistory || selected.provider==="test") && <div className="preview-caption"><span>{isHistory ? "正在查看历史保存版本" : "测试模式结果"}</span></div>}
                     {isHistory && (
                       <div className="history-hint">
                         历史预览不改变当前版本。
@@ -1696,7 +1701,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                         onClick={() => setSelectedVersionId(v.id)}
                         aria-pressed={v.id === selected?.id}
                       >
-                        <img
+                        <RecoverableImage
                           src={v.preview_url}
                           loading="lazy"
                           decoding="async"
@@ -1940,7 +1945,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                     <div
                       className={`library-image ${modal === "pattern" ? "checker" : ""}`}
                     >
-                      <img src={a.thumbnail_url || a.url} alt={a.name} loading="lazy" decoding="async" />
+                      <RecoverableImage src={a.thumbnail_url || a.url} alt={a.name} loading="lazy" decoding="async" />
                       {picked && (
                         <span className="check-mark">
                           <Icon name="check" size={14} />
@@ -2001,6 +2006,8 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
             <p>删除“{deleteTarget.name}”？删除后保留 {config?.retention_hours ?? 50} 小时，可恢复；已有下载仍绑定原版本。</p>
             <div><button className="secondary small" disabled={busy} onClick={() => setDeleteTarget(null)}>取消</button><button className="danger-button" disabled={busy} onClick={() => void deleteDesign(deleteTarget)}>确认删除</button></div>
           </div>}
+          {listLoading && !showDeleted && <p role="status">正在更新作品列表…</p>}
+          {listError && !showDeleted && <div className="notice error" role="alert"><span>{listError}</span><button className="secondary small" onClick={()=>void openDesigns()}>重试读取作品</button></div>}
           {deletedLoading && showDeleted && <p role="status">正在读取已删除作品…</p>}
           <div className="design-library">
             {(showDeleted ? deletedDesigns : designs).map((d) => (

@@ -82,6 +82,47 @@ def _fill(zone, source, scene):
     w, h = zone.size
     if w < 16 or h < 16:
         return {**_whole_pattern(zone, source, backdrop=True), 'passed': True}
+    # Already-periodic full-width textures should not be cut into a 6/7
+    # quilt needlessly. This path is deliberately narrow: preserve the source
+    # horizontal period and its uniform scale, sample at least 98% of its
+    # height, and verify the exact sampled tile. It never changes foreground
+    # geometry. Incompatible widths use the existing conservative quilt path.
+    natural = h * source.width / source.height
+    count = max(1, min(w // 16, math.floor(w / natural)))
+    native_edges = [round(i * w / count) for i in range(count + 1)]
+    native_lengths = sorted({b - a for a, b in zip(native_edges, native_edges[1:])})
+    fractions = [h / (length / source.width) / source.height for length in native_lengths]
+    if len(native_lengths) == 1 and all(.98 <= fraction <= 1.0 + 1e-9 for fraction in fractions):
+        source_check = assess_periodicity(source)
+        if source_check['passed']:
+            checks = []
+            tiles = []
+            try:
+                for length, fraction in zip(native_lengths, fractions):
+                    sampled_height = min(source.height, source.height * fraction)
+                    top = (source.height - sampled_height) / 2
+                    box = (0., top, float(source.width), top + sampled_height)
+                    tile = source.resize((length, h), Image.Resampling.LANCZOS, box=box)
+                    if tile.mode != 'RGBA':
+                        rgba = tile.convert('RGBA')
+                        tile.close()
+                        tile = rgba
+                    tiles.append((length, tile))
+                    checks.append(dict(width=length, source_box=list(box),
+                                       uniform_scale=length / source.width,
+                                       vertical_sample_fraction=fraction,
+                                       check=assess_periodicity(tile)))
+                if all(row['check']['passed'] for row in checks):
+                    for length, tile in tiles:
+                        for a, b in zip(native_edges, native_edges[1:]):
+                            if b - a == length:
+                                zone.alpha_composite(tile, (a, 0))
+                    return dict(kind='native_periodic_texture', count=count,
+                                source_dimensions=list(source.size), source_check=source_check,
+                                tiles=checks, passed=True)
+            finally:
+                for _, tile in tiles:
+                    tile.close()
     preferred = h * source.width / source.height * 6 / 7
     edges = _repeats(w, preferred)
     reports = []
@@ -252,6 +293,14 @@ def validate_binding(snapshot, master_sha256):
             ]
             if not checks or [tile['passed'] for tile in tiles] != checks or build['passed'] != all(checks):
                 raise ValueError('底纹检查与像素报告不一致')
+        elif build['kind'] == 'native_periodic_texture':
+            tiles = build.get('tiles', [])
+            if (not tiles or not build.get('source_check', {}).get('passed') or not build['passed']
+                    or any(not .98 <= t['vertical_sample_fraction'] <= 1.0 + 1e-9
+                           or t['source_box'][0] != 0 or t['source_box'][2] != build['source_dimensions'][0]
+                           or not t['check']['passed'] or not t['check']['multiscale']
+                           or not all(s['passed'] for s in t['check']['multiscale']) for t in tiles)):
+                raise ValueError('原生底纹周期检查与采样记录不一致')
         elif (
             build['kind'] not in ('blank', 'solid_colour', 'complete_background')
             or build['passed'] is not True

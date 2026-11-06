@@ -222,6 +222,69 @@ try {
     }
   }
   }
+  if (!baseline && !previewOnly) {
+    const result = {};
+const url="http://127.0.0.1:"+server.address().port+"/#ribbon";
+const json=(route, data,status=200)=>route.fulfill({status,contentType:"application/json",json:data});
+async function run(name,fn){const p=await browser.newPage({viewport:{width:1366,height:768}});p.setDefaultTimeout(4500);try{result[name]=await fn(p)}catch(e){result[name]={error:String(e).slice(0,600)}}finally{await p.close()}}
+const heading=(p,id="A")=>p.getByRole("heading",{name:"合成作品 "+id,exact:true});
+await run("background",async p=>{
+ let loaded=0, posts=0;await p.route("**/api/ribbon/background-jobs",r=>{posts++;return json(r,{id:"qa-bg",kind:"background",status:"RUNNING"})});
+ await p.route("**/api/ribbon/jobs/qa-bg",async r=>{await new Promise(ok=>setTimeout(ok,100));await json(r,{id:"qa-bg",kind:"background",status:"SUCCEEDED",result_asset_id:"asset-2001"})});
+ await p.route("**/api/ribbon/assets",async r=>{loaded++;await new Promise(ok=>setTimeout(ok,70));await json(r,assets)});
+ await p.goto(url);await heading(p).waitFor();await p.waitForTimeout(200);const start=loaded;
+ await p.getByRole("button",{name:"生成测试底图",exact:true}).click();
+ await p.waitForFunction(()=>JSON.parse(localStorage.getItem("ribbon:synthetic-performance:selection")||"null")?.value?.background_id==="asset-2001");
+ return {requestsAfterSuccess:loaded-start,posts};
+});
+await run("initRetry",async p=>{
+ let count=0;await p.route("**/api/ribbon/assets",r=>++count===1?json(r,{detail:"合成素材读取失败"},503):json(r,assets));
+ await p.goto(url);await p.waitForTimeout(400);
+ const btn=p.getByRole("button",{name:/重试|重新加载|重新读取|重新载入/}).first();
+ const visible=await btn.isVisible();if(visible)await btn.click();
+ return {retry:visible,reads:count,loaded:await heading(p).isVisible()||await heading(p).waitFor({timeout:3000}).then(()=>true,()=>false)};
+});
+await run("idleDisconnect",async p=>{
+ let fail=false, seen=false, after=0;
+ await p.route("**/api/ribbon/designs/A",r=>{if(fail){fail=false;seen=true;return json(r,{detail:"合成暂时断开"},503)}if(seen)after++;return json(r,works[0])});
+ await p.goto(url);await heading(p).waitFor();await p.waitForTimeout(200);fail=true;
+ const err=p.waitForResponse(r=>r.url().endsWith("/api/ribbon/designs/A")&&r.status()===503);await p.evaluate(()=>window.dispatchEvent(new Event("focus")));await err;
+ await p.waitForTimeout(4200);const btn=p.getByRole("button",{name:/重连|重新连接|重试/}).first(),manual=await btn.isVisible();
+ if(after===0&&manual){await btn.click();await p.waitForTimeout(200)}
+ return {recovered:after>0,recoveryReads:after,manual};
+});
+await run("failedPreview",async p=>{
+ let failed=0;await p.route("**/api/ribbon/fixture.svg*work=A*",r=>++failed===1?r.fulfill({status:503,body:"temporary preview failure"}):r.continue());
+ await p.goto(url);await heading(p).waitFor();await p.waitForTimeout(200);
+ const box=p.locator(".preview-panel"),btn=box.getByRole("button",{name:/重试|重新加载|重新读取/}).first(),visible=await btn.isVisible();
+ if(visible)await btn.click();await p.waitForTimeout(150);
+ return {retry:visible,reads:failed,visibleOk:await box.locator(".ribbon-display img").first().evaluate(im=>im.complete&&im.naturalWidth>0).catch(()=>false)};
+});
+await run("worksList",async p=>{
+ let done=false,list=0;const j={id:"qa-jA",kind:"refine",status:"RUNNING"},A=()=>({...works[0],active_job_id:done?null:j.id,active_job:done?null:j});
+ await p.route("**/api/ribbon/designs*",r=>{list++;return json(r,[A(),...works.slice(1)])});
+ await p.route("**/api/ribbon/designs/A",r=>json(r,A()));
+ await p.route("**/api/ribbon/jobs/qa-jA",r=>json(r,{...j,status:done?"SUCCEEDED":"RUNNING"}));
+ await p.goto(url);await heading(p).waitFor();await p.getByRole("button",{name:/我的作品/}).click();await p.locator(".design-list-item").filter({has:p.getByText("合成作品 C",{exact:true})}).click();
+ await heading(p,"C").waitFor();done=true;const before=list;
+ await p.getByRole("button",{name:/我的作品/}).click();await p.waitForTimeout(150);
+ return {newReads:list-before,deleteEnabled:await p.getByRole("button",{name:"删除合成作品 A",exact:true}).isEnabled()};
+});
+await run("lostSubmit",async p=>{
+ const keys=[]; await p.route("**/api/ribbon/designs/A/refinements",r=>{keys.push(r.request().postDataJSON().idempotency_key);return keys.length===1?r.abort("connectionreset"):json(r,{detail:"受控终态：父版本已变化"},409)});
+ await p.goto(url);await heading(p).waitFor();await p.locator("#refinement").fill("把图案缩小一点");await p.locator(".refine-button").click();
+ await p.getByRole("button",{name:/恢复提交/}).click(); await p.waitForTimeout(100);
+ return {posts:keys.length,same:keys.length===2&&keys[0]===keys[1],retainsVersion:await p.getByRole("link",{name:"下载当前图",exact:true}).isVisible()};
+});
+
+    assert.deepEqual(result.background, {requestsAfterSuccess:1,posts:1});
+    assert.equal(result.initRetry.retry,true);assert.equal(result.initRetry.loaded,true);
+    assert.equal(result.idleDisconnect.recovered,true);
+    assert.equal(result.failedPreview.retry,true);assert.equal(result.failedPreview.visibleOk,true);
+    assert.deepEqual(result.worksList,{newReads:1,deleteEnabled:true});
+    assert.deepEqual(result.lostSubmit,{posts:2,same:true,retainsVersion:true});
+    metrics.recovery=result;
+  }
   assert.deepEqual(errors, []);
   await writeFile(path.join(out, previewOnly ? "workspace-preview.json" : baseline ? "workspace-before.json" : "workspace-after.json"), JSON.stringify(metrics, null, 2));
   console.log(JSON.stringify(metrics));

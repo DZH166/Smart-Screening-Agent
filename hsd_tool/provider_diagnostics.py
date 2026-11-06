@@ -1,5 +1,6 @@
 """Persist only allowlisted provider failure metadata. Never persist upstream messages."""
 import json
+import re
 
 # https://docs.volcengine.com/docs/ark/error-codes
 # Compare complete upstream codes. Arbitrary suffixes can contain user data.
@@ -76,3 +77,14 @@ def call_view(row):
     record['error'] = None if row['status'] in ('SUCCEEDED','STARTED') else MESSAGES[details['category']]
     return record
 
+
+def normalize_details(value, fallback=None):
+    if not isinstance(value, dict):
+        return fallback or diagnostic()
+    return diagnostic(**{key: value.get(key) for key in ('category','stage','http_status','upstream_code')})
+
+
+def safe_request_id(value):
+    if not isinstance(value, str) or value.lower().startswith(('sk-', 'bearer', 'data:')):
+        return None
+    return value if re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}', value) else None

@@ -38,3 +38,25 @@ test("gateway and backend errors stay failures, never become demo results", asyn
     }
   } finally { globalThis.fetch = original; }
 });
+
+test("read deadlines and explicit cancellation preserve mutation recovery", async () => {
+  const originalFetch=globalThis.fetch, originalSet=globalThis.setTimeout, originalClear=globalThis.clearTimeout;
+  let deadline, timerCalls=0;
+  globalThis.setTimeout=(fn)=>{deadline=fn;timerCalls++;return 1;};
+  globalThis.clearTimeout=()=>{};
+  globalThis.fetch=(_url,options)=>new Promise((_resolve,reject)=>{
+    options.signal?.addEventListener("abort",()=>reject(new DOMException("aborted","AbortError")),{once:true});
+  });
+  try {
+    const read=api("/assets");assert.equal(timerCalls,1);deadline();
+    await assert.rejects(read,e=>e instanceof ApiError && e.status===408);
+    const caller=new AbortController(), cancelled=api("/assets",{signal:caller.signal});
+    caller.abort();await assert.rejects(cancelled,e=>e.name==="AbortError");
+    let writeSignal;
+    globalThis.fetch=async(_url,options)=>{writeSignal=options.signal;return new Response("{}",{status:200});};
+    const before=timerCalls;await post("/designs",{name:"synthetic"});
+    assert.equal(timerCalls,before);assert.equal(writeSignal,undefined,"no timeout hides a write's uncertain result");
+  } finally {
+    globalThis.fetch=originalFetch;globalThis.setTimeout=originalSet;globalThis.clearTimeout=originalClear;
+  }
+});

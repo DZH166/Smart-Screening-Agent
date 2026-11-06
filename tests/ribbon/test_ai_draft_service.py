@@ -72,9 +72,9 @@ def state(api, work, response):
 
 def assert_loop_output(snapshot):
     """The selected config supplies height/DPI; the unit owns its actual width."""
-    assert snapshot['layout_engine'] == 'seamless-unit-v1'
+    assert snapshot['layout_engine'] == 'seamless-unit-v2'
     loop, profile, source = snapshot['loop'], snapshot['output_profile'], snapshot['output_profile_source']
-    assert loop['engine'] == 'seamless-unit-v1'
+    assert loop['engine'] == 'seamless-unit-v2'
     assert loop['production_verified'] is False
     assert profile['width'] == loop['width'] and profile['width'] > 0
     assert profile['height'] == loop['height'] == source['height'] == 240

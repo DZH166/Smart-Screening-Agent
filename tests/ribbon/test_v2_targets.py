@@ -1,6 +1,7 @@
 """Exercise employee-selected edit targets through HTTP, the worker and saved native PNGs."""
 
 from io import BytesIO
+import json
 from uuid import uuid4
 
 from PIL import Image
@@ -159,3 +160,42 @@ def test_zone_colour_is_cleared_when_source_or_layout_changes(workflow, new_mode
     if new_mode == 'split':
         with Image.open(BytesIO(workflow.download(current(changed)))) as im:
             assert im.getpixel((1, 1))[:3] == (36, 85, 138)
+
+
+def test_zone_colour_none_removes_override_and_reveals_its_own_source(workflow):
+    selection = {**workflow.selection, 'template_id': 'split',
+                 'zone_background_refs': {'left': workflow.background['id']}}
+    initial = workflow.generate(selection)
+    done, colored = edit(workflow, initial, 'zone:left',
+                         {'type': 'parameters', 'values': {'background_color': '#112233'}})
+    assert done['status'] == 'SUCCEEDED', done
+    done, restored = edit(workflow, colored, 'zone:left',
+                          {'type': 'parameters', 'values': {'background_color': None}})
+    assert done['status'] == 'SUCCEEDED', done
+    assert 'left' not in sample(workflow, restored)['zone_colors']
+    assert sample(workflow, restored)['zone_background_refs'] == selection['zone_background_refs']
+    assert workflow.download(current(restored)) == workflow.download(current(initial))
+
+
+def test_native_copy_is_failed_result_with_usage_and_without_new_version(workflow):
+    initial = workflow.generate()
+    snapshot = sample(workflow, initial)
+    target = snapshot['pattern_slots'][0]
+
+    def copied_result(prompt, source, output, kind):
+        with Image.open(source) as image:
+            image.save(output, format='PNG')
+        return dict(request_id='synthetic-copy-call', usage={'generated_images': 1}, model='synthetic')
+
+    workflow.provider.edit_image = copied_result
+    done, unchanged = edit(workflow, initial, target,
+                          {'type': 'edit_asset', 'asset_id': snapshot['asset_refs'][0], 'prompt': 'Improve detail'})
+    assert done['status'] == 'FAILED', done
+    assert unchanged['current_version_id'] == initial['current_version_id']
+    assert unchanged['successful_refinement_count'] == 0
+    assert len(unchanged['versions']) == len(initial['versions'])
+    with workflow.service.db.connect() as db:
+        call = db.execute("SELECT * FROM provider_calls WHERE operation='edit_asset'").fetchone()
+    assert call['status'] == 'FAILED' and call['request_id'] == 'synthetic-copy-call'
+    assert json.loads(call['error'])['category'] == 'invalid_result'
+    assert json.loads(call['usage_json']) == {'generated_images': 1}

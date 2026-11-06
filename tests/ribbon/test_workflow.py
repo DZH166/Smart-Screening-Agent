@@ -549,7 +549,7 @@ def test_admin_configuration_creates_new_versions_without_rewriting_history(env)
     new_version = new["versions"][0]
     assert new_version["snapshot"]["output_profile"]["version"] == profile["version"]
     snapshot = new_version["snapshot"]
-    assert snapshot["layout_engine"] == "seamless-unit-v1"
+    assert snapshot["layout_engine"] == "seamless-unit-v2"
     assert snapshot["output_profile_source"] == profile
     assert snapshot["output_profile_source"]["width"] == 1200
     assert snapshot["output_profile_source"]["height"] == snapshot["output_profile"]["height"] == 300

@@ -267,7 +267,7 @@ async function aiDraftSmoke(page) {
   await page.reload();
   await aiChoice.waitFor();
   assert.equal(await aiChoice.isChecked(), true, "ready DeepSeek + Seedream enables the new-work default");
-  assert.match(await page.locator(".generate-area").innerText(), /原人物文字不重画/);
+  assert.match(await page.locator(".generate-area").innerText(), /按原图保留人物文字/);
 
   const openAll = async () => {
     await page.getByRole("button", { name: "查看全部案例", exact: true }).click();
@@ -309,7 +309,7 @@ async function aiDraftSmoke(page) {
   await dialog.getByRole("button", { name: "用于AI首稿参考", exact: true }).click();
   await cancelReference.waitFor();
   assert.match(await page.locator(".generate-area").innerText(), new RegExp(code));
-  assert.match(await page.locator(".generate-area").innerText(), /所选案例会发送给Seedream/);
+  assert.match(await page.locator(".generate-area").innerText(), /选择的案例会发送给Seedream/);
   assert.equal(writes.length, writesBeforeChoice, "choosing a case only changes a local first-draft option");
   for (const viewport of [{ width: 1366, height: 768 }, { width: 1920, height: 1080 }, { width: 1093, height: 614 }]) {
     await page.setViewportSize(viewport);
@@ -808,7 +808,7 @@ try {
   assert.match(await page.locator(".model-edit-boundary").innerText(), /原长条/);
   await page.getByRole("button", { name: "新建作品", exact: true }).click();
   await generateButton.waitFor();
-  assert.equal(await page.getByRole("button", { name: "给画面添加星光", exact: true }).count(), 1, "a genuinely new work uses the current global profile capabilities");
+  assert.equal(await page.locator(".refinement-panel").count(), 0, "a new draft keeps refinement controls out of the way until it has a saved first version");
   Object.assign(profile, savedProfile);
   modelProvider = "test"; modelReady = false; modelEditing = undefined;
   modelAuthMode = "local";

@@ -386,13 +386,18 @@ def test_graceful_stop_waits_for_already_accepted_operation(service, monkeypatch
     assert stopped.is_set() and not first_thread.is_alive()
 
 
-def test_upload_pixel_decode_waits_for_renderer_allocation(service, monkeypatch, tmp_path):
+@pytest.mark.parametrize('engine', ['seamless-unit-v1', 'seamless-unit-v2'])
+def test_upload_pixel_decode_waits_for_renderer_allocation(service, monkeypatch, tmp_path, engine):
     from ribbon_backend import imaging
-    from ribbon_backend.loop_pipeline import resolve as resolve_loop
+    if engine == 'seamless-unit-v2':
+        from ribbon_backend.loop_pipeline_v2 import resolve as resolve_loop
+    else:
+        from ribbon_backend.loop_pipeline import resolve as resolve_loop
     actor = user(service)
     owner = actor['id']
     with service.db.connect() as db:
         snapshot = service.selection_snapshot(db, owner, selection(service, owner))
+        snapshot['layout_engine'] = engine
         paths = {r['id']: Path(r['path']) for r in db.execute('SELECT id,path FROM assets')}
     # Width/resource preflight precedes the intentionally delayed render read;
     # the actual render must still hold the shared allocation lock throughout.

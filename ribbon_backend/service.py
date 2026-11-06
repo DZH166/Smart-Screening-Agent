@@ -751,7 +751,7 @@ class Service:
         return result
 
     @leased_operation
-    def designs(self, owner, deleted=False):
+    def designs(self, owner, deleted=False, summary=False):
         with self.db.connect() as db:
             # Resolve the list and versions in one read snapshot, so a delete
             # or restore racing this request cannot turn the whole list into 404.
@@ -761,6 +761,10 @@ class Service:
             for row in rows:
                 item = dict(row)
                 item.pop('owner_id')
+                if summary:
+                    item.update(versions=[], active_job=None)
+                    result.append(item)
+                    continue
                 item['versions'] = [self.version_public(v) for v in db.execute('SELECT * FROM versions WHERE design_id=? ORDER BY sequence', (row['id'],))]
                 active = db.execute('SELECT * FROM jobs WHERE id=?', (row['active_job_id'],)).fetchone()
                 item['active_job'] = self.job_public(active) if active else None
@@ -985,6 +989,8 @@ class Service:
         # operation; other HSD tasks may consume space while a model is waiting.
         self.check_space(self.root / 'jobs' / job['id'] / str(job['attempt']),
                          expected + 2 * png_space(MAX_PIXELS, 1))
+        from hsd_tool.provider_diagnostics import normalize_details, safe_request_id
+        from .providers import _safe_usage
         call_id = uid()
         start = time.monotonic()
         models = payload.get('model_config', {})
@@ -1000,17 +1006,17 @@ class Service:
             result = fn()
         except Exception as error:
             uncertain = getattr(error, 'uncertain_result', False)
-            details = getattr(error, 'diagnostic', None) or diagnostic(
+            details = normalize_details(getattr(error, 'diagnostic', None)) if getattr(error, 'diagnostic', None) else diagnostic(
                 'unknown_result' if uncertain else 'unclassified', 'transport' if uncertain else 'unknown')
             with self.db.transaction() as db:
                 db.execute('UPDATE provider_calls SET status=?,error=?,request_id=?,usage_json=?,elapsed_ms=? WHERE id=?',
-                           ('UNKNOWN' if uncertain else 'FAILED',dump(details), getattr(error, 'request_id', None),
-                            dump(getattr(error, 'usage', {})), int((time.monotonic() - start) * 1000), call_id))
+                           ('UNKNOWN' if uncertain else 'FAILED',dump(details), safe_request_id(getattr(error, 'request_id', None)),
+                            dump(_safe_usage(getattr(error, 'usage', {}))), int((time.monotonic() - start) * 1000), call_id))
             raise
         meta = result if isinstance(result, dict) else {}
         with self.db.transaction() as db:
             db.execute("UPDATE provider_calls SET status='SUCCEEDED',model=?,request_id=?,usage_json=?,elapsed_ms=? WHERE id=?",
-                       (meta.get('model') or model, meta.get('request_id'), dump(meta.get('usage', {})),
+                       (meta.get('model') or model, safe_request_id(meta.get('request_id')), dump(_safe_usage(meta.get('usage', {}))),
                         int((time.monotonic() - start) * 1000), call_id))
         return result
 
@@ -1303,7 +1309,21 @@ class Service:
                         render(snapshot, resolve, source, directory / f'before-preview-{index}.png')
                         original, asset_kind = snapshot.get('composite_ref'), 'composite'
                     output = directory / f'edited-{index}.png'
-                    call_model(kind, lambda: provider.edit_image(edit_prompt, source, output, kind.removeprefix('edit_')))
+                    def checked_edit():
+                        meta = provider.edit_image(edit_prompt, source, output, kind.removeprefix('edit_'))
+                        if snapshot.get('layout_engine') == LAYOUT_ENGINE:
+                            from .edit_quality import validate_edit_result
+                            from .providers import ProviderError
+                            try:
+                                validate_edit_result(source, output, target=kind.removeprefix('edit_'))
+                            except ProviderError as error:
+                                # Retain confirmed model usage and request identity even
+                                # when a local result check rejects the returned image.
+                                error.request_id = meta.get('request_id')
+                                error.usage = meta.get('usage', {})
+                                raise
+                        return meta
+                    call_model(kind, checked_edit)
                     replacement = derived(output, asset_kind, '精修派生素材', original)
                     if kind == 'edit_asset':
                         if target == 'border':

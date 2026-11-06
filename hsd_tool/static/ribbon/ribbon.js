@@ -52,29 +52,29 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	}
 	function x(e) {
 		if (h = !1, b(e), !m) {
-			if (n(c) !== null) m = !0, S || (S = !0, ne());
+			if (n(c) !== null) m = !0, ee || (ee = !0, re());
 			else {
 				var t = n(l);
-				t !== null && ae(x, t.startTime - e);
+				t !== null && oe(x, t.startTime - e);
 			}
 		}
 	}
-	var S = !1, ee = -1, C = 5, w = -1;
-	function te() {
-		return g ? !0 : !(e.unstable_now() - w < C);
+	var ee = !1, S = -1, te = 5, C = -1;
+	function ne() {
+		return g ? !0 : !(e.unstable_now() - C < te);
 	}
-	function T() {
-		if (g = !1, S) {
+	function w() {
+		if (g = !1, ee) {
 			var t = e.unstable_now();
-			w = t;
+			C = t;
 			var i = !0;
 			try {
 				a: {
-					m = !1, h && (h = !1, v(ee), ee = -1), p = !0;
+					m = !1, h && (h = !1, v(S), S = -1), p = !0;
 					var a = f;
 					try {
 						b: {
-							for (b(t), d = n(c); d !== null && !(d.expirationTime > t && te());) {
+							for (b(t), d = n(c); d !== null && !(d.expirationTime > t && ne());) {
 								var o = d.callback;
 								if (typeof o == "function") {
 									d.callback = null, f = d.priorityLevel;
@@ -90,7 +90,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 							if (d !== null) i = !0;
 							else {
 								var u = n(l);
-								u !== null && ae(x, u.startTime - t), i = !1;
+								u !== null && oe(x, u.startTime - t), i = !1;
 							}
 						}
 						break a;
@@ -100,31 +100,31 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 					i = void 0;
 				}
 			} finally {
-				i ? ne() : S = !1;
+				i ? re() : ee = !1;
 			}
 		}
 	}
-	var ne;
-	if (typeof y == "function") ne = function() {
-		y(T);
+	var re;
+	if (typeof y == "function") re = function() {
+		y(w);
 	};
 	else if (typeof MessageChannel < "u") {
-		var re = new MessageChannel(), ie = re.port2;
-		re.port1.onmessage = T, ne = function() {
-			ie.postMessage(null);
+		var ie = new MessageChannel(), ae = ie.port2;
+		ie.port1.onmessage = w, re = function() {
+			ae.postMessage(null);
 		};
-	} else ne = function() {
-		_(T, 0);
+	} else re = function() {
+		_(w, 0);
 	};
-	function ae(t, n) {
-		ee = _(function() {
+	function oe(t, n) {
+		S = _(function() {
 			t(e.unstable_now());
 		}, n);
 	}
 	e.unstable_IdlePriority = 5, e.unstable_ImmediatePriority = 1, e.unstable_LowPriority = 4, e.unstable_NormalPriority = 3, e.unstable_Profiling = null, e.unstable_UserBlockingPriority = 2, e.unstable_cancelCallback = function(e) {
 		e.callback = null;
 	}, e.unstable_forceFrameRate = function(e) {
-		0 > e || 125 < e ? console.error("forceFrameRate takes a positive int between 0 and 125, forcing frame rates higher than 125 fps is not supported") : C = 0 < e ? Math.floor(1e3 / e) : 5;
+		0 > e || 125 < e ? console.error("forceFrameRate takes a positive int between 0 and 125, forcing frame rates higher than 125 fps is not supported") : te = 0 < e ? Math.floor(1e3 / e) : 5;
 	}, e.unstable_getCurrentPriorityLevel = function() {
 		return f;
 	}, e.unstable_next = function(e) {
@@ -185,8 +185,8 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			startTime: a,
 			expirationTime: s,
 			sortIndex: -1
-		}, a > o ? (r.sortIndex = a, t(l, r), n(c) === null && r === n(l) && (h ? (v(ee), ee = -1) : h = !0, ae(x, a - o))) : (r.sortIndex = s, t(c, r), m || p || (m = !0, S || (S = !0, ne()))), r;
-	}, e.unstable_shouldYield = te, e.unstable_wrapCallback = function(e) {
+		}, a > o ? (r.sortIndex = a, t(l, r), n(c) === null && r === n(l) && (h ? (v(S), S = -1) : h = !0, oe(x, a - o))) : (r.sortIndex = s, t(c, r), m || p || (m = !0, ee || (ee = !0, re()))), r;
+	}, e.unstable_shouldYield = ne, e.unstable_wrapCallback = function(e) {
 		var t = f;
 		return function() {
 			var n = f;
@@ -227,17 +227,17 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	function x(e, t, n) {
 		this.props = e, this.context = t, this.refs = v, this.updater = n || g;
 	}
-	var S = x.prototype = new b();
-	S.constructor = x, _(S, y.prototype), S.isPureReactComponent = !0;
-	var ee = Array.isArray;
-	function C() {}
-	var w = {
+	var ee = x.prototype = new b();
+	ee.constructor = x, _(ee, y.prototype), ee.isPureReactComponent = !0;
+	var S = Array.isArray;
+	function te() {}
+	var C = {
 		H: null,
 		A: null,
 		T: null,
 		S: null
-	}, te = Object.prototype.hasOwnProperty;
-	function T(e, n, r) {
+	}, ne = Object.prototype.hasOwnProperty;
+	function w(e, n, r) {
 		var i = r.ref;
 		return {
 			$$typeof: t,
@@ -247,13 +247,13 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			props: r
 		};
 	}
-	function ne(e, t) {
-		return T(e.type, t, e.props);
-	}
-	function re(e) {
-		return typeof e == "object" && !!e && e.$$typeof === t;
+	function re(e, t) {
+		return w(e.type, t, e.props);
 	}
 	function ie(e) {
+		return typeof e == "object" && !!e && e.$$typeof === t;
+	}
+	function ae(e) {
 		var t = {
 			"=": "=0",
 			":": "=2"
@@ -262,15 +262,15 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			return t[e];
 		});
 	}
-	var ae = /\/+/g;
-	function E(e, t) {
-		return typeof e == "object" && e && e.key != null ? ie("" + e.key) : t.toString(36);
+	var oe = /\/+/g;
+	function T(e, t) {
+		return typeof e == "object" && e && e.key != null ? ae("" + e.key) : t.toString(36);
 	}
-	function oe(e) {
+	function se(e) {
 		switch (e.status) {
 			case "fulfilled": return e.value;
 			case "rejected": throw e.reason;
-			default: switch (typeof e.status == "string" ? e.then(C, C) : (e.status = "pending", e.then(function(t) {
+			default: switch (typeof e.status == "string" ? e.then(te, te) : (e.status = "pending", e.then(function(t) {
 				e.status === "pending" && (e.status = "fulfilled", e.value = t);
 			}, function(t) {
 				e.status === "pending" && (e.status = "rejected", e.reason = t);
@@ -281,7 +281,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		}
 		throw e;
 	}
-	function se(e, r, i, a, o) {
+	function ce(e, r, i, a, o) {
 		var s = typeof e;
 		(s === "undefined" || s === "boolean") && (e = null);
 		var c = !1;
@@ -297,26 +297,26 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 				case n:
 					c = !0;
 					break;
-				case d: return c = e._init, se(c(e._payload), r, i, a, o);
+				case d: return c = e._init, ce(c(e._payload), r, i, a, o);
 			}
 		}
-		if (c) return o = o(e), c = a === "" ? "." + E(e, 0) : a, ee(o) ? (i = "", c != null && (i = c.replace(ae, "$&/") + "/"), se(o, r, i, "", function(e) {
+		if (c) return o = o(e), c = a === "" ? "." + T(e, 0) : a, S(o) ? (i = "", c != null && (i = c.replace(oe, "$&/") + "/"), ce(o, r, i, "", function(e) {
 			return e;
-		})) : o != null && (re(o) && (o = ne(o, i + (o.key == null || e && e.key === o.key ? "" : ("" + o.key).replace(ae, "$&/") + "/") + c)), r.push(o)), 1;
+		})) : o != null && (ie(o) && (o = re(o, i + (o.key == null || e && e.key === o.key ? "" : ("" + o.key).replace(oe, "$&/") + "/") + c)), r.push(o)), 1;
 		c = 0;
 		var l = a === "" ? "." : a + ":";
-		if (ee(e)) for (var u = 0; u < e.length; u++) a = e[u], s = l + E(a, u), c += se(a, r, i, s, o);
-		else if (u = h(e), typeof u == "function") for (e = u.call(e), u = 0; !(a = e.next()).done;) a = a.value, s = l + E(a, u++), c += se(a, r, i, s, o);
+		if (S(e)) for (var u = 0; u < e.length; u++) a = e[u], s = l + T(a, u), c += ce(a, r, i, s, o);
+		else if (u = h(e), typeof u == "function") for (e = u.call(e), u = 0; !(a = e.next()).done;) a = a.value, s = l + T(a, u++), c += ce(a, r, i, s, o);
 		else if (s === "object") {
-			if (typeof e.then == "function") return se(oe(e), r, i, a, o);
+			if (typeof e.then == "function") return ce(se(e), r, i, a, o);
 			throw r = String(e), Error("Objects are not valid as a React child (found: " + (r === "[object Object]" ? "object with keys {" + Object.keys(e).join(", ") + "}" : r) + "). If you meant to render a collection of children, use an array instead.");
 		}
 		return c;
 	}
-	function ce(e, t, n) {
+	function E(e, t, n) {
 		if (e == null) return e;
 		var r = [], i = 0;
-		return se(e, r, "", "", function(e) {
+		return ce(e, r, "", "", function(e) {
 			return t.call(n, e, i++);
 		}), r;
 	}
@@ -348,51 +348,51 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		console.error(e);
 	};
 	function de(e) {
-		var t = w.T, n = {};
-		n.types = t === null ? null : t.types, w.T = n;
+		var t = C.T, n = {};
+		n.types = t === null ? null : t.types, C.T = n;
 		try {
-			var r = e(), i = w.S;
-			i !== null && i(n, r), typeof r == "object" && r && typeof r.then == "function" && r.then(C, ue);
+			var r = e(), i = C.S;
+			i !== null && i(n, r), typeof r == "object" && r && typeof r.then == "function" && r.then(te, ue);
 		} catch (e) {
 			ue(e);
 		} finally {
-			t !== null && n.types !== null && (t.types = n.types), w.T = t;
+			t !== null && n.types !== null && (t.types = n.types), C.T = t;
 		}
 	}
 	function fe(e) {
-		var t = w.T;
+		var t = C.T;
 		if (t !== null) {
 			var n = t.types;
 			n === null ? t.types = [e] : n.indexOf(e) === -1 && n.push(e);
 		} else de(fe.bind(null, e));
 	}
 	var pe = {
-		map: ce,
+		map: E,
 		forEach: function(e, t, n) {
-			ce(e, function() {
+			E(e, function() {
 				t.apply(this, arguments);
 			}, n);
 		},
 		count: function(e) {
 			var t = 0;
-			return ce(e, function() {
+			return E(e, function() {
 				t++;
 			}), t;
 		},
 		toArray: function(e) {
-			return ce(e, function(e) {
+			return E(e, function(e) {
 				return e;
 			}) || [];
 		},
 		only: function(e) {
-			if (!re(e)) throw Error("React.Children.only expected to receive a single React element child.");
+			if (!ie(e)) throw Error("React.Children.only expected to receive a single React element child.");
 			return e;
 		}
 	};
-	e.Activity = f, e.Children = pe, e.Component = y, e.Fragment = r, e.Profiler = a, e.PureComponent = x, e.StrictMode = i, e.Suspense = l, e.ViewTransition = p, e.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE = w, e.__COMPILER_RUNTIME = {
+	e.Activity = f, e.Children = pe, e.Component = y, e.Fragment = r, e.Profiler = a, e.PureComponent = x, e.StrictMode = i, e.Suspense = l, e.ViewTransition = p, e.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE = C, e.__COMPILER_RUNTIME = {
 		__proto__: null,
 		c: function(e) {
-			return w.H.useMemoCache(e);
+			return C.H.useMemoCache(e);
 		}
 	}, e.addTransitionType = fe, e.cache = function(e) {
 		return function() {
@@ -403,14 +403,14 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	}, e.cloneElement = function(e, t, n) {
 		if (e == null) throw Error("The argument must be a React element, but you passed " + e + ".");
 		var r = _({}, e.props), i = e.key;
-		if (t != null) for (a in t.key !== void 0 && (i = "" + t.key), t) !te.call(t, a) || a === "key" || a === "__self" || a === "__source" || a === "ref" && t.ref === void 0 || (r[a] = t[a]);
+		if (t != null) for (a in t.key !== void 0 && (i = "" + t.key), t) !ne.call(t, a) || a === "key" || a === "__self" || a === "__source" || a === "ref" && t.ref === void 0 || (r[a] = t[a]);
 		var a = arguments.length - 2;
 		if (a === 1) r.children = n;
 		else if (1 < a) {
 			for (var o = Array(a), s = 0; s < a; s++) o[s] = arguments[s + 2];
 			r.children = o;
 		}
-		return T(e.type, i, r);
+		return w(e.type, i, r);
 	}, e.createContext = function(e) {
 		return e = {
 			$$typeof: s,
@@ -425,7 +425,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		}, e;
 	}, e.createElement = function(e, t, n) {
 		var r, i = {}, a = null;
-		if (t != null) for (r in t.key !== void 0 && (a = "" + t.key), t) te.call(t, r) && r !== "key" && r !== "__self" && r !== "__source" && (i[r] = t[r]);
+		if (t != null) for (r in t.key !== void 0 && (a = "" + t.key), t) ne.call(t, r) && r !== "key" && r !== "__self" && r !== "__source" && (i[r] = t[r]);
 		var o = arguments.length - 2;
 		if (o === 1) i.children = n;
 		else if (1 < o) {
@@ -433,7 +433,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			i.children = s;
 		}
 		if (e && e.defaultProps) for (r in o = e.defaultProps, o) i[r] === void 0 && (i[r] = o[r]);
-		return T(e, a, i);
+		return w(e, a, i);
 	}, e.createRef = function() {
 		return { current: null };
 	}, e.forwardRef = function(e) {
@@ -441,7 +441,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			$$typeof: c,
 			render: e
 		};
-	}, e.isValidElement = re, e.lazy = function(e) {
+	}, e.isValidElement = ie, e.lazy = function(e) {
 		return {
 			$$typeof: d,
 			_payload: {
@@ -457,43 +457,43 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			compare: t === void 0 ? null : t
 		};
 	}, e.startTransition = de, e.unstable_useCacheRefresh = function() {
-		return w.H.useCacheRefresh();
+		return C.H.useCacheRefresh();
 	}, e.use = function(e) {
-		return w.H.use(e);
+		return C.H.use(e);
 	}, e.useActionState = function(e, t, n) {
-		return w.H.useActionState(e, t, n);
+		return C.H.useActionState(e, t, n);
 	}, e.useCallback = function(e, t) {
-		return w.H.useCallback(e, t);
+		return C.H.useCallback(e, t);
 	}, e.useContext = function(e) {
-		return w.H.useContext(e);
+		return C.H.useContext(e);
 	}, e.useDebugValue = function() {}, e.useDeferredValue = function(e, t) {
-		return w.H.useDeferredValue(e, t);
+		return C.H.useDeferredValue(e, t);
 	}, e.useEffect = function(e, t) {
-		return w.H.useEffect(e, t);
+		return C.H.useEffect(e, t);
 	}, e.useEffectEvent = function(e) {
-		return w.H.useEffectEvent(e);
+		return C.H.useEffectEvent(e);
 	}, e.useId = function() {
-		return w.H.useId();
+		return C.H.useId();
 	}, e.useImperativeHandle = function(e, t, n) {
-		return w.H.useImperativeHandle(e, t, n);
+		return C.H.useImperativeHandle(e, t, n);
 	}, e.useInsertionEffect = function(e, t) {
-		return w.H.useInsertionEffect(e, t);
+		return C.H.useInsertionEffect(e, t);
 	}, e.useLayoutEffect = function(e, t) {
-		return w.H.useLayoutEffect(e, t);
+		return C.H.useLayoutEffect(e, t);
 	}, e.useMemo = function(e, t) {
-		return w.H.useMemo(e, t);
+		return C.H.useMemo(e, t);
 	}, e.useOptimistic = function(e, t) {
-		return w.H.useOptimistic(e, t);
+		return C.H.useOptimistic(e, t);
 	}, e.useReducer = function(e, t, n) {
-		return w.H.useReducer(e, t, n);
+		return C.H.useReducer(e, t, n);
 	}, e.useRef = function(e) {
-		return w.H.useRef(e);
+		return C.H.useRef(e);
 	}, e.useState = function(e) {
-		return w.H.useState(e);
+		return C.H.useState(e);
 	}, e.useSyncExternalStore = function(e, t, n) {
-		return w.H.useSyncExternalStore(e, t, n);
+		return C.H.useSyncExternalStore(e, t, n);
 	}, e.useTransition = function() {
-		return w.H.useTransition();
+		return C.H.useTransition();
 	}, e.version = "19.3.1";
 })), i = /* @__PURE__ */ e(((e, t) => {
 	t.exports = r();
@@ -779,21 +779,21 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			default: throw Error(s(559));
 		}
 	}
-	var x = null, S = null;
-	function ee(e, t, n) {
+	var x = null, ee = null;
+	function S(e, t, n) {
 		return e === n || e === t && (x = e, !0);
 	}
-	function C(e, t, n) {
-		return e === n ? (S = e, !1) : e === t && (S !== null && (x = e), !0);
+	function te(e, t, n) {
+		return e === n ? (ee = e, !1) : e === t && (ee !== null && (x = e), !0);
 	}
-	function w(e) {
+	function C(e) {
 		if (e === null) return null;
 		do
 			e = e === null ? null : e.return;
 		while (e && e.tag !== 5 && e.tag !== 27 && e.tag !== 3);
 		return e || null;
 	}
-	function te(e, t, n) {
+	function ne(e, t, n) {
 		for (var r = 0, i = e; i; i = n(i)) r++;
 		i = 0;
 		for (var a = t; a; a = n(a)) i++;
@@ -805,57 +805,57 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		}
 		return null;
 	}
-	var T = Object.assign, ne = Symbol.for("react.element"), re = Symbol.for("react.transitional.element"), ie = Symbol.for("react.portal"), ae = Symbol.for("react.fragment"), E = Symbol.for("react.strict_mode"), oe = Symbol.for("react.profiler"), se = Symbol.for("react.consumer"), ce = Symbol.for("react.context"), le = Symbol.for("react.forward_ref"), ue = Symbol.for("react.suspense"), de = Symbol.for("react.suspense_list"), fe = Symbol.for("react.memo"), pe = Symbol.for("react.lazy"), me = Symbol.for("react.activity"), he = Symbol.for("react.legacy_hidden"), ge = Symbol.for("react.memo_cache_sentinel"), _e = Symbol.for("react.view_transition"), ve = Symbol.for("react.recoverable"), ye = Symbol.iterator;
+	var w = Object.assign, re = Symbol.for("react.element"), ie = Symbol.for("react.transitional.element"), ae = Symbol.for("react.portal"), oe = Symbol.for("react.fragment"), T = Symbol.for("react.strict_mode"), se = Symbol.for("react.profiler"), ce = Symbol.for("react.consumer"), E = Symbol.for("react.context"), le = Symbol.for("react.forward_ref"), ue = Symbol.for("react.suspense"), de = Symbol.for("react.suspense_list"), fe = Symbol.for("react.memo"), pe = Symbol.for("react.lazy"), me = Symbol.for("react.activity"), he = Symbol.for("react.legacy_hidden"), ge = Symbol.for("react.memo_cache_sentinel"), _e = Symbol.for("react.view_transition"), ve = Symbol.for("react.recoverable"), ye = Symbol.iterator;
 	function be(e) {
 		return typeof e != "object" || !e ? null : (e = ye && e[ye] || e["@@iterator"], typeof e == "function" ? e : null);
 	}
 	var xe = Symbol.for("react.client.reference");
-	function Se(e) {
+	function D(e) {
 		if (e == null) return null;
 		if (typeof e == "function") return e.$$typeof === xe ? null : e.displayName || e.name || null;
 		if (typeof e == "string") return e;
 		switch (e) {
-			case ae: return "Fragment";
-			case oe: return "Profiler";
-			case E: return "StrictMode";
+			case oe: return "Fragment";
+			case se: return "Profiler";
+			case T: return "StrictMode";
 			case ue: return "Suspense";
 			case de: return "SuspenseList";
 			case me: return "Activity";
 			case _e: return "ViewTransition";
 		}
 		if (typeof e == "object") switch (e.$$typeof) {
-			case ie: return "Portal";
-			case ce: return e.displayName || "Context";
-			case se: return (e._context.displayName || "Context") + ".Consumer";
+			case ae: return "Portal";
+			case E: return e.displayName || "Context";
+			case ce: return (e._context.displayName || "Context") + ".Consumer";
 			case le:
 				var t = e.render;
 				return e = e.displayName, e ||= (e = t.displayName || t.name || "", e === "" ? "ForwardRef" : "ForwardRef(" + e + ")"), e;
-			case fe: return t = e.displayName || null, t === null ? Se(e.type) || "Memo" : t;
+			case fe: return t = e.displayName || null, t === null ? D(e.type) || "Memo" : t;
 			case pe:
 				t = e._payload, e = e._init;
 				try {
-					return Se(e(t));
+					return D(e(t));
 				} catch {}
 		}
 		return null;
 	}
-	var Ce = Array.isArray, D = r.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE, O = a.__DOM_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE, we = {
+	var Se = Array.isArray, O = r.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE, k = a.__DOM_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE, Ce = {
 		pending: !1,
 		data: null,
 		method: null,
 		action: null
-	}, Te = [], Ee = -1;
-	function De(e) {
+	}, we = [], Te = -1;
+	function Ee(e) {
 		return { current: e };
 	}
-	function k(e) {
-		0 > Ee || (e.current = Te[Ee], Te[Ee] = null, Ee--);
+	function De(e) {
+		0 > Te || (e.current = we[Te], we[Te] = null, Te--);
 	}
 	function A(e, t) {
-		Ee++, Te[Ee] = e.current, e.current = t;
+		Te++, we[Te] = e.current, e.current = t;
 	}
-	var Oe = De(null), ke = De(null), Ae = De(null), j = De(null);
-	function M(e, t) {
+	var Oe = Ee(null), ke = Ee(null), Ae = Ee(null), je = Ee(null);
+	function Me(e, t) {
 		switch (A(Ae, t), A(ke, e), A(Oe, null), t.nodeType) {
 			case 9:
 			case 11:
@@ -872,34 +872,34 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 				default: e = 0;
 			}
 		}
-		k(Oe), A(Oe, e);
+		De(Oe), A(Oe, e);
 	}
-	function je() {
-		k(Oe), k(ke), k(Ae);
+	function Ne() {
+		De(Oe), De(ke), De(Ae);
 	}
-	function Me(e) {
+	function Pe(e) {
 		var t = e.memoizedState;
-		t !== null && (sh._currentValue = t.memoizedState, A(j, e)), t = Oe.current;
+		t !== null && (sh._currentValue = t.memoizedState, A(je, e)), t = Oe.current;
 		var n = dp(t, e.type);
 		t !== n && (A(ke, e), A(Oe, n));
 	}
-	function Ne(e) {
-		ke.current === e && (k(Oe), k(ke)), j.current === e && (k(j), sh._currentValue = we);
+	function Fe(e) {
+		ke.current === e && (De(Oe), De(ke)), je.current === e && (De(je), sh._currentValue = Ce);
 	}
-	var Pe, Fe;
-	function Ie(e) {
-		if (Pe === void 0) try {
+	var Ie, Le;
+	function Re(e) {
+		if (Ie === void 0) try {
 			throw Error();
 		} catch (e) {
 			var t = e.stack.trim().match(/\n( *(at )?)/);
-			Pe = t && t[1] || "", Fe = -1 < e.stack.indexOf("\n    at") ? " (<anonymous>)" : -1 < e.stack.indexOf("@") ? "@unknown:0:0" : "";
+			Ie = t && t[1] || "", Le = -1 < e.stack.indexOf("\n    at") ? " (<anonymous>)" : -1 < e.stack.indexOf("@") ? "@unknown:0:0" : "";
 		}
-		return "\n" + Pe + e + Fe;
+		return "\n" + Ie + e + Le;
 	}
-	var Le = !1;
-	function Re(e, t) {
-		if (!e || Le) return "";
-		Le = !0;
+	var ze = !1;
+	function Be(e, t) {
+		if (!e || ze) return "";
+		ze = !0;
 		var n = Error.prepareStackTrace;
 		Error.prepareStackTrace = void 0;
 		try {
@@ -970,39 +970,39 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 				}
 			}
 		} finally {
-			Le = !1, Error.prepareStackTrace = n;
+			ze = !1, Error.prepareStackTrace = n;
 		}
-		return (n = e ? e.displayName || e.name : "") ? Ie(n) : "";
+		return (n = e ? e.displayName || e.name : "") ? Re(n) : "";
 	}
-	function ze(e, t) {
+	function j(e, t) {
 		switch (e.tag) {
 			case 26:
 			case 27:
-			case 5: return Ie(e.type);
-			case 16: return Ie("Lazy");
-			case 13: return e.child !== t && t !== null ? Ie("Suspense Fallback") : Ie("Suspense");
-			case 19: return Ie("SuspenseList");
+			case 5: return Re(e.type);
+			case 16: return Re("Lazy");
+			case 13: return e.child !== t && t !== null ? Re("Suspense Fallback") : Re("Suspense");
+			case 19: return Re("SuspenseList");
 			case 0:
-			case 15: return Re(e.type, !1);
-			case 11: return Re(e.type.render, !1);
-			case 1: return Re(e.type, !0);
-			case 31: return Ie("Activity");
-			case 30: return Ie("ViewTransition");
+			case 15: return Be(e.type, !1);
+			case 11: return Be(e.type.render, !1);
+			case 1: return Be(e.type, !0);
+			case 31: return Re("Activity");
+			case 30: return Re("ViewTransition");
 			default: return "";
 		}
 	}
-	function Be(e) {
+	function Ve(e) {
 		try {
 			var t = "", n = null;
 			do
-				t += ze(e, n), n = e, e = e.return;
+				t += j(e, n), n = e, e = e.return;
 			while (e);
 			return t;
 		} catch (e) {
 			return "\nError generating stack: " + e.message + "\n" + e.stack;
 		}
 	}
-	var Ve = Object.prototype.hasOwnProperty, He = t.unstable_scheduleCallback, Ue = t.unstable_cancelCallback, We = t.unstable_shouldYield, Ge = t.unstable_requestPaint, Ke = t.unstable_now, qe = t.unstable_getCurrentPriorityLevel, Je = t.unstable_ImmediatePriority, Ye = t.unstable_UserBlockingPriority, Xe = t.unstable_NormalPriority, Ze = t.unstable_LowPriority, Qe = t.unstable_IdlePriority, $e = t.log, et = t.unstable_setDisableYieldValue, tt = null, nt = null;
+	var He = Object.prototype.hasOwnProperty, Ue = t.unstable_scheduleCallback, We = t.unstable_cancelCallback, Ge = t.unstable_shouldYield, Ke = t.unstable_requestPaint, M = t.unstable_now, qe = t.unstable_getCurrentPriorityLevel, Je = t.unstable_ImmediatePriority, Ye = t.unstable_UserBlockingPriority, Xe = t.unstable_NormalPriority, Ze = t.unstable_LowPriority, Qe = t.unstable_IdlePriority, $e = t.log, et = t.unstable_setDisableYieldValue, tt = null, nt = null;
 	function rt(e) {
 		if (typeof $e == "function" && et(e), nt && typeof nt.setStrictMode == "function") try {
 			nt.setStrictMode(tt, e);
@@ -1148,9 +1148,9 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	}
 	function St(e, t) {
 		var n = t & -t;
-		return n = n & 42 ? 1 : N(n), (n & (e.suspendedLanes | t)) === 0 ? n : 0;
+		return n = n & 42 ? 1 : Ct(n), (n & (e.suspendedLanes | t)) === 0 ? n : 0;
 	}
-	function N(e) {
+	function Ct(e) {
 		switch (e) {
 			case 2:
 				e = 1;
@@ -1188,32 +1188,32 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		}
 		return e;
 	}
-	function P(e) {
+	function wt(e) {
 		return e &= -e, 2 < e ? 8 < e ? e & 134217727 ? 32 : 268435456 : 8 : 2;
 	}
-	function Ct() {
-		var e = O.p;
+	function Tt() {
+		var e = k.p;
 		return e === 0 ? (e = window.event, e === void 0 ? 32 : Ch(e.type)) : e;
 	}
-	function wt(e, t) {
-		var n = O.p;
+	function Et(e, t) {
+		var n = k.p;
 		try {
-			return O.p = e, t();
+			return k.p = e, t();
 		} finally {
-			O.p = n;
+			k.p = n;
 		}
 	}
-	var F = Math.random().toString(36).slice(2), I = "__reactFiber$" + F, Tt = "__reactProps$" + F, Et = "__reactContainer$" + F, Dt = "__reactEvents$" + F, Ot = "__reactListeners$" + F, kt = "__reactHandles$" + F, At = "__reactResources$" + F, jt = "__reactMarker$" + F, L = "__reactLoad$" + F;
-	function Mt(e) {
-		delete e[I], delete e[Tt], delete e[Ot], delete e[kt];
+	var Dt = Math.random().toString(36).slice(2), N = "__reactFiber$" + Dt, Ot = "__reactProps$" + Dt, kt = "__reactContainer$" + Dt, At = "__reactEvents$" + Dt, jt = "__reactListeners$" + Dt, P = "__reactHandles$" + Dt, F = "__reactResources$" + Dt, Mt = "__reactMarker$" + Dt, Nt = "__reactLoad$" + Dt;
+	function Pt(e) {
+		delete e[N], delete e[Ot], delete e[jt], delete e[P];
 	}
-	function Nt(e) {
+	function I(e) {
 		var t;
-		if (t = e[I]) return t;
+		if (t = e[N]) return t;
 		for (var n = e.parentNode; n;) {
-			if (t = n[Et] || n[I]) {
+			if (t = n[kt] || n[N]) {
 				if (n = t.alternate, t.child !== null || n !== null && n.child !== null) for (e = fm(e); e !== null;) {
-					if (n = e[I]) return n;
+					if (n = e[N]) return n;
 					e = fm(e);
 				}
 				return t;
@@ -1222,41 +1222,41 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		}
 		return null;
 	}
-	function Pt(e) {
-		if (e = e[I] || e[Et]) {
+	function Ft(e) {
+		if (e = e[N] || e[kt]) {
 			var t = e.tag;
 			if (t === 5 || t === 6 || t === 13 || t === 31 || t === 26 || t === 27 || t === 3) return e;
 		}
 		return null;
 	}
-	function Ft(e) {
+	function It(e) {
 		var t = e.tag;
 		if (t === 5 || t === 26 || t === 27 || t === 6) return e.stateNode;
 		throw Error(s(33));
 	}
-	function It(e) {
-		var t = e[At];
-		return t ||= e[At] = {
+	function Lt(e) {
+		var t = e[F];
+		return t ||= e[F] = {
 			hoistableStyles: /* @__PURE__ */ new Map(),
 			hoistableScripts: /* @__PURE__ */ new Map()
 		}, t;
 	}
-	function R(e) {
-		e[jt] = !0;
+	function L(e) {
+		e[Mt] = !0;
 	}
-	function Lt(e) {
-		e[L] = void 0;
+	function Rt(e) {
+		e[Nt] = void 0;
 	}
-	var Rt = /* @__PURE__ */ new Set(), zt = {};
-	function Bt(e, t) {
+	var zt = /* @__PURE__ */ new Set(), Bt = {};
+	function R(e, t) {
 		Vt(e, t), Vt(e + "Capture", t);
 	}
 	function Vt(e, t) {
-		for (zt[e] = t, e = 0; e < t.length; e++) Rt.add(t[e]);
+		for (Bt[e] = t, e = 0; e < t.length; e++) zt.add(t[e]);
 	}
 	var Ht = RegExp("^[:A-Z_a-z\\u00C0-\\u00D6\\u00D8-\\u00F6\\u00F8-\\u02FF\\u0370-\\u037D\\u037F-\\u1FFF\\u200C-\\u200D\\u2070-\\u218F\\u2C00-\\u2FEF\\u3001-\\uD7FF\\uF900-\\uFDCF\\uFDF0-\\uFFFD][:A-Z_a-z\\u00C0-\\u00D6\\u00D8-\\u00F6\\u00F8-\\u02FF\\u0370-\\u037D\\u037F-\\u1FFF\\u200C-\\u200D\\u2070-\\u218F\\u2C00-\\u2FEF\\u3001-\\uD7FF\\uF900-\\uFDCF\\uFDF0-\\uFFFD\\-.0-9\\u00B7\\u0300-\\u036F\\u203F-\\u2040]*$"), Ut = {}, Wt = {};
 	function Gt(e) {
-		return Ve.call(Wt, e) ? !0 : Ve.call(Ut, e) ? !1 : Ht.test(e) ? Wt[e] = !0 : (Ut[e] = !0, !1);
+		return He.call(Wt, e) ? !0 : He.call(Ut, e) ? !1 : Ht.test(e) ? Wt[e] = !0 : (Ut[e] = !0, !1);
 	}
 	var z = !1;
 	function Kt() {
@@ -1410,7 +1410,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		if (t == null) {
 			if (r != null) {
 				if (n != null) throw Error(s(92));
-				if (Ce(r)) {
+				if (Se(r)) {
 					if (1 < r.length) throw Error(s(93));
 					r = r[0];
 				}
@@ -1547,9 +1547,9 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	}
 	var xn = null, Sn = null;
 	function Cn(e) {
-		var t = Pt(e);
+		var t = Ft(e);
 		if (t && (e = t.stateNode)) {
-			var n = e[Tt] || null;
+			var n = e[Ot] || null;
 			a: switch (e = t.stateNode, t.type) {
 				case "input":
 					if (rn(e, n.value, n.defaultValue, n.defaultValue, n.checked, n.defaultChecked, n.type, n.name), t = n.name, n.type === "radio" && t != null) {
@@ -1557,7 +1557,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 						for (n = n.querySelectorAll("input[name=\"" + nn("" + t) + "\"][type=\"radio\"]"), t = 0; t < n.length; t++) {
 							var r = n[t];
 							if (r !== e && r.form === e.form) {
-								var i = r[Tt] || null;
+								var i = r[Ot] || null;
 								if (!i) throw Error(s(90));
 								rn(r, i.value, i.defaultValue, i.defaultValue, i.checked, i.defaultChecked, i.type, i.name);
 							}
@@ -1585,7 +1585,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	function En(e, t) {
 		var n = e.stateNode;
 		if (n === null) return null;
-		var r = n[Tt] || null;
+		var r = n[Ot] || null;
 		if (r === null) return null;
 		n = r[t];
 		a: switch (t) {
@@ -1641,7 +1641,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			for (var o in this._reactName = t, this._targetInst = r, this.type = n, this.nativeEvent = i, this.target = a, this.currentTarget = null, e) e.hasOwnProperty(o) && (t = e[o], this[o] = t ? t(i) : i[o]);
 			return this.isDefaultPrevented = (i.defaultPrevented == null ? !1 === i.returnValue : i.defaultPrevented) ? Fn : In, this.isPropagationStopped = In, this;
 		}
-		return T(t.prototype, {
+		return w(t.prototype, {
 			preventDefault: function() {
 				this.defaultPrevented = !0;
 				var e = this.nativeEvent;
@@ -1664,10 +1664,10 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		},
 		defaultPrevented: 0,
 		isTrusted: 0
-	}, zn = Ln(Rn), Bn = T({}, Rn, {
+	}, zn = Ln(Rn), Bn = w({}, Rn, {
 		view: 0,
 		detail: 0
-	}), Vn = Ln(Bn), Hn, Un, Wn, Gn = T({}, Bn, {
+	}), Vn = Ln(Bn), Hn, Un, Wn, Gn = w({}, Bn, {
 		screenX: 0,
 		screenY: 0,
 		clientX: 0,
@@ -1690,13 +1690,13 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		movementY: function(e) {
 			return "movementY" in e ? e.movementY : Un;
 		}
-	}), Kn = Ln(Gn), qn = Ln(T({}, Gn, { dataTransfer: 0 })), Jn = Ln(T({}, Bn, { relatedTarget: 0 })), Yn = Ln(T({}, Rn, {
+	}), Kn = Ln(Gn), qn = Ln(w({}, Gn, { dataTransfer: 0 })), Jn = Ln(w({}, Bn, { relatedTarget: 0 })), Yn = Ln(w({}, Rn, {
 		animationName: 0,
 		elapsedTime: 0,
 		pseudoElement: 0
-	})), Xn = Ln(T({}, Rn, { clipboardData: function(e) {
+	})), Xn = Ln(w({}, Rn, { clipboardData: function(e) {
 		return "clipboardData" in e ? e.clipboardData : window.clipboardData;
-	} })), Zn = Ln(T({}, Rn, { data: 0 })), Qn = {
+	} })), Zn = Ln(w({}, Rn, { data: 0 })), Qn = {
 		Esc: "Escape",
 		Spacebar: " ",
 		Left: "ArrowLeft",
@@ -1759,7 +1759,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	function nr() {
 		return tr;
 	}
-	var rr = Ln(T({}, Bn, {
+	var rr = Ln(w({}, Bn, {
 		key: function(e) {
 			if (e.key) {
 				var t = Qn[e.key] || e.key;
@@ -1785,7 +1785,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		which: function(e) {
 			return e.type === "keypress" ? Pn(e) : e.type === "keydown" || e.type === "keyup" ? e.keyCode : 0;
 		}
-	})), ir = Ln(T({}, Gn, {
+	})), ir = Ln(w({}, Gn, {
 		pointerId: 0,
 		width: 0,
 		height: 0,
@@ -1796,7 +1796,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		twist: 0,
 		pointerType: 0,
 		isPrimary: 0
-	})), ar = Ln(T({}, Rn, { submitter: 0 })), or = Ln(T({}, Bn, {
+	})), ar = Ln(w({}, Rn, { submitter: 0 })), or = Ln(w({}, Bn, {
 		touches: 0,
 		targetTouches: 0,
 		changedTouches: 0,
@@ -1805,11 +1805,11 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		ctrlKey: 0,
 		shiftKey: 0,
 		getModifierState: nr
-	})), sr = Ln(T({}, Rn, {
+	})), sr = Ln(w({}, Rn, {
 		propertyName: 0,
 		elapsedTime: 0,
 		pseudoElement: 0
-	})), cr = Ln(T({}, Gn, {
+	})), cr = Ln(w({}, Gn, {
 		deltaX: function(e) {
 			return "deltaX" in e ? e.deltaX : "wheelDeltaX" in e ? -e.wheelDeltaX : 0;
 		},
@@ -1818,7 +1818,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		},
 		deltaZ: 0,
 		deltaMode: 0
-	})), lr = Ln(T({}, Rn, {
+	})), lr = Ln(w({}, Rn, {
 		newState: 0,
 		oldState: 0,
 		source: 0
@@ -1898,7 +1898,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		Vf(e, 0);
 	}
 	function Or(e) {
-		if (en(Ft(e))) return e;
+		if (en(It(e))) return e;
 	}
 	function kr(e, t) {
 		if (e === "change") return t;
@@ -1948,7 +1948,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		if (n.length !== r.length) return !1;
 		for (r = 0; r < n.length; r++) {
 			var i = n[r];
-			if (!Ve.call(t, i) || !Vr(e[i], t[i])) return !1;
+			if (!He.call(t, i) || !Vr(e[i], t[i])) return !1;
 		}
 		return !0;
 	}
@@ -2049,7 +2049,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	var oi = ai("animationend"), si = ai("animationiteration"), ci = ai("animationstart"), li = ai("transitionrun"), ui = ai("transitionstart"), di = ai("transitioncancel"), fi = ai("transitionend"), pi = /* @__PURE__ */ new Map(), mi = "abort auxClick beforeToggle cancel canPlay canPlayThrough click close contextMenu copy cut drag dragEnd dragEnter dragExit dragLeave dragOver dragStart drop durationChange emptied encrypted ended error fullscreenChange fullscreenError gotPointerCapture input invalid keyDown keyPress keyUp load loadedData loadedMetadata loadStart lostPointerCapture mouseDown mouseMove mouseOut mouseOver mouseUp paste pause play playing pointerCancel pointerDown pointerMove pointerOut pointerOver pointerUp progress rateChange reset resize seeked seeking stalled submit suspend timeUpdate touchCancel touchEnd touchStart volumeChange scroll toggle touchMove waiting wheel".split(" ");
 	mi.push("scrollEnd");
 	function hi(e, t) {
-		pi.set(e, t), Bt(t, [e]);
+		pi.set(e, t), R(t, [e]);
 	}
 	var gi = 0;
 	function _i(e, t) {
@@ -2157,11 +2157,11 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		else if (typeof r == "string") o = qm(e, n, Oe.current) ? 26 : e === "html" || e === "head" || e === "body" ? 27 : 5;
 		else a: switch (r) {
 			case me: return e = Mi(31, n, t, i), e.elementType = me, e.lanes = a, e;
-			case ae: return Li(n.children, i, a, t);
-			case E:
+			case oe: return Li(n.children, i, a, t);
+			case T:
 				o = 8, i |= 24;
 				break;
-			case oe: return e = Mi(12, n, t, i | 2), e.elementType = oe, e.lanes = a, e;
+			case se: return e = Mi(12, n, t, i | 2), e.elementType = se, e.lanes = a, e;
 			case ue: return e = Mi(13, n, t, i), e.elementType = ue, e.lanes = a, e;
 			case de: return e = Mi(19, n, t, i), e.elementType = de, e.lanes = a, e;
 			case he:
@@ -2173,10 +2173,10 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			}, e;
 			default:
 				if (typeof r == "object" && r) switch (r.$$typeof) {
-					case ce:
+					case E:
 						o = 10;
 						break a;
-					case se:
+					case ce:
 						o = 9;
 						break a;
 					case le:
@@ -2217,13 +2217,13 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			return n === void 0 ? (t = {
 				value: e,
 				source: t,
-				stack: Be(t)
+				stack: Ve(t)
 			}, Vi.set(e, t), t) : n;
 		}
 		return {
 			value: e,
 			source: t,
-			stack: Be(t)
+			stack: Ve(t)
 		};
 	}
 	var Ui = [], Wi = 0, Gi = null, Ki = 0, qi = [], Ji = 0, Yi = null, Xi = 1, Zi = "";
@@ -2258,7 +2258,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	}
 	function ca(e) {
 		var t = e.stateNode, n = e.type, r = e.memoizedProps;
-		switch (t[I] = e, t[Tt] = r, n) {
+		switch (t[N] = e, t[Ot] = r, n) {
 			case "dialog":
 				Q("cancel", t), Q("close", t);
 				break;
@@ -2329,12 +2329,12 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	function pa(e) {
 		ia === null ? ia = [e] : ia.push(e);
 	}
-	var ma = De(null), ha = null, ga = null;
+	var ma = Ee(null), ha = null, ga = null;
 	function _a(e, t, n) {
 		A(ma, t._currentValue), t._currentValue = n;
 	}
 	function va(e) {
-		e._currentValue = ma.current, k(ma);
+		e._currentValue = ma.current, De(ma);
 	}
 	function ya(e, t, n) {
 		for (; e !== null;) {
@@ -2392,7 +2392,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 					var c = i.type;
 					Vr(i.pendingProps.value, o.value) || (e === null ? e = [c] : e.push(c));
 				}
-			} else if (i === j.current) {
+			} else if (i === je.current) {
 				if (o = i.alternate, o === null) throw Error(s(387));
 				o.memoizedState.memoizedState !== i.memoizedState.memoizedState && (e === null ? e = [sh] : e.push(sh));
 			}
@@ -2444,7 +2444,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			});
 		};
 	}, Oa = t.unstable_scheduleCallback, ka = t.unstable_NormalPriority, Aa = {
-		$$typeof: ce,
+		$$typeof: E,
 		Consumer: null,
 		Provider: null,
 		_currentValue: null,
@@ -2515,9 +2515,9 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			for (r.status = "rejected", r.reason = e, e = 0; e < n.length; e++) (0, n[e])(void 0);
 		}), r;
 	}
-	var Ua = D.S;
-	D.S = function(e, t) {
-		if (hd = Ke(), typeof t == "object" && t && typeof t.then == "function" && Ba(e, t), Pa !== null) for (var n = bf; n !== null;) Na(n, Pa), n = n.next;
+	var Ua = O.S;
+	O.S = function(e, t) {
+		if (hd = M(), typeof t == "object" && t && typeof t.then == "function" && Ba(e, t), Pa !== null) for (var n = bf; n !== null;) Na(n, Pa), n = n.next;
 		if (n = e.types, n !== null) {
 			for (var r = bf; r !== null;) Na(r, n), r = r.next;
 			if (Ra !== 0) {
@@ -2530,7 +2530,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		}
 		Ua !== null && Ua(e, t);
 	};
-	var Wa = De(null);
+	var Wa = Ee(null);
 	function Ga() {
 		var e = Wa.current;
 		return e === null ? q.pooledCache : e;
@@ -2602,7 +2602,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		t = t.props.ref, e.ref = t === void 0 ? null : t;
 	}
 	function co(e, t) {
-		throw t.$$typeof === ne ? Error(s(525)) : (e = Object.prototype.toString.call(t), Error(s(31, e === "[object Object]" ? "object with keys {" + Object.keys(t).join(", ") + "}" : e)));
+		throw t.$$typeof === re ? Error(s(525)) : (e = Object.prototype.toString.call(t), Error(s(31, e === "[object Object]" ? "object with keys {" + Object.keys(t).join(", ") + "}" : e)));
 	}
 	function lo(e) {
 		function t(t, n) {
@@ -2634,7 +2634,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		}
 		function l(e, t, n, r) {
 			var a = n.type;
-			return a === ae ? (e = d(e, t, n.props.children, r, n.key), so(e, n), e) : t !== null && (t.elementType === a || typeof a == "object" && a && a.$$typeof === pe && eo(a) === t.type) ? (t = i(t, n.props), so(t, n), t.return = e, t) : (t = Ii(n.type, n.key, n.props, null, e.mode, r), so(t, n), t.return = e, t);
+			return a === oe ? (e = d(e, t, n.props.children, r, n.key), so(e, n), e) : t !== null && (t.elementType === a || typeof a == "object" && a && a.$$typeof === pe && eo(a) === t.type) ? (t = i(t, n.props), so(t, n), t.return = e, t) : (t = Ii(n.type, n.key, n.props, null, e.mode, r), so(t, n), t.return = e, t);
 		}
 		function u(e, t, n, r) {
 			return t === null || t.tag !== 4 || t.stateNode.containerInfo !== n.containerInfo || t.stateNode.implementation !== n.implementation ? (t = Bi(n, e.mode, r), t.return = e, t) : (t = i(t, n.children || []), t.return = e, t);
@@ -2646,13 +2646,13 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			if (typeof t == "string" && t !== "" || typeof t == "number" || typeof t == "bigint") return t = Ri("" + t, e.mode, n), t.return = e, t;
 			if (typeof t == "object" && t) {
 				switch (t.$$typeof) {
-					case re: return n = Ii(t.type, t.key, t.props, null, e.mode, n), so(n, t), n.return = e, n;
-					case ie: return t = Bi(t, e.mode, n), t.return = e, t;
+					case ie: return n = Ii(t.type, t.key, t.props, null, e.mode, n), so(n, t), n.return = e, n;
+					case ae: return t = Bi(t, e.mode, n), t.return = e, t;
 					case pe: return t = eo(t), f(e, t, n);
 				}
-				if (Ce(t) || be(t)) return t = Li(t, e.mode, n, null), t.return = e, t;
+				if (Se(t) || be(t)) return t = Li(t, e.mode, n, null), t.return = e, t;
 				if (typeof t.then == "function") return f(e, oo(t), n);
-				if (t.$$typeof === ce) return f(e, Ta(e, t), n);
+				if (t.$$typeof === E) return f(e, Ta(e, t), n);
 				co(e, t);
 			}
 			return null;
@@ -2662,13 +2662,13 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			if (typeof n == "string" && n !== "" || typeof n == "number" || typeof n == "bigint") return i === null ? c(e, t, "" + n, r) : null;
 			if (typeof n == "object" && n) {
 				switch (n.$$typeof) {
-					case re: return n.key === i ? l(e, t, n, r) : null;
-					case ie: return n.key === i ? u(e, t, n, r) : null;
+					case ie: return n.key === i ? l(e, t, n, r) : null;
+					case ae: return n.key === i ? u(e, t, n, r) : null;
 					case pe: return n = eo(n), p(e, t, n, r);
 				}
-				if (Ce(n) || be(n)) return i === null ? d(e, t, n, r, null) : null;
+				if (Se(n) || be(n)) return i === null ? d(e, t, n, r, null) : null;
 				if (typeof n.then == "function") return p(e, t, oo(n), r);
-				if (n.$$typeof === ce) return p(e, t, Ta(e, n), r);
+				if (n.$$typeof === E) return p(e, t, Ta(e, n), r);
 				co(e, n);
 			}
 			return null;
@@ -2677,13 +2677,13 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			if (typeof r == "string" && r !== "" || typeof r == "number" || typeof r == "bigint") return e = e.get(n) || null, c(t, e, "" + r, i);
 			if (typeof r == "object" && r) {
 				switch (r.$$typeof) {
-					case re: return e = e.get(r.key === null ? n : r.key) || null, l(t, e, r, i);
-					case ie: return e = e.get(r.key === null ? n : r.key) || null, u(t, e, r, i);
+					case ie: return e = e.get(r.key === null ? n : r.key) || null, l(t, e, r, i);
+					case ae: return e = e.get(r.key === null ? n : r.key) || null, u(t, e, r, i);
 					case pe: return r = eo(r), m(e, t, n, r, i);
 				}
-				if (Ce(r) || be(r)) return e = e.get(n) || null, d(t, e, r, i, null);
+				if (Se(r) || be(r)) return e = e.get(n) || null, d(t, e, r, i, null);
 				if (typeof r.then == "function") return m(e, t, n, oo(r), i);
-				if (r.$$typeof === ce) return m(e, t, n, Ta(t, r), i);
+				if (r.$$typeof === E) return m(e, t, n, Ta(t, r), i);
 				co(t, r);
 			}
 			return null;
@@ -2730,13 +2730,13 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			}), V && Qi(i, g), u;
 		}
 		function _(e, r, a, c) {
-			if (typeof a == "object" && a && a.type === ae && a.key === null && a.props.ref === void 0 && (a = a.props.children), typeof a == "object" && a) {
+			if (typeof a == "object" && a && a.type === oe && a.key === null && a.props.ref === void 0 && (a = a.props.children), typeof a == "object" && a) {
 				switch (a.$$typeof) {
-					case re:
+					case ie:
 						a: {
 							for (var l = a.key; r !== null;) {
 								if (r.key === l) {
-									if (l = a.type, l === ae) {
+									if (l = a.type, l === oe) {
 										if (r.tag === 7) {
 											n(e, r.sibling), c = i(r, a.props.children), so(c, a), c.return = e, e = c;
 											break a;
@@ -2750,10 +2750,10 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 								}
 								t(e, r), r = r.sibling;
 							}
-							a.type === ae ? (c = Li(a.props.children, e.mode, c, a.key), so(c, a), c.return = e, e = c) : (c = Ii(a.type, a.key, a.props, null, e.mode, c), so(c, a), c.return = e, e = c);
+							a.type === oe ? (c = Li(a.props.children, e.mode, c, a.key), so(c, a), c.return = e, e = c) : (c = Ii(a.type, a.key, a.props, null, e.mode, c), so(c, a), c.return = e, e = c);
 						}
 						return o(e);
-					case ie:
+					case ae:
 						a: {
 							for (l = a.key; r !== null;) {
 								if (r.key === l) {
@@ -2771,13 +2771,13 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 						return o(e);
 					case pe: return a = eo(a), _(e, r, a, c);
 				}
-				if (Ce(a)) return h(e, r, a, c);
+				if (Se(a)) return h(e, r, a, c);
 				if (be(a)) {
 					if (l = be(a), typeof l != "function") throw Error(s(150));
 					return a = l.call(a), g(e, r, a, c);
 				}
 				if (typeof a.then == "function") return _(e, r, oo(a), c);
-				if (a.$$typeof === ce) return _(e, r, Ta(e, a), c);
+				if (a.$$typeof === E) return _(e, r, Ta(e, a), c);
 				co(e, a);
 			}
 			return typeof a == "string" && a !== "" || typeof a == "number" || typeof a == "bigint" ? (a = "" + a, r !== null && r.tag === 6 ? (n(e, r.sibling), c = i(r, a), c.return = e, e = c) : (n(e, r), c = Ri(a, e.mode, c), c.return = e, e = c), o(e)) : n(e, r);
@@ -2914,7 +2914,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 							case 3: m.flags = m.flags & -65537 | 128;
 							case 0:
 								if (m = h.payload, f = typeof m == "function" ? m.call(g, d, f) : m, f == null) break a;
-								d = T({}, d, f);
+								d = w({}, d, f);
 								break a;
 							case 2: po = !0;
 						}
@@ -2943,7 +2943,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		var n = e.callbacks;
 		if (n !== null) for (e.callbacks = null, e = 0; e < n.length; e++) Co(n[e], t);
 	}
-	var To = De(null), Eo = De(0);
+	var To = Ee(null), Eo = Ee(0);
 	function Do(e, t) {
 		e = id, A(Eo, e), A(To, t), id = e | t.baseLanes;
 	}
@@ -2951,9 +2951,9 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		A(Eo, id), A(To, To.current);
 	}
 	function ko() {
-		id = Eo.current, k(To), k(Eo);
+		id = Eo.current, De(To), De(Eo);
 	}
-	var Ao = De(null), jo = null;
+	var Ao = Ee(null), jo = null;
 	function Mo(e) {
 		var t = e.alternate;
 		A(Lo, Lo.current & 1), A(Ao, e), jo === null && (t === null || To.current !== null || t.memoizedState !== null) && (jo = e);
@@ -2968,14 +2968,14 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		A(Lo, Lo.current), A(Ao, Ao.current);
 	}
 	function Io(e) {
-		k(Ao), jo === e && (jo = null), k(Lo);
+		De(Ao), jo === e && (jo = null), De(Lo);
 	}
-	var Lo = De(0);
+	var Lo = Ee(0);
 	function Ro(e, t) {
 		A(Ao, Ao.current), A(Lo, t);
 	}
 	function zo(e) {
-		k(Lo), k(Ao), jo === e && (jo = null);
+		De(Lo), De(Ao), jo === e && (jo = null);
 	}
 	function Bo(e) {
 		for (var t = e; t !== null;) {
@@ -3007,10 +3007,10 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		return !0;
 	}
 	function Qo(e, t, n, r, i, a) {
-		return Vo = a, H = t, t.memoizedState = null, t.updateQueue = null, t.lanes = 0, D.H = e === null || e.memoizedState === null ? hc : gc, Go = !1, a = n(r, i), Go = !1, Wo && (a = es(t, n, r, i)), $o(e), a;
+		return Vo = a, H = t, t.memoizedState = null, t.updateQueue = null, t.lanes = 0, O.H = e === null || e.memoizedState === null ? hc : gc, Go = !1, a = n(r, i), Go = !1, Wo && (a = es(t, n, r, i)), $o(e), a;
 	}
 	function $o(e) {
-		D.H = mc;
+		O.H = mc;
 		var t = U !== null && U.next !== null;
 		if (Vo = 0, Ho = U = H = null, Uo = !1, qo = 0, Jo = null, t) throw Error(s(300));
 		e === null || Nc || (e = e.dependencies, e !== null && Sa(e) && (Nc = !0));
@@ -3024,12 +3024,12 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 				var a = e.updateQueue;
 				a.lastEffect = null, a.events = null, a.stores = null, a.memoCache != null && (a.memoCache.index = 0);
 			}
-			D.H = _c, a = t(n, r);
+			O.H = _c, a = t(n, r);
 		} while (Wo);
 		return a;
 	}
 	function ts() {
-		var e = D.H, t = e.useState()[0];
+		var e = O.H, t = e.useState()[0];
 		return t = typeof t.then == "function" ? cs(t) : t, e = e.useState()[0], (U === null ? null : U.memoizedState) !== e && (H.flags |= 1024), t;
 	}
 	function ns() {
@@ -3088,13 +3088,13 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	}
 	function cs(e) {
 		var t = qo;
-		return qo += 1, Jo === null && (Jo = []), e = $a(Jo, e, t), t = H, (Ho === null ? t.memoizedState : Ho.next) === null && (t = t.alternate, D.H = t === null || t.memoizedState === null ? hc : gc), e;
+		return qo += 1, Jo === null && (Jo = []), e = $a(Jo, e, t), t = H, (Ho === null ? t.memoizedState : Ho.next) === null && (t = t.alternate, O.H = t === null || t.memoizedState === null ? hc : gc), e;
 	}
 	function ls(e) {
 		if (typeof e == "object" && e) {
 			if (typeof e.then == "function") return cs(e);
 			if (e.$$typeof === ve) return;
-			if (e.$$typeof === ce) return wa(e);
+			if (e.$$typeof === E) return wa(e);
 		}
 		throw Error(s(438, String(e)));
 	}
@@ -3275,21 +3275,21 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 					a.listeners.push(e);
 				}
 			};
-			D.T === null ? a.isTransition = !1 : n(!0), r(a), n = t.pending, n === null ? (a.next = t.pending = a, ws(t, a)) : (a.next = n.next, t.pending = n.next = a);
+			O.T === null ? a.isTransition = !1 : n(!0), r(a), n = t.pending, n === null ? (a.next = t.pending = a, ws(t, a)) : (a.next = n.next, t.pending = n.next = a);
 		}
 	}
 	function ws(e, t) {
 		var n = t.action, r = t.payload, i = e.state;
 		if (t.isTransition) {
-			var a = D.T, o = {};
-			o.types = a === null ? null : a.types, D.T = o;
+			var a = O.T, o = {};
+			o.types = a === null ? null : a.types, O.T = o;
 			try {
-				var s = n(i, r), c = D.S;
+				var s = n(i, r), c = O.S;
 				c !== null && c(o, s), Ts(e, t, s);
 			} catch (n) {
 				Ds(e, t, n);
 			} finally {
-				a !== null && o.types !== null && (a.types = o.types), D.T = a;
+				a !== null && o.types !== null && (a.types = o.types), O.T = a;
 			}
 		} else try {
 			a = n(i, r), Ts(e, t, a);
@@ -3497,12 +3497,12 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		return Vr(n, t) ? n : To.current === null ? !(Vo & 106) || Vo & 1073741824 && !(Y & 261930) ? (Nc = !0, e.memoizedState = n) : (e = Md(), H.lanes |= e, od |= e, t) : (e = Xs(e, n, r), Vr(e, t) || (Nc = !0), e);
 	}
 	function Qs(e, t, n, r, i) {
-		var a = O.p;
-		O.p = a !== 0 && 8 > a ? a : 8;
-		var o = D.T, s = {};
-		s.types = o === null ? null : o.types, D.T = s, uc(e, !1, t, n);
+		var a = k.p;
+		k.p = a !== 0 && 8 > a ? a : 8;
+		var o = O.T, s = {};
+		s.types = o === null ? null : o.types, O.T = s, uc(e, !1, t, n);
 		try {
-			var c = i(), l = D.S;
+			var c = i(), l = O.S;
 			l !== null && l(s, c), typeof c == "object" && c && typeof c.then == "function" ? lc(e, t, Ha(c, r), jd(e)) : lc(e, t, r, jd(e));
 		} catch (n) {
 			lc(e, t, {
@@ -3511,14 +3511,14 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 				reason: n
 			}, jd());
 		} finally {
-			O.p = a, o !== null && s.types !== null && (o.types = s.types), D.T = o;
+			k.p = a, o !== null && s.types !== null && (o.types = s.types), O.T = o;
 		}
 	}
 	function $s() {}
 	function ec(e, t, n, r) {
 		if (e.tag !== 5) throw Error(s(476));
 		var i = tc(e).queue;
-		Qs(e, i, t, we, n === null ? $s : function() {
+		Qs(e, i, t, Ce, n === null ? $s : function() {
 			return nc(e), n(r);
 		});
 	}
@@ -3526,15 +3526,15 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		var t = e.memoizedState;
 		if (t !== null) return t;
 		t = {
-			memoizedState: we,
-			baseState: we,
+			memoizedState: Ce,
+			baseState: Ce,
 			baseQueue: null,
 			queue: {
 				pending: null,
 				lanes: 0,
 				dispatch: null,
 				lastRenderedReducer: ds,
-				lastRenderedState: we
+				lastRenderedState: Ce
 			},
 			next: null
 		};
@@ -3860,7 +3860,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		useEffectEvent: Hs
 	};
 	function vc(e, t, n, r) {
-		t = e.memoizedState, n = n(r, t), n = n == null ? t : T({}, t, n), e.memoizedState = n, e.lanes === 0 && (e.updateQueue.baseState = n);
+		t = e.memoizedState, n = n(r, t), n = n == null ? t : w({}, t, n), e.memoizedState = n, e.lanes === 0 && (e.updateQueue.baseState = n);
 	}
 	var yc = {
 		enqueueSetState: function(e, t, n) {
@@ -3888,7 +3888,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	function Sc(e, t) {
 		var n = t;
 		if ("ref" in t) for (var r in n = {}, t) r !== "ref" && (n[r] = t[r]);
-		if (e = e.defaultProps) for (var i in n === t && (n = T({}, n)), e) n[i] === void 0 && (n[i] = e[i]);
+		if (e = e.defaultProps) for (var i in n === t && (n = w({}, n)), e) n[i] === void 0 && (n[i] = e[i]);
 		return n;
 	}
 	function Cc(e) {
@@ -4329,14 +4329,14 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	function dl(e, t, n) {
 		switch (t.tag) {
 			case 3:
-				M(t, t.stateNode.containerInfo), _a(t, Aa, e.memoizedState.cache), da();
+				Me(t, t.stateNode.containerInfo), _a(t, Aa, e.memoizedState.cache), da();
 				break;
 			case 27:
 			case 5:
-				Me(t);
+				Pe(t);
 				break;
 			case 4:
-				M(t, t.stateNode.containerInfo);
+				Me(t, t.stateNode.containerInfo);
 				break;
 			case 10:
 				_a(t, t.type, t.memoizedProps.value);
@@ -4391,12 +4391,12 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 								t.tag = 14, t = Ic(null, t, e, r, n);
 								break a;
 							}
-							if (i === ce) {
+							if (i === E) {
 								t.tag = 10, t.type = e, t = cl(null, t, n);
 								break a;
 							}
 						}
-						throw t = Se(e) || e, Error(s(306, t, ""));
+						throw t = D(e) || e, Error(s(306, t, ""));
 					}
 				}
 				return t;
@@ -4404,7 +4404,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			case 1: return r = t.type, i = Sc(r, t.pendingProps), qc(e, t, r, i, n);
 			case 3:
 				a: {
-					if (M(t, t.stateNode.containerInfo), e === null) throw Error(s(387));
+					if (Me(t, t.stateNode.containerInfo), e === null) throw Error(s(387));
 					r = t.pendingProps;
 					var a = t.memoizedState;
 					i = a.element, ho(e, t), So(t, r, null, n);
@@ -4440,11 +4440,11 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 				}
 				return t;
 			case 26: return Wc(e, t), e === null ? (n = Nm(t.type, null, t.pendingProps, null)) ? t.memoizedState = n : V || (t.stateNode = fp(t.type, t.pendingProps, Ae.current, t)) : t.memoizedState = Nm(t.type, e.memoizedProps, t.pendingProps, e.memoizedState), null;
-			case 27: return Me(t), e === null && V && (r = t.stateNode = hm(t.type, t.pendingProps, Ae.current), ra = t, aa = !0, i = B, Sp(t.type) ? (um = i, B = lm(r.firstChild)) : B = i), Pc(e, t, t.pendingProps.children, n), Wc(e, t), e === null && (t.flags |= 4194304), t.child;
-			case 5: return e === null && V && ((i = r = B) && (r = rm(r, t.type, t.pendingProps, aa), r === null ? i = !1 : (t.stateNode = r, ra = t, B = lm(r.firstChild), aa = !1, i = !0)), i || sa(t)), Me(t), i = t.type, a = t.pendingProps, o = e === null ? null : e.memoizedProps, r = a.children, pp(i, a) ? r = null : o !== null && pp(i, o) && (t.flags |= 32), t.memoizedState !== null && (i = Qo(e, t, ts, null, null, n), sh._currentValue = i), Wc(e, t), Pc(e, t, r, n), t.child;
+			case 27: return Pe(t), e === null && V && (r = t.stateNode = hm(t.type, t.pendingProps, Ae.current), ra = t, aa = !0, i = B, Sp(t.type) ? (um = i, B = lm(r.firstChild)) : B = i), Pc(e, t, t.pendingProps.children, n), Wc(e, t), e === null && (t.flags |= 4194304), t.child;
+			case 5: return e === null && V && ((i = r = B) && (r = rm(r, t.type, t.pendingProps, aa), r === null ? i = !1 : (t.stateNode = r, ra = t, B = lm(r.firstChild), aa = !1, i = !0)), i || sa(t)), Pe(t), i = t.type, a = t.pendingProps, o = e === null ? null : e.memoizedProps, r = a.children, pp(i, a) ? r = null : o !== null && pp(i, o) && (t.flags |= 32), t.memoizedState !== null && (i = Qo(e, t, ts, null, null, n), sh._currentValue = i), Wc(e, t), Pc(e, t, r, n), t.child;
 			case 6: return e === null && V && ((e = n = B) && (n = im(n, t.pendingProps, aa), n === null ? e = !1 : (t.stateNode = n, ra = t, B = null, e = !0)), e || sa(t)), null;
 			case 13: return Qc(e, t, n);
-			case 4: return M(t, t.stateNode.containerInfo), r = t.pendingProps, e === null ? t.child = uo(t, null, r, n) : Pc(e, t, r, n), t.child;
+			case 4: return Me(t, t.stateNode.containerInfo), r = t.pendingProps, e === null ? t.child = uo(t, null, r, n) : Pc(e, t, r, n), t.child;
 			case 11: return Fc(e, t, t.type, t.pendingProps, n);
 			case 7: return r = t.pendingProps, Wc(e, t), Pc(e, t, r, n), t.child;
 			case 8: return Pc(e, t, t.pendingProps.children, n), t.child;
@@ -4527,12 +4527,12 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			case 9:
 			case 14: return W(t), null;
 			case 1: return W(t), null;
-			case 3: return n = t.stateNode, r = null, e !== null && (r = e.memoizedState.cache), t.memoizedState.cache !== r && (t.flags |= 2048), va(Aa), je(), n.pendingContext && (n.context = n.pendingContext, n.pendingContext = null), (e === null || e.child === null) && (ua(t) ? pl(t) : e === null || e.memoizedState.isDehydrated && !(t.flags & 256) || (t.flags |= 1024, fa())), W(t), null;
+			case 3: return n = t.stateNode, r = null, e !== null && (r = e.memoizedState.cache), t.memoizedState.cache !== r && (t.flags |= 2048), va(Aa), Ne(), n.pendingContext && (n.context = n.pendingContext, n.pendingContext = null), (e === null || e.child === null) && (ua(t) ? pl(t) : e === null || e.memoizedState.isDehydrated && !(t.flags & 256) || (t.flags |= 1024, fa())), W(t), null;
 			case 26:
 				var i = t.type, a = t.memoizedState;
 				return e === null ? (pl(t), a === null ? (W(t), ml(t, i, null, r, n)) : (W(t), hl(t, a))) : a ? a === e.memoizedState ? (W(t), t.flags &= -16777217) : (pl(t), W(t), hl(t, a)) : (e = e.memoizedProps, e !== r && pl(t), W(t), ml(t, i, e, r, n)), null;
 			case 27:
-				if (Ne(t), n = Ae.current, i = t.type, e !== null && t.stateNode != null) e.memoizedProps !== r && pl(t);
+				if (Fe(t), n = Ae.current, i = t.type, e !== null && t.stateNode != null) e.memoizedProps !== r && pl(t);
 				else {
 					if (!r) {
 						if (t.stateNode === null) throw Error(s(166));
@@ -4542,7 +4542,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 				}
 				return W(t), t.subtreeFlags &= -33554433, null;
 			case 5:
-				if (Ne(t), i = t.type, e !== null && t.stateNode != null) e.memoizedProps !== r && pl(t);
+				if (Fe(t), i = t.type, e !== null && t.stateNode != null) e.memoizedProps !== r && pl(t);
 				else {
 					if (!r) {
 						if (t.stateNode === null) throw Error(s(166));
@@ -4574,7 +4574,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 								default: a = typeof r.is == "string" ? o.createElement(i, { is: r.is }) : o.createElement(i);
 							}
 						}
-						a[I] = t, a[Tt] = r;
+						a[N] = t, a[Ot] = r;
 						a: for (o = t.child; o !== null;) {
 							if (o.tag === 5 || o.tag === 6) a.appendChild(o.stateNode);
 							else if (o.tag !== 4 && o.tag !== 27 && o.child !== null) {
@@ -4614,8 +4614,8 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 							case 27:
 							case 5: r = i.memoizedProps;
 						}
-						e[I] = t, e = !!(e.nodeValue === n || r !== null && !0 === r.suppressHydrationWarning || ep(e.nodeValue, n)), e || sa(t, !0);
-					} else e = lp(e).createTextNode(r), e[I] = t, t.stateNode = e;
+						e[N] = t, e = !!(e.nodeValue === n || r !== null && !0 === r.suppressHydrationWarning || ep(e.nodeValue, n)), e || sa(t, !0);
+					} else e = lp(e).createTextNode(r), e[N] = t, t.stateNode = e;
 				}
 				return W(t), null;
 			case 31:
@@ -4624,7 +4624,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 						if (e === null) {
 							if (!r) throw Error(s(318));
 							if (e = t.memoizedState, e = e === null ? null : e.dehydrated, !e) throw Error(s(557));
-							e[I] = t;
+							e[N] = t;
 						} else da(), !(t.flags & 128) && (t.memoizedState = null), t.flags |= 4;
 						W(t), e = !1;
 					} else n = fa(), e !== null && e.memoizedState !== null && (e.memoizedState.hydrationErrors = n), e = !0;
@@ -4638,14 +4638,14 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 						if (e === null) {
 							if (!i) throw Error(s(318));
 							if (i = t.memoizedState, i = i === null ? null : i.dehydrated, !i) throw Error(s(317));
-							i[I] = t;
+							i[N] = t;
 						} else da(), !(t.flags & 128) && (t.memoizedState = null), t.flags |= 4;
 						W(t), i = !1;
 					} else i = fa(), e !== null && e.memoizedState !== null && (e.memoizedState.hydrationErrors = i), i = !0;
 					if (!i) return t.flags & 256 ? (Io(t), t) : (Io(t), null);
 				}
 				return Io(t), t.flags & 128 ? (t.lanes = n, t) : (n = r !== null, e = e !== null && e.memoizedState !== null, n && (r = t.child, i = null, r.alternate !== null && r.alternate.memoizedState !== null && r.alternate.memoizedState.cachePool !== null && (i = r.alternate.memoizedState.cachePool.pool), a = null, r.memoizedState !== null && r.memoizedState.cachePool !== null && (a = r.memoizedState.cachePool.pool), a !== i && (r.flags |= 2048)), n !== e && n && (t.child.flags |= 8192), gl(t, t.updateQueue), W(t), null);
-			case 4: return je(), e === null && Wf(t.stateNode.containerInfo), t.flags |= 67108864, W(t), null;
+			case 4: return Ne(), e === null && Wf(t.stateNode.containerInfo), t.flags |= 67108864, W(t), null;
 			case 10: return va(t.type), W(t), null;
 			case 19:
 				if (zo(t), r = t.memoizedState, r === null) return W(t), null;
@@ -4659,13 +4659,13 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 							}
 							e = e.sibling;
 						}
-						r.tail !== null && Ke() > gd && (t.flags |= 128, i = !0, _l(r, !1), t.lanes = 4194304);
+						r.tail !== null && M() > gd && (t.flags |= 128, i = !0, _l(r, !1), t.lanes = 4194304);
 					}
 				} else {
 					if (!i) {
 						if (e = Bo(a), e !== null) {
 							if (t.flags |= 128, i = !0, e = e.updateQueue, t.updateQueue = e, gl(t, e), _l(r, !0), r.tail === null && r.tailMode !== "collapsed" && r.tailMode !== "visible" && !a.alternate && !V) return W(t), null;
-						} else 2 * Ke() - r.renderingStartTime > gd && n !== 536870912 && (t.flags |= 128, i = !0, _l(r, !1), t.lanes = 4194304);
+						} else 2 * M() - r.renderingStartTime > gd && n !== 536870912 && (t.flags |= 128, i = !0, _l(r, !1), t.lanes = 4194304);
 					}
 					r.isBackwards ? (a.sibling = t.child, t.child = a) : (e = r.last, e === null ? t.child = a : e.sibling = a, r.last = a);
 				}
@@ -4681,11 +4681,11 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 						}
 						n = !0;
 					}
-					return r.rendering = e, r.tail = e.sibling, r.renderingStartTime = Ke(), e.sibling = null, a = Lo.current, a = i ? a & 1 | 2 : a & 1, r.tailMode === "visible" || r.tailMode === "collapsed" || !n || V ? Ro(t, a) : (n = a, A(Ao, t), A(Lo, n), jo === null && (jo = t)), V && Qi(t, r.treeForkCount), e;
+					return r.rendering = e, r.tail = e.sibling, r.renderingStartTime = M(), e.sibling = null, a = Lo.current, a = i ? a & 1 | 2 : a & 1, r.tailMode === "visible" || r.tailMode === "collapsed" || !n || V ? Ro(t, a) : (n = a, A(Ao, t), A(Lo, n), jo === null && (jo = t)), V && Qi(t, r.treeForkCount), e;
 				}
 				return W(t), null;
 			case 22:
-			case 23: return Io(t), ko(), r = t.memoizedState !== null, e === null ? r && (t.flags |= 8192) : e.memoizedState !== null !== r && (t.flags |= 8192), r ? n & 536870912 && !(t.flags & 128) && (W(t), t.subtreeFlags & 6 && (t.flags |= 8192)) : W(t), n = t.updateQueue, n !== null && gl(t, n.retryQueue), n = null, e !== null && e.memoizedState !== null && e.memoizedState.cachePool !== null && (n = e.memoizedState.cachePool.pool), r = null, t.memoizedState !== null && t.memoizedState.cachePool !== null && (r = t.memoizedState.cachePool.pool), r !== n && (t.flags |= 2048), e !== null && k(Wa), null;
+			case 23: return Io(t), ko(), r = t.memoizedState !== null, e === null ? r && (t.flags |= 8192) : e.memoizedState !== null !== r && (t.flags |= 8192), r ? n & 536870912 && !(t.flags & 128) && (W(t), t.subtreeFlags & 6 && (t.flags |= 8192)) : W(t), n = t.updateQueue, n !== null && gl(t, n.retryQueue), n = null, e !== null && e.memoizedState !== null && e.memoizedState.cachePool !== null && (n = e.memoizedState.cachePool.pool), r = null, t.memoizedState !== null && t.memoizedState.cachePool !== null && (r = t.memoizedState.cachePool.pool), r !== n && (t.flags |= 2048), e !== null && De(Wa), null;
 			case 24: return n = null, e !== null && (n = e.memoizedState.cache), t.memoizedState.cache !== n && (t.flags |= 2048), va(Aa), W(t), null;
 			case 25: return null;
 			case 30: return t.flags |= 33554432, W(t), null;
@@ -4695,10 +4695,10 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	function yl(e, t) {
 		switch (ta(t), t.tag) {
 			case 1: return e = t.flags, e & 65536 ? (t.flags = e & -65537 | 128, t) : null;
-			case 3: return va(Aa), je(), e = t.flags, e & 65536 && !(e & 128) ? (t.flags = e & -65537 | 128, t) : null;
+			case 3: return va(Aa), Ne(), e = t.flags, e & 65536 && !(e & 128) ? (t.flags = e & -65537 | 128, t) : null;
 			case 26:
 			case 27:
-			case 5: return Ne(t), null;
+			case 5: return Fe(t), null;
 			case 31:
 				if (t.memoizedState !== null) {
 					if (Io(t), t.alternate === null) throw Error(s(340));
@@ -4712,10 +4712,10 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 				}
 				return e = t.flags, e & 65536 ? (t.flags = e & -65537 | 128, t) : null;
 			case 19: return zo(t), e = t.flags, e & 65536 ? (t.flags = e & -65537 | 128, e = t.memoizedState, e !== null && (e.rendering = null, e.tail = null), t.flags |= 4, t) : null;
-			case 4: return je(), null;
+			case 4: return Ne(), null;
 			case 10: return va(t.type), null;
 			case 22:
-			case 23: return Io(t), ko(), e !== null && k(Wa), e = t.flags, e & 65536 ? (t.flags = e & -65537 | 128, t) : null;
+			case 23: return Io(t), ko(), e !== null && De(Wa), e = t.flags, e & 65536 ? (t.flags = e & -65537 | 128, t) : null;
 			case 24: return va(Aa), null;
 			case 25: return null;
 			default: return null;
@@ -4724,15 +4724,15 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	function bl(e, t) {
 		switch (ta(t), t.tag) {
 			case 3:
-				va(Aa), je();
+				va(Aa), Ne();
 				break;
 			case 26:
 			case 27:
 			case 5:
-				Ne(t);
+				Fe(t);
 				break;
 			case 4:
-				je();
+				Ne();
 				break;
 			case 31:
 				t.memoizedState !== null && Io(t);
@@ -4748,7 +4748,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 				break;
 			case 22:
 			case 23:
-				Io(t), ko(), e !== null && k(Wa);
+				Io(t), ko(), e !== null && De(Wa);
 				break;
 			case 24: va(Aa);
 		}
@@ -4898,7 +4898,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	function Nl(e, t, n) {
 		try {
 			var r = e.stateNode;
-			ip(r, e.type, n, t), r[Tt] = t;
+			ip(r, e.type, n, t), r[Ot] = t;
 		} catch (t) {
 			Z(e, e.return, t);
 		}
@@ -4933,7 +4933,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		var t = e.stateNode, n = e.memoizedProps;
 		try {
 			for (var r = e.type, i = t.attributes; i.length;) t.removeAttributeNode(i[0]);
-			np(t, r, n), t[I] = e, t[Tt] = n;
+			np(t, r, n), t[N] = e, t[Ot] = n;
 		} catch (t) {
 			Z(e, e.return, t);
 		}
@@ -5327,7 +5327,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	}
 	function yu(e) {
 		var t = e.alternate;
-		t !== null && (e.alternate = null, yu(t)), e.child = null, e.deletions = null, e.sibling = null, e.tag === 5 && (t = e.stateNode, t !== null && Mt(t)), e.stateNode = null, e.return = null, e.dependencies = null, e.memoizedProps = null, e.memoizedState = null, e.pendingProps = null, e.stateNode = null, e.updateQueue = null;
+		t !== null && (e.alternate = null, yu(t)), e.child = null, e.deletions = null, e.sibling = null, e.tag === 5 && (t = e.stateNode, t !== null && Pt(t)), e.stateNode = null, e.return = null, e.dependencies = null, e.memoizedProps = null, e.memoizedState = null, e.pendingProps = null, e.stateNode = null, e.updateQueue = null;
 	}
 	var bu = null, xu = !1;
 	function Su(e, t, n) {
@@ -5484,7 +5484,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 										t = e.type, n = e.memoizedProps, i = a.ownerDocument || a;
 										b: switch (t) {
 											case "title":
-												r = i.getElementsByTagName("title")[0], (!r || r[jt] || r[I] || r.namespaceURI === "http://www.w3.org/2000/svg" || r.hasAttribute("itemprop")) && (r = i.createElement(t), i.head.insertBefore(r, i.querySelector("head > title"))), np(r, t, n), r[I] = e, R(r), t = r;
+												r = i.getElementsByTagName("title")[0], (!r || r[Mt] || r[N] || r.namespaceURI === "http://www.w3.org/2000/svg" || r.hasAttribute("itemprop")) && (r = i.createElement(t), i.head.insertBefore(r, i.querySelector("head > title"))), np(r, t, n), r[N] = e, L(r), t = r;
 												break a;
 											case "link":
 												if (a = Gm("link", "href", i).get(t + (n.href || ""))) {
@@ -5506,7 +5506,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 												break;
 											default: throw Error(s(468, t));
 										}
-										r[I] = e, R(r), t = r;
+										r[N] = e, L(r), t = r;
 									}
 									e.stateNode = t;
 								}
@@ -5558,7 +5558,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 				Ou(t, e, n), ju(e), i & 4 && (t = e.updateQueue, t !== null && (e.updateQueue = null, Du(e, t)));
 				break;
 			case 13:
-				Ou(t, e, n), ju(e), e.child.flags & 8192 && e.memoizedState !== null != (r !== null && r.memoizedState !== null) && (md = Ke()), i & 4 && (t = e.updateQueue, t !== null && (e.updateQueue = null, Du(e, t)));
+				Ou(t, e, n), ju(e), e.child.flags & 8192 && e.memoizedState !== null != (r !== null && r.memoizedState !== null) && (md = M()), i & 4 && (t = e.updateQueue, t !== null && (e.updateQueue = null, Du(e, t)));
 				break;
 			case 22:
 				a = e.memoizedState !== null, o = r !== null && r.memoizedState !== null;
@@ -6016,7 +6016,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		}
 	}, $u = typeof WeakMap == "function" ? WeakMap : Map, K = 0, q = null, J = null, Y = 0, X = 0, ed = null, td = !1, nd = !1, rd = !1, id = 0, ad = 0, od = 0, sd = 0, cd = 0, ld = 0, ud = 0, dd = null, fd = null, pd = !1, md = 0, hd = 0, gd = Infinity, _d = null, vd = null, yd = 0, bd = null, xd = null, Sd = 0, Cd = 0, wd = null, Td = null, Ed = null, Dd = null, Od = null, kd = 0, Ad = null;
 	function jd() {
-		return K & 2 && Y !== 0 ? Y & -Y : D.T === null ? Ct() : Pf();
+		return K & 2 && Y !== 0 ? Y & -Y : O.T === null ? Tt() : Pf();
 	}
 	function Md() {
 		if (ld === 0) {
@@ -6086,7 +6086,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 						case 5: break;
 						default: throw Error(s(329));
 					}
-					if ((t & 62914560) === t && (i = md + 300 - Ke(), 10 < i)) {
+					if ((t & 62914560) === t && (i = md + 300 - M(), 10 < i)) {
 						if (Rd(r, t, ld, !td), ft(r, 0, !0) !== 0) break a;
 						Sd = t, r.timeoutHandle = gp(Id.bind(null, r, n, fd, _d, pd, t, ld, sd, ud, td, a, "Throttled", -0, 0), i);
 						break a;
@@ -6110,7 +6110,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			waitingForImages: !0,
 			waitingForViewTransition: !1,
 			unsuspend: vn
-		}, Bl = null, Ku(t, a, d), h && (m = d, h = e.containerInfo, h = (h.nodeType === 9 ? h : h.ownerDocument).__reactViewTransition, h != null && (m.count++, m.waitingForViewTransition = !0, m = nh.bind(m), h.finished.then(m, m))), m = (a & 62914560) === a ? md - Ke() : (a & 4194048) === a ? hd - Ke() : 0, m = eh(d, m), m !== null) ? (Sd = a, e.cancelPendingCommit = m(nf.bind(null, e, t, a, n, r, i, o, s, c, l, u, d, null, f, p)), Rd(e, a, o, !l)) : nf(e, t, a, n, r, i, o, s, c, l, u, d);
+		}, Bl = null, Ku(t, a, d), h && (m = d, h = e.containerInfo, h = (h.nodeType === 9 ? h : h.ownerDocument).__reactViewTransition, h != null && (m.count++, m.waitingForViewTransition = !0, m = nh.bind(m), h.finished.then(m, m))), m = (a & 62914560) === a ? md - M() : (a & 4194048) === a ? hd - M() : 0, m = eh(d, m), m !== null) ? (Sd = a, e.cancelPendingCommit = m(nf.bind(null, e, t, a, n, r, i, o, s, c, l, u, d, null, f, p)), Rd(e, a, o, !l)) : nf(e, t, a, n, r, i, o, s, c, l, u, d);
 	}
 	function Ld(e) {
 		for (var t = e;;) {
@@ -6160,19 +6160,19 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		return n !== -1 && (e.timeoutHandle = -1, _p(n)), n = e.cancelPendingCommit, n !== null && (e.cancelPendingCommit = null, n()), Sd = 0, Bd(), q = e, J = n = Pi(e.current, null), Y = t, X = 0, ed = null, td = !1, nd = pt(e, t), rd = !1, ud = ld = cd = sd = od = ad = 0, fd = dd = null, pd = !1, id = mt(e, t), wi(), n;
 	}
 	function Hd(e, t) {
-		H = null, D.H = mc, t === Ja || t === Xa ? (t = no(), X = 3) : t === Ya ? (t = no(), X = 4) : X = t === Mc ? 8 : typeof t == "object" && t && typeof t.then == "function" ? 6 : 1, ed = t, J === null && (ad = 1, Ec(e, Hi(t, e.current)));
+		H = null, O.H = mc, t === Ja || t === Xa ? (t = no(), X = 3) : t === Ya ? (t = no(), X = 4) : X = t === Mc ? 8 : typeof t == "object" && t && typeof t.then == "function" ? 6 : 1, ed = t, J === null && (ad = 1, Ec(e, Hi(t, e.current)));
 	}
 	function Ud() {
 		var e = Ao.current;
 		return e === null ? !0 : (Y & 4194048) === Y ? jo === null : (Y & 62914560) === Y || Y & 536870912 ? e === jo : !1;
 	}
 	function Wd() {
-		var e = D.H;
-		return D.H = mc, e === null ? mc : e;
+		var e = O.H;
+		return O.H = mc, e === null ? mc : e;
 	}
 	function Gd() {
-		var e = D.A;
-		return D.A = Qu, e;
+		var e = O.A;
+		return O.A = Qu, e;
 	}
 	function Kd() {
 		ad = 4, td || (Y & 4194048) !== Y && Ao.current !== null || (nd = !0), !(od & 134217727) && !(sd & 134217727) || q === null || Rd(q, Y, ld, !1);
@@ -6211,7 +6211,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 				Hd(e, t);
 			}
 		while (1);
-		return t && e.shellSuspendCounter++, ga = ha = null, K = r, D.H = i, D.A = a, J === null && (q = null, Y = 0, wi()), o;
+		return t && e.shellSuspendCounter++, ga = ha = null, K = r, O.H = i, O.A = a, J === null && (q = null, Y = 0, wi()), o;
 	}
 	function Jd() {
 		for (; J !== null;) Zd(J);
@@ -6220,7 +6220,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		var n = K;
 		K |= 2;
 		var r = Wd(), i = Gd();
-		q !== e || Y !== t ? (_d = null, gd = Ke() + 500, Vd(e, t)) : nd = pt(e, t);
+		q !== e || Y !== t ? (_d = null, gd = M() + 500, Vd(e, t)) : nd = pt(e, t);
 		a: do
 			try {
 				if (X !== 0 && J !== null) {
@@ -6284,10 +6284,10 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 				Hd(e, t);
 			}
 		while (1);
-		return ga = ha = null, D.H = r, D.A = i, K = n, J === null ? (q = null, Y = 0, wi(), ad) : 0;
+		return ga = ha = null, O.H = r, O.A = i, K = n, J === null ? (q = null, Y = 0, wi(), ad) : 0;
 	}
 	function Xd() {
-		for (; J !== null && !We();) Zd(J);
+		for (; J !== null && !Ge();) Zd(J);
 	}
 	function Zd(e) {
 		var t = fl(e.alternate, e, id);
@@ -6378,11 +6378,11 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		if (Cd = s, s |= Ci, yt(e, n, s, r, i, a), Dd = null, (n & 335544064) === n ? (Od = Fa(e), r = 10262) : (Od = null, r = 10256), (t.subtreeFlags & r) !== 0 || (t.flags & r) !== 0 ? (e.callbackNode = null, e.callbackPriority = 0, yf(Xe, function() {
 			return ff(), null;
 		})) : (e.callbackNode = null, e.callbackPriority = 0), zl = !1, r = !!(t.flags & 13878), t.subtreeFlags & 13878 || r) {
-			r = D.T, D.T = null, i = O.p, O.p = 2, a = K, K |= 4;
+			r = O.T, O.T = null, i = k.p, k.p = 2, a = K, K |= 4;
 			try {
 				pu(e, t, n);
 			} finally {
-				K = a, O.p = i, D.T = r;
+				K = a, k.p = i, O.T = r;
 			}
 		}
 		yd = 1, zl ? Ed = Mp(o, e.containerInfo, Od, sf, cf, of, lf, ff, af, null, null) : (sf(), cf(), lf());
@@ -6401,9 +6401,9 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			yd = 0;
 			var e = bd, t = xd, n = Sd, r = !!(t.flags & 13878);
 			if (t.subtreeFlags & 13878 || r) {
-				r = D.T, D.T = null;
-				var i = O.p;
-				O.p = 2;
+				r = O.T, O.T = null;
+				var i = k.p;
+				k.p = 2;
 				var a = K;
 				K |= 4;
 				try {
@@ -6438,7 +6438,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 					}
 					gh = !!sp, cp = sp = null;
 				} finally {
-					K = a, O.p = i, D.T = r;
+					K = a, k.p = i, O.T = r;
 				}
 			}
 			e.current = t, yd = 2;
@@ -6449,15 +6449,15 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			yd = 0;
 			var e = bd, t = xd, n = !!(t.flags & 8772);
 			if (t.subtreeFlags & 8772 || n) {
-				n = D.T, D.T = null;
-				var r = O.p;
-				O.p = 2;
+				n = O.T, O.T = null;
+				var r = k.p;
+				k.p = 2;
 				var i = K;
 				K |= 4;
 				try {
 					hu(e, t.alternate, t);
 				} finally {
-					K = i, O.p = r, D.T = n;
+					K = i, k.p = r, O.T = n;
 				}
 			}
 			yd = 3;
@@ -6467,20 +6467,20 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		if (yd === 4 || yd === 3) {
 			yd = 0;
 			var e = Ed;
-			Ed = null, Ge();
+			Ed = null, Ke();
 			var t = bd, n = xd, r = Sd, i = Td, a = (r & 335544064) === r ? 10262 : 10256;
-			if ((n.subtreeFlags & a) !== 0 || (n.flags & a) !== 0 ? yd = 5 : (yd = 0, xd = bd = null, uf(t, t.pendingLanes)), a = t.pendingLanes, a === 0 && (vd = null), P(r), n = n.stateNode, nt && typeof nt.onCommitFiberRoot == "function") try {
+			if ((n.subtreeFlags & a) !== 0 || (n.flags & a) !== 0 ? yd = 5 : (yd = 0, xd = bd = null, uf(t, t.pendingLanes)), a = t.pendingLanes, a === 0 && (vd = null), wt(r), n = n.stateNode, nt && typeof nt.onCommitFiberRoot == "function") try {
 				nt.onCommitFiberRoot(tt, n, void 0, (n.current.flags & 128) == 128);
 			} catch {}
 			if (i !== null) {
-				n = D.T, a = O.p, O.p = 2, D.T = null;
+				n = O.T, a = k.p, k.p = 2, O.T = null;
 				try {
 					for (var o = t.onRecoverableError, s = 0; s < i.length; s++) {
 						var c = i[s];
 						o(c.value, { componentStack: c.stack });
 					}
 				} finally {
-					D.T = n, O.p = a;
+					O.T = n, k.p = a;
 				}
 			}
 			if (i = Dd, o = Od, Od = null, i !== null && (Dd = null, o === null && (o = []), e !== null)) for (c = 0; c < i.length; c++) n = (0, i[c])(o), n !== void 0 && e.finished.finally(n);
@@ -6497,9 +6497,9 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		if (yd !== 5) return !1;
 		var e = bd, t = Cd;
 		Cd = 0;
-		var n = P(Sd), r = D.T, i = O.p;
+		var n = wt(Sd), r = O.T, i = k.p;
 		try {
-			O.p = 32 > n ? 32 : n, D.T = null, n = wd, wd = null;
+			k.p = 32 > n ? 32 : n, O.T = null, n = wd, wd = null;
 			var a = bd, o = Sd;
 			if (yd = 0, xd = bd = null, Sd = 0, K & 6) throw Error(s(331));
 			var c = K;
@@ -6508,7 +6508,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			} catch {}
 			return !0;
 		} finally {
-			O.p = i, D.T = r, uf(e, t);
+			k.p = i, O.T = r, uf(e, t);
 		}
 	}
 	function pf(e, t, n) {
@@ -6542,7 +6542,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	}
 	function hf(e, t, n) {
 		var r = e.pingCache;
-		r !== null && r.delete(t), e.pingedLanes |= e.suspendedLanes & n, e.warmLanes &= ~n, q === e && (Y & n) === n && (ad === 4 || ad === 3 && (Y & 62914560) === Y && 300 > Ke() - md ? K & 2 ? cd |= n : Vd(e, 0) : cd |= n, ud === Y && (ud = 0)), Ef(e);
+		r !== null && r.delete(t), e.pingedLanes |= e.suspendedLanes & n, e.warmLanes &= ~n, q === e && (Y & n) === n && (ad === 4 || ad === 3 && (Y & 62914560) === Y && 300 > M() - md ? K & 2 ? cd |= n : Vd(e, 0) : cd |= n, ud === Y && (ud = 0)), Ef(e);
 	}
 	function gf(e, t) {
 		t === 0 && (t = gt()), e = Di(e, t), e !== null && (vt(e, t), Ef(e));
@@ -6570,7 +6570,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		r !== null && r.delete(t), gf(e, n);
 	}
 	function yf(e, t) {
-		return He(e, t);
+		return Ue(e, t);
 	}
 	var bf = null, xf = null, Sf = !1, Cf = !1, wf = !1, Tf = 0;
 	function Ef(e) {
@@ -6605,7 +6605,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		Cf = Sf = !1;
 		var e = 0;
 		Tf !== 0 && hp() && (e = Tf);
-		for (var t = Ke(), n = null, r = bf; r !== null;) {
+		for (var t = M(), n = null, r = bf; r !== null;) {
 			var i = r.next, a = Af(r, t);
 			a === 0 ? (r.next = null, n === null ? bf = i : n.next = i, i === null && (xf = n)) : (n = r, (e !== 0 || a & 3) && (Cf = !0)), r = i;
 		}
@@ -6616,10 +6616,10 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			var o = 31 - it(a), s = 1 << o, c = i[o];
 			c === -1 ? ((s & n) === 0 || (s & r) !== 0) && (i[o] = ht(s, t)) : c <= t && (e.expiredLanes |= s), a &= ~s;
 		}
-		if (t = q, n = Y, n = ft(e, e === t ? n : 0, e.cancelPendingCommit !== null || e.timeoutHandle !== -1), r = e.callbackNode, n === 0 || e === t && (X === 2 || X === 9) || e.cancelPendingCommit !== null) return r !== null && r !== null && Ue(r), e.callbackNode = null, e.callbackPriority = 0;
+		if (t = q, n = Y, n = ft(e, e === t ? n : 0, e.cancelPendingCommit !== null || e.timeoutHandle !== -1), r = e.callbackNode, n === 0 || e === t && (X === 2 || X === 9) || e.cancelPendingCommit !== null) return r !== null && r !== null && We(r), e.callbackNode = null, e.callbackPriority = 0;
 		if (!(n & 3) || pt(e, n)) {
 			if (t = n & -n, t === e.callbackPriority) return t;
-			switch (r !== null && Ue(r), P(n)) {
+			switch (r !== null && We(r), wt(n)) {
 				case 2:
 				case 8:
 					n = Ye;
@@ -6632,16 +6632,16 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 					break;
 				default: n = Xe;
 			}
-			return r = jf.bind(null, e), n = He(n, r), e.callbackPriority = t, e.callbackNode = n, t;
+			return r = jf.bind(null, e), n = Ue(n, r), e.callbackPriority = t, e.callbackNode = n, t;
 		}
-		return r !== null && r !== null && Ue(r), e.callbackPriority = 2, e.callbackNode = null, 2;
+		return r !== null && r !== null && We(r), e.callbackPriority = 2, e.callbackNode = null, 2;
 	}
 	function jf(e, t) {
 		if (yd !== 0 && yd !== 5) return e.callbackNode = null, e.callbackPriority = 0, null;
 		var n = e.callbackNode;
 		if (df() && e.callbackNode !== n) return null;
 		var r = Y;
-		return r = ft(e, e === q ? r : 0, e.cancelPendingCommit !== null || e.timeoutHandle !== -1), r === 0 ? null : (Fd(e, r, t), Af(e, Ke()), e.callbackNode != null && e.callbackNode === n ? jf.bind(null, e) : null);
+		return r = ft(e, e === q ? r : 0, e.cancelPendingCommit !== null || e.timeoutHandle !== -1), r === 0 ? null : (Fd(e, r, t), Af(e, M()), e.callbackNode != null && e.callbackNode === n ? jf.bind(null, e) : null);
 	}
 	function Mf(e, t) {
 		if (df()) return null;
@@ -6649,7 +6649,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	}
 	function Nf() {
 		bp(function() {
-			K & 6 ? He(Je, Of) : kf();
+			K & 6 ? Ue(Je, Of) : kf();
 		});
 	}
 	function Pf() {
@@ -6664,8 +6664,8 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	}
 	function If(e, t, n, r, i) {
 		if (t === "submit" && n && n.stateNode === i) {
-			var a = Ff((i[Tt] || null).action), o = r.submitter;
-			o && (t = (t = o[Tt] || null) ? Ff(t.formAction) : o.getAttribute("formAction"), t !== null && (a = t, o = null));
+			var a = Ff((i[Ot] || null).action), o = r.submitter;
+			o && (t = (t = o[Ot] || null) ? Ff(t.formAction) : o.getAttribute("formAction"), t !== null && (a = t, o = null));
 			var s = new zn("action", "action", null, r, i);
 			e.push({
 				event: s,
@@ -6698,12 +6698,12 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		var Rf = mi[Lf];
 		hi(Rf.toLowerCase(), "on" + (Rf[0].toUpperCase() + Rf.slice(1)));
 	}
-	hi(oi, "onAnimationEnd"), hi(si, "onAnimationIteration"), hi(ci, "onAnimationStart"), hi("dblclick", "onDoubleClick"), hi("focusin", "onFocus"), hi("focusout", "onBlur"), hi(li, "onTransitionRun"), hi(ui, "onTransitionStart"), hi(di, "onTransitionCancel"), hi(fi, "onTransitionEnd"), Vt("onMouseEnter", ["mouseout", "mouseover"]), Vt("onMouseLeave", ["mouseout", "mouseover"]), Vt("onPointerEnter", ["pointerout", "pointerover"]), Vt("onPointerLeave", ["pointerout", "pointerover"]), Bt("onChange", "change click focusin focusout input keydown keyup selectionchange".split(" ")), Bt("onSelect", "focusout contextmenu dragend focusin keydown keyup mousedown mouseup selectionchange".split(" ")), Bt("onBeforeInput", [
+	hi(oi, "onAnimationEnd"), hi(si, "onAnimationIteration"), hi(ci, "onAnimationStart"), hi("dblclick", "onDoubleClick"), hi("focusin", "onFocus"), hi("focusout", "onBlur"), hi(li, "onTransitionRun"), hi(ui, "onTransitionStart"), hi(di, "onTransitionCancel"), hi(fi, "onTransitionEnd"), Vt("onMouseEnter", ["mouseout", "mouseover"]), Vt("onMouseLeave", ["mouseout", "mouseover"]), Vt("onPointerEnter", ["pointerout", "pointerover"]), Vt("onPointerLeave", ["pointerout", "pointerover"]), R("onChange", "change click focusin focusout input keydown keyup selectionchange".split(" ")), R("onSelect", "focusout contextmenu dragend focusin keydown keyup mousedown mouseup selectionchange".split(" ")), R("onBeforeInput", [
 		"compositionend",
 		"keypress",
 		"textInput",
 		"paste"
-	]), Bt("onCompositionEnd", "compositionend focusout keydown keypress keyup mousedown".split(" ")), Bt("onCompositionStart", "compositionstart focusout keydown keypress keyup mousedown".split(" ")), Bt("onCompositionUpdate", "compositionupdate focusout keydown keypress keyup mousedown".split(" "));
+	]), R("onCompositionEnd", "compositionend focusout keydown keypress keyup mousedown".split(" ")), R("onCompositionStart", "compositionstart focusout keydown keypress keyup mousedown".split(" ")), R("onCompositionUpdate", "compositionupdate focusout keydown keypress keyup mousedown".split(" "));
 	var zf = "abort canplay canplaythrough durationchange emptied encrypted ended error loadeddata loadedmetadata loadstart pause play playing progress ratechange resize seeked seeking stalled suspend timeupdate volumechange waiting".split(" "), Bf = new Set("beforetoggle cancel close invalid load scroll scrollend toggle".split(" ").concat(zf));
 	function Vf(e, t) {
 		t = !!(t & 4);
@@ -6737,8 +6737,8 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		}
 	}
 	function Q(e, t) {
-		var n = t[Dt];
-		n === void 0 && (n = t[Dt] = /* @__PURE__ */ new Set());
+		var n = t[At];
+		n === void 0 && (n = t[At] = /* @__PURE__ */ new Set());
 		var r = e + "__bubble";
 		n.has(r) || (Gf(t, e, 2, !1), n.add(r));
 	}
@@ -6749,7 +6749,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	var Uf = "_reactListening" + Math.random().toString(36).slice(2);
 	function Wf(e) {
 		if (!e[Uf]) {
-			e[Uf] = !0, Rt.forEach(function(t) {
+			e[Uf] = !0, zt.forEach(function(t) {
 				t !== "selectionchange" && (Bf.has(t) || Hf(t, !1, e), Hf(t, !0, e));
 			});
 			var t = e.nodeType === 9 ? e : e.ownerDocument;
@@ -6785,7 +6785,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 					o = o.return;
 				}
 				for (; s !== null;) {
-					if (o = Nt(s), o === null) return;
+					if (o = I(s), o === null) return;
 					if (c = o.tag, c === 5 || c === 6 || c === 26 || c === 27) {
 						r = a = o;
 						continue a;
@@ -6895,11 +6895,11 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			}
 			if (!(t & 7)) {
 				a: {
-					if (c = e === "mouseover" || e === "pointerover", s = e === "mouseout" || e === "pointerout", c && n !== yn && (u = n.relatedTarget || n.fromElement) && (Nt(u) || u[Et])) break a;
-					(s || c) && (u = i.window === i ? i : (c = i.ownerDocument) ? c.defaultView || c.parentWindow : window, s ? (c = n.relatedTarget || n.toElement, s = r, c = c ? Nt(c) : null, c !== null && (f = l(c), d = c.tag, c !== f || d !== 5 && d !== 27 && d !== 6) && (c = null)) : (s = null, c = r), s !== c && (d = Kn, g = "onMouseLeave", p = "onMouseEnter", m = "mouse", (e === "pointerout" || e === "pointerover") && (d = ir, g = "onPointerLeave", p = "onPointerEnter", m = "pointer"), f = s == null ? u : Ft(s), h = c == null ? u : Ft(c), u = new d(g, m + "leave", s, n, i), u.target = f, u.relatedTarget = h, g = null, Nt(i) === r && (d = new d(p, m + "enter", c, n, i), d.target = h, d.relatedTarget = f, g = d), f = g, d = s && c ? te(s, c, Yf) : null, s !== null && Xf(o, u, s, d, !1), c !== null && f !== null && Xf(o, f, c, d, !0)));
+					if (c = e === "mouseover" || e === "pointerover", s = e === "mouseout" || e === "pointerout", c && n !== yn && (u = n.relatedTarget || n.fromElement) && (I(u) || u[kt])) break a;
+					(s || c) && (u = i.window === i ? i : (c = i.ownerDocument) ? c.defaultView || c.parentWindow : window, s ? (c = n.relatedTarget || n.toElement, s = r, c = c ? I(c) : null, c !== null && (f = l(c), d = c.tag, c !== f || d !== 5 && d !== 27 && d !== 6) && (c = null)) : (s = null, c = r), s !== c && (d = Kn, g = "onMouseLeave", p = "onMouseEnter", m = "mouse", (e === "pointerout" || e === "pointerover") && (d = ir, g = "onPointerLeave", p = "onPointerEnter", m = "pointer"), f = s == null ? u : It(s), h = c == null ? u : It(c), u = new d(g, m + "leave", s, n, i), u.target = f, u.relatedTarget = h, g = null, I(i) === r && (d = new d(p, m + "enter", c, n, i), d.target = h, d.relatedTarget = f, g = d), f = g, d = s && c ? ne(s, c, Yf) : null, s !== null && Xf(o, u, s, d, !1), c !== null && f !== null && Xf(o, f, c, d, !0)));
 				}
 				a: {
-					if (s = r ? Ft(r) : window, c = s.nodeName && s.nodeName.toLowerCase(), c === "select" || c === "input" && s.type === "file") var _ = kr;
+					if (s = r ? It(r) : window, c = s.nodeName && s.nodeName.toLowerCase(), c === "select" || c === "input" && s.type === "file") var _ = kr;
 					else if (Cr(s)) {
 						if (Ar) _ = zr;
 						else {
@@ -6913,7 +6913,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 					}
 					v && v(e, s, r);
 				}
-				switch (v = r ? Ft(r) : window, e) {
+				switch (v = r ? It(r) : window, e) {
 					case "focusin":
 						(Cr(v) || v.contentEditable === "true") && (Xr = v, Zr = r, Qr = null);
 						break;
@@ -7209,8 +7209,8 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			case "innerText":
 			case "textContent": return;
 			default:
-				if (!zt.hasOwnProperty(n)) a: {
-					if (n[0] === "o" && n[1] === "n" && (i = n.endsWith("Capture"), a = n.slice(2, i ? n.length - 7 : void 0), t = e[Tt] || null, t = t == null ? null : t[n], typeof t == "function" && e.removeEventListener(a, t, i), typeof r == "function")) {
+				if (!Bt.hasOwnProperty(n)) a: {
+					if (n[0] === "o" && n[1] === "n" && (i = n.endsWith("Capture"), a = n.slice(2, i ? n.length - 7 : void 0), t = e[Ot] || null, t = t == null ? null : t[n], typeof t == "function" && e.removeEventListener(a, t, i), typeof r == "function")) {
 						typeof t != "function" && t !== null && (n in e ? e[n] = null : e.hasAttribute(n) && e.removeAttribute(n)), e.addEventListener(a, r, i);
 						break a;
 					}
@@ -7553,7 +7553,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		return e === 1 && t === "foreignObject" ? 0 : e;
 	}
 	function fp(e, t, n, r) {
-		return n = lp(n).createElement(e), n[I] = r, n[Tt] = t, np(n, e, t), R(n), n;
+		return n = lp(n).createElement(e), n[N] = r, n[Ot] = t, np(n, e, t), L(n), n;
 	}
 	function pp(e, t) {
 		return e === "textarea" || e === "noscript" || typeof t.children == "string" || typeof t.children == "number" || typeof t.children == "bigint" || typeof t.dangerouslySetInnerHTML == "object" && t.dangerouslySetInnerHTML !== null && t.dangerouslySetInnerHTML.__html != null;
@@ -7591,7 +7591,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 					n = e.ownerDocument.head, _m(n);
 					for (var a = n.firstChild; a;) {
 						var o = a.nextSibling, s = a.nodeName;
-						a[jt] || s === "SCRIPT" || s === "STYLE" || s === "LINK" && a.rel.toLowerCase() === "stylesheet" || n.removeChild(a), a = o;
+						a[Mt] || s === "SCRIPT" || s === "STYLE" || s === "LINK" && a.rel.toLowerCase() === "stylesheet" || n.removeChild(a), a = o;
 					}
 				} else n === "body" && _m(e.ownerDocument.body);
 			}
@@ -7727,7 +7727,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		this._scope = document.documentElement, this._selector = "::view-transition-" + e + "(" + t + ")";
 	}
 	Np.prototype.animate = function(e, t) {
-		return t = typeof t == "number" ? { duration: t } : T({}, t), t.pseudoElement = this._selector, this._scope.animate(e, t);
+		return t = typeof t == "number" ? { duration: t } : w({}, t), t.pseudoElement = this._selector, this._scope.animate(e, t);
 	}, Np.prototype.getAnimations = function() {
 		for (var e = this._scope, t = this._selector, n = e.getAnimations({ subtree: !0 }), r = [], i = 0; i < n.length; i++) {
 			var a = n[i].effect;
@@ -7922,7 +7922,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		return s = r && a && o & Node.DOCUMENT_POSITION_FOLLOWING && s & Node.DOCUMENT_POSITION_PRECEDING, t = r && t === e || a && i === e || c || s ? Node.DOCUMENT_POSITION_CONTAINED_BY : !r && t === e || !a && i === e ? Node.DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC : o, t & Node.DOCUMENT_POSITION_DISCONNECTED || t & Node.DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC || Xp(t, this._fragmentFiber, n[0], n[n.length - 1], e) ? t : Node.DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC;
 	};
 	function Xp(e, t, n, r, i) {
-		var a = Nt(i);
+		var a = I(i);
 		if (e & Node.DOCUMENT_POSITION_CONTAINED_BY) {
 			if (n = !!a) a: {
 				for (; a !== null;) {
@@ -7950,7 +7950,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			}
 			return a;
 		}
-		return e & Node.DOCUMENT_POSITION_PRECEDING ? ((t = !!a) && !(t = a === n) && (t = te(n, a, w), t === null ? t = !1 : (h(t, !0, ee, a, n), a = x, x = null, t = a !== null)), t) : e & Node.DOCUMENT_POSITION_FOLLOWING ? ((t = !!a) && !(t = a === r) && (t = te(r, a, w), t === null ? t = !1 : (h(t, !0, C, a, r), a = x, S = x = null, t = a !== null)), t) : !1;
+		return e & Node.DOCUMENT_POSITION_PRECEDING ? ((t = !!a) && !(t = a === n) && (t = ne(n, a, C), t === null ? t = !1 : (h(t, !0, S, a, n), a = x, x = null, t = a !== null)), t) : e & Node.DOCUMENT_POSITION_FOLLOWING ? ((t = !!a) && !(t = a === r) && (t = ne(r, a, C), t === null ? t = !1 : (h(t, !0, te, a, r), a = x, ee = x = null, t = a !== null)), t) : !1;
 	}
 	function Zp(e, t) {
 		var n = e.ownerDocument.createRange();
@@ -8019,7 +8019,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 				case "HTML":
 				case "HEAD":
 				case "BODY":
-					nm(n), Mt(n);
+					nm(n), Pt(n);
 					continue;
 				case "SCRIPT":
 				case "STYLE": continue;
@@ -8038,7 +8038,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 					var a = i.name == null ? null : "" + i.name;
 					if (i.type === "hidden" && e.getAttribute("name") === a) return e;
 				} else return e;
-			} else if (!e[jt]) switch (t) {
+			} else if (!e[Mt]) switch (t) {
 				case "meta":
 					if (!e.hasAttribute("itemprop")) break;
 					return e;
@@ -8162,11 +8162,11 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			var i = n[r];
 			n.hasOwnProperty(r) && i != null && $(e, t, r, null, rp, i);
 		}
-		n.dangerouslySetInnerHTML != null && (e.textContent = ""), e.onclick === vn && (e.onclick = null), Mt(e);
+		n.dangerouslySetInnerHTML != null && (e.textContent = ""), e.onclick === vn && (e.onclick = null), Pt(e);
 	}
 	function _m(e) {
 		for (var t = e.attributes; t.length;) e.removeAttributeNode(t[0]);
-		Mt(e);
+		Pt(e);
 	}
 	var vm = /* @__PURE__ */ new Map(), ym = /* @__PURE__ */ new Set();
 	function bm(e) {
@@ -8176,8 +8176,8 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		}
 		return e.nodeType === 9 ? e : e.ownerDocument;
 	}
-	var xm = O.d;
-	O.d = {
+	var xm = k.d;
+	k.d = {
 		f: Sm,
 		r: Cm,
 		D: Em,
@@ -8193,7 +8193,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		return e || t;
 	}
 	function Cm(e) {
-		var t = Pt(e);
+		var t = Ft(e);
 		t !== null && t.tag === 5 && t.type === "form" ? nc(t) : xm.r(e);
 	}
 	var wm = typeof document > "u" ? null : document;
@@ -8205,7 +8205,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 				rel: e,
 				crossOrigin: n,
 				href: t
-			}, r.querySelector(i) === null && (t = r.createElement("link"), np(t, "link", e), R(t), r.head.appendChild(t)));
+			}, r.querySelector(i) === null && (t = r.createElement("link"), np(t, "link", e), L(t), r.head.appendChild(t)));
 		}
 	}
 	function Em(e) {
@@ -8227,15 +8227,15 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 					break;
 				case "script": a = Rm(e);
 			}
-			if (!(vm.has(a) || (e = T({
+			if (!(vm.has(a) || (e = w({
 				rel: "preload",
 				href: t === "image" && n && n.imageSrcSet ? void 0 : e,
 				as: t
 			}, n), vm.set(a, e), r.querySelector(i) !== null || t === "style" && r.querySelector(Fm(a)) || t === "script" && r.querySelector(zm(a))))) {
 				var o = r.createElement("link");
-				np(o, "link", e), t === "style" && (o[L] = !0, o.onload = o.onerror = function() {
-					Lt(o);
-				}), R(o), r.head.appendChild(o);
+				np(o, "link", e), t === "style" && (o[Nt] = !0, o.onload = o.onerror = function() {
+					Rt(o);
+				}), L(o), r.head.appendChild(o);
 			}
 		}
 	}
@@ -8252,7 +8252,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 				case "worker":
 				case "script": a = Rm(e);
 			}
-			if (!vm.has(a) && (e = T({
+			if (!vm.has(a) && (e = w({
 				rel: "modulepreload",
 				href: e
 			}, t), vm.set(a, e), n.querySelector(i) === null)) {
@@ -8264,7 +8264,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 					case "worker":
 					case "script": if (n.querySelector(zm(a))) return;
 				}
-				r = n.createElement("link"), np(r, "link", e), R(r), n.head.appendChild(r);
+				r = n.createElement("link"), np(r, "link", e), L(r), n.head.appendChild(r);
 			}
 		}
 	}
@@ -8272,7 +8272,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		xm.S(e, t, n);
 		var r = wm;
 		if (r && e) {
-			var i = It(r).hoistableStyles, a = Pm(e);
+			var i = Lt(r).hoistableStyles, a = Pm(e);
 			t ||= "default";
 			var o = i.get(a);
 			if (!o) {
@@ -8282,13 +8282,13 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 				};
 				if (o = r.querySelector(Fm(a))) s.loading = 5;
 				else {
-					e = T({
+					e = w({
 						rel: "stylesheet",
 						href: e,
 						"data-precedence": t
 					}, n), (n = vm.get(a)) && Hm(e, n);
 					var c = o = r.createElement("link");
-					R(c), np(c, "link", e), c._p = new Promise(function(e, t) {
+					L(c), np(c, "link", e), c._p = new Promise(function(e, t) {
 						c.onload = e, c.onerror = t;
 					}), c.addEventListener("load", function() {
 						s.loading |= 1;
@@ -8309,11 +8309,11 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		xm.X(e, t);
 		var n = wm;
 		if (n && e) {
-			var r = It(n).hoistableScripts, i = Rm(e), a = r.get(i);
-			a || (a = n.querySelector(zm(i)), a || (e = T({
+			var r = Lt(n).hoistableScripts, i = Rm(e), a = r.get(i);
+			a || (a = n.querySelector(zm(i)), a || (e = w({
 				src: e,
 				async: !0
-			}, t), (t = vm.get(i)) && Um(e, t), a = n.createElement("script"), R(a), np(a, "link", e), n.head.appendChild(a)), a = {
+			}, t), (t = vm.get(i)) && Um(e, t), a = n.createElement("script"), L(a), np(a, "link", e), n.head.appendChild(a)), a = {
 				type: "script",
 				instance: a,
 				count: 1,
@@ -8325,12 +8325,12 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		xm.M(e, t);
 		var n = wm;
 		if (n && e) {
-			var r = It(n).hoistableScripts, i = Rm(e), a = r.get(i);
-			a || (a = n.querySelector(zm(i)), a || (e = T({
+			var r = Lt(n).hoistableScripts, i = Rm(e), a = r.get(i);
+			a || (a = n.querySelector(zm(i)), a || (e = w({
 				src: e,
 				async: !0,
 				type: "module"
-			}, t), (t = vm.get(i)) && Um(e, t), a = n.createElement("script"), R(a), np(a, "link", e), n.head.appendChild(a)), a = {
+			}, t), (t = vm.get(i)) && Um(e, t), a = n.createElement("script"), L(a), np(a, "link", e), n.head.appendChild(a)), a = {
 				type: "script",
 				instance: a,
 				count: 1,
@@ -8344,7 +8344,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		switch (e) {
 			case "meta":
 			case "title": return null;
-			case "style": return typeof n.precedence == "string" && typeof n.href == "string" ? (n = Pm(n.href), t = It(i).hoistableStyles, r = t.get(n), r || (r = {
+			case "style": return typeof n.precedence == "string" && typeof n.href == "string" ? (n = Pm(n.href), t = Lt(i).hoistableStyles, r = t.get(n), r || (r = {
 				type: "style",
 				instance: null,
 				count: 0,
@@ -8358,7 +8358,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			case "link":
 				if (n.rel === "stylesheet" && typeof n.href == "string" && typeof n.precedence == "string") {
 					e = Pm(n.href);
-					var a = It(i).hoistableStyles, o = a.get(e);
+					var a = Lt(i).hoistableStyles, o = a.get(e);
 					if (o || (i = i.ownerDocument || i, o = {
 						type: "stylesheet",
 						instance: null,
@@ -8381,7 +8381,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 				}
 				if (t && r !== null) throw Error(s(529, ""));
 				return null;
-			case "script": return t = n.async, n = n.src, typeof n == "string" && t && typeof t != "function" && typeof t != "symbol" ? (n = Rm(n), t = It(i).hoistableScripts, r = t.get(n), r || (r = {
+			case "script": return t = n.async, n = n.src, typeof n == "string" && t && typeof t != "function" && typeof t != "symbol" ? (n = Rm(n), t = Lt(i).hoistableScripts, r = t.get(n), r || (r = {
 				type: "script",
 				instance: null,
 				count: 0,
@@ -8402,18 +8402,18 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		return "link[rel=\"stylesheet\"][" + e + "]";
 	}
 	function Im(e) {
-		return T({}, e, {
+		return w({}, e, {
 			"data-precedence": e.precedence,
 			precedence: null
 		});
 	}
 	function Lm(e, t, n, r) {
 		if (t = e.querySelector("link[rel=\"preload\"][as=\"style\"][" + t + "]")) {
-			if (!0 !== t[L]) {
+			if (!0 !== t[Nt]) {
 				r.loading = 1;
 				return;
 			}
-		} else t = e.createElement("link"), t[L] = !0, t.onload = t.onerror = Lt.bind(null, t), np(t, "link", n), R(t), e.head.appendChild(t);
+		} else t = e.createElement("link"), t[Nt] = !0, t.onload = t.onerror = Rt.bind(null, t), np(t, "link", n), L(t), e.head.appendChild(t);
 		r.preload = t, t.addEventListener("load", function() {
 			return r.loading |= 1;
 		}), t.addEventListener("error", function() {
@@ -8430,24 +8430,24 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		if (t.count++, t.instance === null) switch (t.type) {
 			case "style":
 				var r = e.querySelector("style[data-href~=\"" + nn(n.href) + "\"]");
-				if (r) return t.instance = r, R(r), r;
-				var i = T({}, n, {
+				if (r) return t.instance = r, L(r), r;
+				var i = w({}, n, {
 					"data-href": n.href,
 					"data-precedence": n.precedence,
 					href: null,
 					precedence: null
 				});
-				return r = (e.ownerDocument || e).createElement("style"), R(r), np(r, "style", i), Vm(r, n.precedence, e), t.instance = r;
+				return r = (e.ownerDocument || e).createElement("style"), L(r), np(r, "style", i), Vm(r, n.precedence, e), t.instance = r;
 			case "stylesheet":
 				i = Pm(n.href);
 				var a = e.querySelector(Fm(i));
-				if (a) return t.state.loading |= 4, t.instance = a, R(a), a;
-				r = Im(n), (i = vm.get(i)) && Hm(r, i), a = (e.ownerDocument || e).createElement("link"), R(a);
+				if (a) return t.state.loading |= 4, t.instance = a, L(a), a;
+				r = Im(n), (i = vm.get(i)) && Hm(r, i), a = (e.ownerDocument || e).createElement("link"), L(a);
 				var o = a;
 				return o._p = new Promise(function(e, t) {
 					o.onload = e, o.onerror = t;
 				}), np(a, "link", r), t.state.loading |= 4, Vm(a, n.precedence, e), t.instance = a;
-			case "script": return a = Rm(n.src), (i = e.querySelector(zm(a))) ? (t.instance = i, R(i), i) : (r = n, (i = vm.get(a)) && (r = T({}, n), Um(r, i)), e = e.ownerDocument || e, i = e.createElement("script"), R(i), np(i, "link", r), e.head.appendChild(i), t.instance = i);
+			case "script": return a = Rm(n.src), (i = e.querySelector(zm(a))) ? (t.instance = i, L(i), i) : (r = n, (i = vm.get(a)) && (r = w({}, n), Um(r, i)), e = e.ownerDocument || e, i = e.createElement("script"), L(i), np(i, "link", r), e.head.appendChild(i), t.instance = i);
 			case "void": return null;
 			default: throw Error(s(443, t.type));
 		}
@@ -8477,7 +8477,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		if (r.has(e)) return r;
 		for (r.set(e, null), n = n.getElementsByTagName(e), i = 0; i < n.length; i++) {
 			var a = n[i];
-			if (!(a[jt] || a[I] || e === "link" && a.getAttribute("rel") === "stylesheet") && a.namespaceURI !== "http://www.w3.org/2000/svg") {
+			if (!(a[Mt] || a[N] || e === "link" && a.getAttribute("rel") === "stylesheet") && a.namespaceURI !== "http://www.w3.org/2000/svg") {
 				var o = a.getAttribute(t) || "";
 				o = e + o;
 				var s = r.get(o);
@@ -8524,10 +8524,10 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			if (n.instance === null) {
 				var i = Pm(r.href), a = t.querySelector(Fm(i));
 				if (a) {
-					t = a._p, typeof t == "object" && t && typeof t.then == "function" && (e.count++, e = nh.bind(e), t.then(e, e)), n.state.loading |= 4, n.instance = a, R(a);
+					t = a._p, typeof t == "object" && t && typeof t.then == "function" && (e.count++, e = nh.bind(e), t.then(e, e)), n.state.loading |= 4, n.instance = a, L(a);
 					return;
 				}
-				a = t.ownerDocument || t, r = Im(r), (i = vm.get(i)) && Hm(r, i), a = a.createElement("link"), R(a);
+				a = t.ownerDocument || t, r = Im(r), (i = vm.get(i)) && Hm(r, i), a = a.createElement("link"), L(a);
 				var o = a;
 				o._p = new Promise(function(e, t) {
 					o.onload = e, o.onerror = t;
@@ -8592,11 +8592,11 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		}
 	}
 	var sh = {
-		$$typeof: ce,
+		$$typeof: E,
 		Provider: null,
 		Consumer: null,
-		_currentValue: we,
-		_currentValue2: we,
+		_currentValue: Ce,
+		_currentValue2: Ce,
 		_threadCount: 0
 	};
 	function ch(e, t, n, r, i, a, o, s, c) {
@@ -8633,30 +8633,30 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	function hh(e) {
 		if (e.tag === 13 || e.tag === 31) {
 			var t = jd();
-			t = N(t);
+			t = Ct(t);
 			var n = Di(e, t);
 			n !== null && Pd(n, e, t), ph(e, t);
 		}
 	}
 	var gh = !0;
 	function _h(e, t, n, r) {
-		var i = D.T;
-		D.T = null;
-		var a = O.p;
+		var i = O.T;
+		O.T = null;
+		var a = k.p;
 		try {
-			O.p = 2, yh(e, t, n, r);
+			k.p = 2, yh(e, t, n, r);
 		} finally {
-			O.p = a, D.T = i;
+			k.p = a, O.T = i;
 		}
 	}
 	function vh(e, t, n, r) {
-		var i = D.T;
-		D.T = null;
-		var a = O.p;
+		var i = O.T;
+		O.T = null;
+		var a = k.p;
 		try {
-			O.p = 8, yh(e, t, n, r);
+			k.p = 8, yh(e, t, n, r);
 		} finally {
-			O.p = a, D.T = i;
+			k.p = a, O.T = i;
 		}
 	}
 	function yh(e, t, n, r) {
@@ -8666,7 +8666,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			else if (Ph(i, e, t, n, r)) r.stopPropagation();
 			else if (Mh(e, r), t & 4 && -1 < jh.indexOf(e)) {
 				for (; i !== null;) {
-					var a = Pt(i);
+					var a = Ft(i);
 					if (a !== null) switch (a.tag) {
 						case 3:
 							if (a = a.stateNode, a.current.memoizedState.isDehydrated) {
@@ -8677,7 +8677,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 										var c = 1 << 31 - it(o);
 										s.entanglements[1] |= c, o &= ~c;
 									}
-									Ef(a), !(K & 6) && (gd = Ke() + 500, Df(0, !1));
+									Ef(a), !(K & 6) && (gd = M() + 500, Df(0, !1));
 								}
 							}
 							break;
@@ -8696,7 +8696,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	}
 	var xh = null;
 	function Sh(e) {
-		if (xh = null, e = Nt(e), e !== null) {
+		if (xh = null, e = I(e), e !== null) {
 			var t = l(e);
 			if (t === null) e = null;
 			else {
@@ -8830,7 +8830,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 			eventSystemFlags: r,
 			nativeEvent: a,
 			targetContainers: [i]
-		}, t !== null && (t = Pt(t), t !== null && mh(t)), e) : (e.eventSystemFlags |= r, t = e.targetContainers, i !== null && t.indexOf(i) === -1 && t.push(i), e);
+		}, t !== null && (t = Ft(t), t !== null && mh(t)), e) : (e.eventSystemFlags |= r, t = e.targetContainers, i !== null && t.indexOf(i) === -1 && t.push(i), e);
 	}
 	function Ph(e, t, n, r, i) {
 		switch (t) {
@@ -8845,20 +8845,20 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		return !1;
 	}
 	function Fh(e) {
-		var t = Nt(e.target);
+		var t = I(e.target);
 		if (t !== null) {
 			var n = l(t);
 			if (n !== null) {
 				if (t = n.tag, t === 13) {
 					if (t = u(n), t !== null) {
-						e.blockedOn = t, wt(e.priority, function() {
+						e.blockedOn = t, Et(e.priority, function() {
 							hh(n);
 						});
 						return;
 					}
 				} else if (t === 31) {
 					if (t = d(n), t !== null) {
-						e.blockedOn = t, wt(e.priority, function() {
+						e.blockedOn = t, Et(e.priority, function() {
 							hh(n);
 						});
 						return;
@@ -8879,7 +8879,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 				n = e.nativeEvent;
 				var r = new n.constructor(n.type, n);
 				yn = r, n.target.dispatchEvent(r), yn = null;
-			} else return t = Pt(n), t !== null && mh(t), e.blockedOn = n, !1;
+			} else return t = Ft(n), t !== null && mh(t), e.blockedOn = n, !1;
 			t.shift();
 		}
 		return !0;
@@ -8903,7 +8903,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 					if (Sh(r || n) === null) continue;
 					break;
 				}
-				var a = Pt(n);
+				var a = Ft(n);
 				a !== null && (e.splice(t, 3), t -= 3, ec(a, {
 					pending: !0,
 					data: i,
@@ -8924,12 +8924,12 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		}
 		for (; 0 < Ah.length && (n = Ah[0], n.blockedOn === null);) Fh(n), n.blockedOn === null && Ah.shift();
 		if (n = (e.ownerDocument || e).$$reactFormReplay, n != null) for (r = 0; r < n.length; r += 3) {
-			var i = n[r], a = n[r + 1], o = i[Tt] || null;
+			var i = n[r], a = n[r + 1], o = i[Ot] || null;
 			if (typeof a == "function") o || Vh(n);
 			else if (o) {
 				var s = null;
 				if (a && a.hasAttribute("formAction")) {
-					if (i = a, o = a[Tt] || null) s = o.formAction;
+					if (i = a, o = a[Ot] || null) s = o.formAction;
 					else if (Sh(i) !== null) continue;
 				} else s = o.action;
 				typeof s == "function" ? n[r + 1] = s : (n.splice(r, 3), r -= 3), Vh(n);
@@ -8981,7 +8981,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		if (e !== null) {
 			this._internalRoot = null;
 			var t = e.containerInfo;
-			dh(e.current, 2, null, e, null, null), zd(), t[Et] = null;
+			dh(e.current, 2, null, e, null, null), zd(), t[kt] = null;
 		}
 	};
 	function Gh(e) {
@@ -8989,7 +8989,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	}
 	Gh.prototype.unstable_scheduleHydration = function(e) {
 		if (e) {
-			var t = Ct();
+			var t = Tt();
 			e = {
 				blockedOn: null,
 				target: e,
@@ -9001,7 +9001,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	};
 	var Kh = r.version;
 	if (Kh !== "19.3.1") throw Error(s(527, Kh, "19.3.1"));
-	O.findDOMNode = function(e) {
+	k.findDOMNode = function(e) {
 		var t = e._reactInternals;
 		if (t === void 0) throw typeof e.render == "function" ? Error(s(188)) : (e = Object.keys(e).join(","), Error(s(268, e)));
 		return e = p(t), e = e === null ? null : m(e), e = e === null ? null : e.stateNode, e;
@@ -9010,7 +9010,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 		bundleType: 0,
 		version: "19.3.1",
 		rendererPackageName: "react-dom",
-		currentDispatcherRef: D,
+		currentDispatcherRef: O,
 		reconcilerVersion: "19.3.1"
 	};
 	if (typeof __REACT_DEVTOOLS_GLOBAL_HOOK__ < "u") {
@@ -9022,7 +9022,7 @@ var e = (e, t) => () => (t || (e((t = { exports: {} }).exports, t, t.exports), e
 	e.createRoot = function(e, t) {
 		if (!c(e)) throw Error(s(299));
 		var n = !1, r = "", i = Cc, a = wc, o = Tc;
-		return t != null && (!0 === t.unstable_strictMode && (n = !0), t.identifierPrefix !== void 0 && (r = t.identifierPrefix), t.onUncaughtError !== void 0 && (i = t.onUncaughtError), t.onCaughtError !== void 0 && (a = t.onCaughtError), t.onRecoverableError !== void 0 && (o = t.onRecoverableError)), t = lh(e, 1, !1, null, null, n, r, null, i, a, o, Uh), e[Et] = t.current, Wf(e), new Wh(t);
+		return t != null && (!0 === t.unstable_strictMode && (n = !0), t.identifierPrefix !== void 0 && (r = t.identifierPrefix), t.onUncaughtError !== void 0 && (i = t.onUncaughtError), t.onCaughtError !== void 0 && (a = t.onCaughtError), t.onRecoverableError !== void 0 && (o = t.onRecoverableError)), t = lh(e, 1, !1, null, null, n, r, null, i, a, o, Uh), e[kt] = t.current, Wf(e), new Wh(t);
 	};
 })), c = /* @__PURE__ */ e(((e, t) => {
 	function n() {
@@ -9046,21 +9046,31 @@ async function f(e, t = {}) {
 		"HEAD",
 		"OPTIONS"
 	].includes(r) || n.set("X-HSD-Token", p()), t.body && !(t.body instanceof FormData) && n.set("Content-Type", "application/json");
-	let i = await fetch(`/api/ribbon${e}`, {
-		...t,
-		headers: n,
-		credentials: "same-origin",
-		cache: "no-store"
-	});
-	if (!i.ok) {
-		let e = `请求失败（${i.status}）`;
-		try {
-			let t = await i.json();
-			e = typeof t.detail == "string" ? t.detail : typeof t.error == "string" ? t.error : JSON.stringify(t.detail || t);
-		} catch {}
-		throw new d(e, i.status);
+	let i = ["GET", "HEAD"].includes(r) ? new AbortController() : null, a = () => i?.abort(t.signal?.reason);
+	t.signal?.aborted ? a() : t.signal?.addEventListener("abort", a, { once: !0 });
+	let o = i ? setTimeout(() => i.abort(), 15e3) : void 0;
+	try {
+		let r = await fetch(`/api/ribbon${e}`, {
+			...t,
+			headers: n,
+			signal: i?.signal || t.signal,
+			credentials: "same-origin",
+			cache: "no-store"
+		});
+		if (!r.ok) {
+			let e = `请求失败（${r.status}）`;
+			try {
+				let t = await r.json();
+				e = typeof t.detail == "string" ? t.detail : typeof t.error == "string" ? t.error : JSON.stringify(t.detail || t);
+			} catch {}
+			throw new d(e, r.status);
+		}
+		return r.status === 204 ? void 0 : await r.json();
+	} catch (e) {
+		throw i?.signal.aborted && !t.signal?.aborted ? new d("读取超时，请重试。后台任务不会因此重新提交。", 408) : e;
+	} finally {
+		clearTimeout(o), t.signal?.removeEventListener("abort", a);
 	}
-	if (i.status !== 204) return i.json();
 }
 var p = () => "";
 function m(e) {
@@ -9104,7 +9114,7 @@ var b = /* @__PURE__ */ e(((e) => {
 	e.Fragment = n, e.jsx = r, e.jsxs = r;
 })), x = (/* @__PURE__ */ e(((e, t) => {
 	t.exports = b();
-})))(), S = {
+})))(), ee = {
 	grid: "整齐平铺",
 	stagger: "错位平铺",
 	scatter: "随机散点",
@@ -9119,26 +9129,26 @@ var b = /* @__PURE__ */ e(((e) => {
 	split: "左右分区",
 	stacked: "上下分区",
 	opposed: "正倒交替"
-}, ee = /* @__PURE__ */ new Set([
+}, S = /* @__PURE__ */ new Set([
 	"grid",
 	"stagger",
 	"scatter",
 	"single",
 	"ends",
 	"panels"
-]), C = {
+]), te = {
 	design_background: "首稿底纹",
 	generate_background: "生成底图",
 	plan: "理解修改要求",
 	edit_asset: "修改图案",
 	edit_background: "修改底纹",
 	edit_composite: "修改整幅"
-}, w = {
+}, C = {
 	STARTED: "等待结果",
 	SUCCEEDED: "已返回",
 	FAILED: "失败",
 	UNKNOWN: "结果未确认"
-}, te = {
+}, ne = {
 	prepare: "准备",
 	provider: "服务响应",
 	transport: "网络传输",
@@ -9147,28 +9157,28 @@ var b = /* @__PURE__ */ e(((e) => {
 	recovery: "任务恢复",
 	unknown: "历史未记录"
 };
-function T({ calls: e }) {
+function w({ calls: e }) {
 	return e?.length ? /* @__PURE__ */ (0, x.jsxs)("details", { children: [/* @__PURE__ */ (0, x.jsxs)("summary", { children: [
 		"调用详情（",
 		e.length,
 		"）"
 	] }), /* @__PURE__ */ (0, x.jsx)("ul", { children: e.map((e) => /* @__PURE__ */ (0, x.jsxs)("li", { children: [
 		/* @__PURE__ */ (0, x.jsxs)("strong", { children: [
-			C[e.operation] || "模型调用",
+			te[e.operation] || "模型调用",
 			" · ",
-			w[e.status] || e.status
+			C[e.status] || e.status
 		] }),
 		e.error && /* @__PURE__ */ (0, x.jsx)("small", { children: e.error }),
 		e.diagnostic && /* @__PURE__ */ (0, x.jsxs)("small", { children: [
-			te[e.diagnostic.stage] || "未知阶段",
+			ne[e.diagnostic.stage] || "未知阶段",
 			e.diagnostic.http_status && ` · HTTP ${e.diagnostic.http_status}`,
 			e.diagnostic.upstream_code && ` · ${e.diagnostic.upstream_code}`
 		] }),
 		e.request_id && /* @__PURE__ */ (0, x.jsxs)("small", { children: ["请求编号 ", e.request_id] })
 	] }, e.id)) })] }) : null;
 }
-function ne({ onClose: e, onChanged: t }) {
-	let [n, r] = (0, l.useState)("tasks"), [i, a] = (0, l.useState)(null), [o, s] = (0, l.useState)(""), [c, u] = (0, l.useState)(""), [d, p] = (0, l.useState)(!1), [m, g] = (0, l.useState)(""), [_, v] = (0, l.useState)(""), [y, b] = (0, l.useState)("grid"), [C, w] = (0, l.useState)(!0), [te, ne] = (0, l.useState)("{}"), [re, ie] = (0, l.useState)("演示输出"), [ae, se] = (0, l.useState)(1800), [ce, le] = (0, l.useState)(300), [ue, de] = (0, l.useState)(150), [fe, pe] = (0, l.useState)(!0), me = /* @__PURE__ */ new Map();
+function re({ onClose: e, onChanged: t }) {
+	let [n, r] = (0, l.useState)("tasks"), [i, a] = (0, l.useState)(null), [o, s] = (0, l.useState)(""), [c, u] = (0, l.useState)(""), [d, p] = (0, l.useState)(!1), [m, g] = (0, l.useState)(""), [_, v] = (0, l.useState)(""), [y, b] = (0, l.useState)("grid"), [te, C] = (0, l.useState)(!0), [ne, re] = (0, l.useState)("{}"), [ie, ae] = (0, l.useState)("演示输出"), [oe, ce] = (0, l.useState)(1800), [E, le] = (0, l.useState)(300), [ue, de] = (0, l.useState)(150), [fe, pe] = (0, l.useState)(!0), me = /* @__PURE__ */ new Map();
 	for (let e of i?.provider_calls ?? []) {
 		let t = me.get(e.job_id);
 		t ? t.push(e) : me.set(e.job_id, [e]);
@@ -9184,20 +9194,20 @@ function ne({ onClose: e, onChanged: t }) {
 		he();
 	}, []);
 	function ge(e) {
-		g(e.id), v(e.name), b(e.mode), w(e.enabled), ne(JSON.stringify(e.rules, null, 2)), u("保存将建立新的配置版本，历史作品不受影响。");
+		g(e.id), v(e.name), b(e.mode), C(e.enabled), re(JSON.stringify(e.rules, null, 2)), u("保存将建立新的配置版本，历史作品不受影响。");
 	}
 	async function _e(e) {
 		e.preventDefault(), p(!0), s("");
 		try {
-			let e = JSON.parse(te);
+			let e = JSON.parse(ne);
 			if (!e || Array.isArray(e) || typeof e != "object") throw Error("模板规则必须为 JSON 对象。");
 			await h("/admin/templates", {
 				...m ? { id: m } : {},
 				name: _,
 				mode: y,
-				enabled: C,
+				enabled: te,
 				rules: e
-			}), await Promise.all([he(), t()]), u("模板新版本已保存，样式图已同步。"), g(""), v(""), ne("{}");
+			}), await Promise.all([he(), t()]), u("模板新版本已保存，样式图已同步。"), g(""), v(""), re("{}");
 		} catch (e) {
 			s(e instanceof Error ? e.message : "保存失败");
 		} finally {
@@ -9207,11 +9217,11 @@ function ne({ onClose: e, onChanged: t }) {
 	async function ve(e) {
 		e.preventDefault(), p(!0), s("");
 		try {
-			if (ae * ce > 4e7) throw Error("总像素不可超过 4000 万。");
+			if (oe * E > 4e7) throw Error("总像素不可超过 4000 万。");
 			await h("/admin/output-profiles", {
-				name: re,
-				width: ae,
-				height: ce,
+				name: ie,
+				width: oe,
+				height: E,
 				dpi: ue,
 				format: "PNG",
 				is_demo: fe
@@ -9222,7 +9232,7 @@ function ne({ onClose: e, onChanged: t }) {
 			p(!1);
 		}
 	}
-	return /* @__PURE__ */ (0, x.jsxs)(oe, {
+	return /* @__PURE__ */ (0, x.jsxs)(se, {
 		title: "内部管理",
 		onClose: e,
 		wide: !0,
@@ -9279,7 +9289,7 @@ function ne({ onClose: e, onChanged: t }) {
 						}), /* @__PURE__ */ (0, x.jsx)("small", { children: e.phase })] }),
 						/* @__PURE__ */ (0, x.jsx)("td", { children: e.provider }),
 						/* @__PURE__ */ (0, x.jsx)("td", { children: e.attempt }),
-						/* @__PURE__ */ (0, x.jsxs)("td", { children: [e.error || e.result_version_id?.slice(0, 12) || e.result_asset_id?.slice(0, 12) || "—", /* @__PURE__ */ (0, x.jsx)(T, { calls: me.get(e.id) })] })
+						/* @__PURE__ */ (0, x.jsxs)("td", { children: [e.error || e.result_version_id?.slice(0, 12) || e.result_asset_id?.slice(0, 12) || "—", /* @__PURE__ */ (0, x.jsx)(w, { calls: me.get(e.id) })] })
 					] }, e.id)) })] }), !i?.jobs.length && /* @__PURE__ */ (0, x.jsx)("div", {
 						className: "empty-library",
 						children: "暂无后台任务"
@@ -9308,7 +9318,7 @@ function ne({ onClose: e, onChanged: t }) {
 								" · ",
 								e.enabled ? "已启用" : "已停用"
 							] })] }),
-							/* @__PURE__ */ (0, x.jsx)(E, {
+							/* @__PURE__ */ (0, x.jsx)(T, {
 								name: "arrow",
 								size: 15
 							})
@@ -9328,27 +9338,27 @@ function ne({ onClose: e, onChanged: t }) {
 						/* @__PURE__ */ (0, x.jsxs)("label", { children: ["排版规则类型", /* @__PURE__ */ (0, x.jsx)("select", {
 							value: y,
 							onChange: (e) => b(e.target.value),
-							children: Object.entries(S).map(([e, t]) => /* @__PURE__ */ (0, x.jsx)("option", {
+							children: Object.entries(ee).map(([e, t]) => /* @__PURE__ */ (0, x.jsx)("option", {
 								value: e,
 								children: t
 							}, e))
 						})] }),
 						/* @__PURE__ */ (0, x.jsxs)("label", { children: ["规则配置（JSON）", /* @__PURE__ */ (0, x.jsx)("textarea", {
 							className: "code-input",
-							value: te,
-							onChange: (e) => ne(e.target.value),
+							value: ne,
+							onChange: (e) => re(e.target.value),
 							rows: 5
 						})] }),
 						/* @__PURE__ */ (0, x.jsxs)("small", {
 							className: "template-rules-help",
-							children: [ee.has(y) ? "支持 rows（1–4）、step_ratio（0.2–2）、motif_ratio（0.05–0.8）。" : y === "fullwidth" || y === "ends_open" ? "仅支持 motif_ratio（0.05–0.8）调整图案大小；行数固定，不使用 rows 或 step_ratio。" : "支持 step_ratio（0.2–2）、motif_ratio（0.05–0.8）；行数由排法固定，不使用 rows。", "服务端会检查，不适用的字段请移除。"]
+							children: [S.has(y) ? "支持 rows（1–4）、step_ratio（0.2–2）、motif_ratio（0.05–0.8）。" : y === "fullwidth" || y === "ends_open" ? "仅支持 motif_ratio（0.05–0.8）调整图案大小；行数固定，不使用 rows 或 step_ratio。" : "支持 step_ratio（0.2–2）、motif_ratio（0.05–0.8）；行数由排法固定，不使用 rows。", "服务端会检查，不适用的字段请移除。"]
 						}),
 						/* @__PURE__ */ (0, x.jsxs)("label", {
 							className: "checkbox-line",
 							children: [/* @__PURE__ */ (0, x.jsx)("input", {
 								type: "checkbox",
-								checked: C,
-								onChange: (e) => w(e.target.checked)
+								checked: te,
+								onChange: (e) => C(e.target.checked)
 							}), "启用此模式"]
 						}),
 						/* @__PURE__ */ (0, x.jsx)("button", {
@@ -9360,7 +9370,7 @@ function ne({ onClose: e, onChanged: t }) {
 							type: "button",
 							className: "text-button",
 							onClick: () => {
-								g(""), v(""), ne("{}"), w(!0);
+								g(""), v(""), re("{}"), C(!0);
 							},
 							children: "改为新增模式"
 						})
@@ -9402,8 +9412,8 @@ function ne({ onClose: e, onChanged: t }) {
 					children: [
 						/* @__PURE__ */ (0, x.jsx)("h3", { children: "启用新的输出配置" }),
 						/* @__PURE__ */ (0, x.jsxs)("label", { children: ["配置名称", /* @__PURE__ */ (0, x.jsx)("input", {
-							value: re,
-							onChange: (e) => ie(e.target.value),
+							value: ie,
+							onChange: (e) => ae(e.target.value),
 							required: !0,
 							maxLength: 60
 						})] }),
@@ -9413,14 +9423,14 @@ function ne({ onClose: e, onChanged: t }) {
 								type: "number",
 								min: 64,
 								max: 16e3,
-								value: ae,
-								onChange: (e) => se(Number(e.target.value)),
+								value: oe,
+								onChange: (e) => ce(Number(e.target.value)),
 								required: !0
 							})] }), /* @__PURE__ */ (0, x.jsxs)("label", { children: ["高度（px）", /* @__PURE__ */ (0, x.jsx)("input", {
 								type: "number",
 								min: 64,
 								max: 5e3,
-								value: ce,
+								value: E,
 								onChange: (e) => le(Number(e.target.value)),
 								required: !0
 							})] })]
@@ -9457,7 +9467,7 @@ function ne({ onClose: e, onChanged: t }) {
 	});
 }
 // src/LayoutExamples.tsx
-function re(e) {
+function ie(e) {
 	if (!e?.startsWith("/api/ribbon/layout-examples/")) return null;
 	try {
 		let t = new URL(e, location.href);
@@ -9466,8 +9476,8 @@ function re(e) {
 		return null;
 	}
 }
-function ie({ example: e }) {
-	let [t, n] = (0, l.useState)(!1), [r, i] = (0, l.useState)(!1), [a, o] = (0, l.useState)(0), s = (0, l.useRef)(null), c = e.available ? re(e.image_url) : null;
+function ae({ example: e }) {
+	let [t, n] = (0, l.useState)(!1), [r, i] = (0, l.useState)(!1), [a, o] = (0, l.useState)(0), s = (0, l.useRef)(null), c = e.available ? ie(e.image_url) : null;
 	return (0, l.useEffect)(() => {
 		i(!1), n(!1), o(0);
 	}, [
@@ -9516,7 +9526,7 @@ function ie({ example: e }) {
 		}, `${e.id}-${e.image_url}-${a}`)
 	})] });
 }
-function ae({ mode: e, cache: t, onUnauthorized: n, onViewAll: r, referenceMode: i, onChooseReference: a }) {
+function oe({ mode: e, cache: t, onUnauthorized: n, onViewAll: r, referenceMode: i, onChooseReference: a }) {
 	let [o, s] = (0, l.useState)(() => t.current), [c, u] = (0, l.useState)(!t.current), [p, m] = (0, l.useState)(""), [h, g] = (0, l.useState)(0), _ = (0, l.useRef)(n);
 	_.current = n;
 	let v = (0, l.useRef)(null);
@@ -9556,7 +9566,7 @@ function ae({ mode: e, cache: t, onUnauthorized: n, onViewAll: r, referenceMode:
 			children: "重新加载案例"
 		})]
 	});
-	let b = o.modes.find((t) => t.mode === e), S = e ? o.examples.filter((e) => b?.example_ids.includes(e.id)) : o.examples;
+	let b = o.modes.find((t) => t.mode === e), ee = e ? o.examples.filter((e) => b?.example_ids.includes(e.id)) : o.examples;
 	return /* @__PURE__ */ (0, x.jsxs)("div", {
 		className: "layout-examples",
 		ref: v,
@@ -9599,7 +9609,7 @@ function ae({ mode: e, cache: t, onUnauthorized: n, onViewAll: r, referenceMode:
 			}),
 			/* @__PURE__ */ (0, x.jsx)("div", {
 				className: "layout-examples-list",
-				children: S.map((t) => /* @__PURE__ */ (0, x.jsxs)("article", {
+				children: ee.map((t) => /* @__PURE__ */ (0, x.jsxs)("article", {
 					className: "layout-example",
 					children: [
 						/* @__PURE__ */ (0, x.jsxs)("div", {
@@ -9620,7 +9630,7 @@ function ae({ mode: e, cache: t, onUnauthorized: n, onViewAll: r, referenceMode:
 							className: "layout-mode-note",
 							children: [/* @__PURE__ */ (0, x.jsxs)("strong", { children: [e.name, "："] }), e.note]
 						}, e.mode)),
-						/* @__PURE__ */ (0, x.jsx)(ie, { example: t }),
+						/* @__PURE__ */ (0, x.jsx)(ae, { example: t }),
 						/* @__PURE__ */ (0, x.jsxs)("p", {
 							className: "layout-example-look",
 							children: [/* @__PURE__ */ (0, x.jsx)("strong", { children: "看点：" }), Array.isArray(t.look_for) ? t.look_for.join("；") : t.look_for]
@@ -9629,7 +9639,7 @@ function ae({ mode: e, cache: t, onUnauthorized: n, onViewAll: r, referenceMode:
 							className: "layout-example-reference",
 							children: "当前没有单独的对应排版选项，不会因查看案例自动生成这种效果。"
 						}),
-						a && i && t.available && !t.reference_only && t.mode_tags.includes(i) && re(t.image_url) && /* @__PURE__ */ (0, x.jsx)("button", {
+						a && i && t.available && !t.reference_only && t.mode_tags.includes(i) && ie(t.image_url) && /* @__PURE__ */ (0, x.jsx)("button", {
 							type: "button",
 							className: "secondary choose-ai-reference",
 							onClick: () => a(t),
@@ -9638,7 +9648,7 @@ function ae({ mode: e, cache: t, onUnauthorized: n, onViewAll: r, referenceMode:
 					]
 				}, t.id))
 			}),
-			!S.length && /* @__PURE__ */ (0, x.jsx)("p", {
+			!ee.length && /* @__PURE__ */ (0, x.jsx)("p", {
 				className: "layout-example-unavailable",
 				children: "暂时没有对应案例，请查看全部案例或稍后重新加载。"
 			}),
@@ -9654,7 +9664,7 @@ function ae({ mode: e, cache: t, onUnauthorized: n, onViewAll: r, referenceMode:
 	});
 }
 // src/App.tsx
-function E({ name: e, size: t = 18 }) {
+function T({ name: e, size: t = 18 }) {
 	return /* @__PURE__ */ (0, x.jsx)("svg", {
 		width: t,
 		height: t,
@@ -9714,7 +9724,7 @@ function E({ name: e, size: t = 18 }) {
 		}[e]
 	});
 }
-function oe({ title: e, children: t, onClose: n, wide: r = !1, className: i = "" }) {
+function se({ title: e, children: t, onClose: n, wide: r = !1, className: i = "" }) {
 	let a = (0, l.useRef)(null);
 	return (0, l.useEffect)(() => {
 		let e = a.current?.getRootNode(), t = e?.activeElement;
@@ -9749,13 +9759,13 @@ function oe({ title: e, children: t, onClose: n, wide: r = !1, className: i = ""
 					className: "icon-button",
 					"aria-label": "关闭弹窗",
 					onClick: n,
-					children: /* @__PURE__ */ (0, x.jsx)(E, { name: "close" })
+					children: /* @__PURE__ */ (0, x.jsx)(T, { name: "close" })
 				})]
 			}), t]
 		})
 	});
 }
-function se() {
+function ce() {
 	return /* @__PURE__ */ (0, x.jsxs)("div", {
 		className: "brand",
 		children: [/* @__PURE__ */ (0, x.jsx)("span", {
@@ -9777,7 +9787,7 @@ function se() {
 		}), /* @__PURE__ */ (0, x.jsx)("div", { children: /* @__PURE__ */ (0, x.jsx)("strong", { children: "丝带设计助手" }) })]
 	});
 }
-function ce(e) {
+function E(e) {
 	return e instanceof Error ? e.message : "发生未知错误，请重试。";
 }
 var le = {
@@ -9941,7 +9951,7 @@ function ye({ version: e, sizeLabel: t, target: n }) {
 				hidden: r,
 				children: /* @__PURE__ */ (0, x.jsxs)("div", {
 					className: "target-layer",
-					children: [/* @__PURE__ */ (0, x.jsx)("img", {
+					children: [/* @__PURE__ */ (0, x.jsx)(be, {
 						src: e.preview_url,
 						decoding: "async",
 						alt: `${_(e)}的循环单元预览`
@@ -9962,7 +9972,7 @@ function ye({ version: e, sizeLabel: t, target: n }) {
 						2
 					].map((t) => /* @__PURE__ */ (0, x.jsxs)("div", {
 						className: "loop-repeat",
-						children: [/* @__PURE__ */ (0, x.jsx)("img", {
+						children: [/* @__PURE__ */ (0, x.jsx)(be, {
 							src: e.preview_url,
 							decoding: "async",
 							alt: t === 0 ? `${_(e)}的三次连续效果预览` : ""
@@ -10021,7 +10031,41 @@ function ye({ version: e, sizeLabel: t, target: n }) {
 		]
 	});
 }
-var be = {
+function be({ src: e, alt: t, ...n }) {
+	let [r, i] = (0, l.useState)(0), [a, o] = (0, l.useState)(!1), [s, c] = (0, l.useState)(!1);
+	(0, l.useEffect)(() => {
+		i(0), o(!1), c(!1);
+	}, [e]);
+	let u = r ? e + (e.includes("?") ? "&" : "?") + "retry=" + r : e, d = () => {
+		o(!1), c(!1), i((e) => e + 1);
+	};
+	return /* @__PURE__ */ (0, x.jsxs)(x.Fragment, { children: [!a && /* @__PURE__ */ (0, x.jsx)("img", {
+		...n,
+		src: u,
+		alt: t,
+		onLoad: () => c(!0),
+		onError: () => o(!0)
+	}), a ? /* @__PURE__ */ (0, x.jsxs)("span", {
+		className: "image-recovery",
+		role: "status",
+		children: [/* @__PURE__ */ (0, x.jsxs)("span", { children: [t || "图片", "加载失败"] }), /* @__PURE__ */ (0, x.jsx)("span", {
+			role: "button",
+			tabIndex: 0,
+			className: "secondary small",
+			onClick: (e) => {
+				e.stopPropagation(), d();
+			},
+			onKeyDown: (e) => {
+				(e.key === "Enter" || e.key === " ") && (e.preventDefault(), e.stopPropagation(), d());
+			},
+			children: "重新加载图片"
+		})]
+	}) : !s && n.loading !== "lazy" && /* @__PURE__ */ (0, x.jsx)("span", {
+		className: "image-loading",
+		children: "图片加载中…"
+	})] });
+}
+var xe = {
 	queued: "等待处理",
 	planning: "正在理解修改要求",
 	rendering: "正在生成设计",
@@ -10037,7 +10081,7 @@ var be = {
 	SUCCEEDED: "已保存",
 	FAILED: "处理未完成"
 };
-function xe({ active: e, view: t }) {
+function D({ active: e, view: t }) {
 	let [n, r] = (0, l.useState)(null), [i, a] = (0, l.useState)(!0), [o, s] = (0, l.useState)("");
 	return (0, l.useEffect)(() => {
 		if (!e) return;
@@ -10045,7 +10089,7 @@ function xe({ active: e, view: t }) {
 		return a(!0), f("/auth/me").then((e) => {
 			t || r(e);
 		}).catch((e) => {
-			t || (r(null), s(ce(e)));
+			t || (r(null), s(E(e)));
 		}).finally(() => {
 			t || a(!1);
 		}), () => {
@@ -10083,39 +10127,39 @@ function xe({ active: e, view: t }) {
 	] });
 }
 function Se({ user: e, onLogout: t, active: n, view: r }) {
-	let i = `ribbon:${e.id}:`, [a, o] = (0, l.useState)(null), [s, c] = (0, l.useState)([]), [u, p] = (0, l.useState)([]), [m, b] = (0, l.useState)([]), [S, ee] = (0, l.useState)(null), [C, w] = (0, l.useState)(le), [te, T] = (0, l.useState)(null), [re, ie] = (0, l.useState)("detail"), [ve, xe] = (0, l.useState)(""), [Se, Ce] = (0, l.useState)(""), [D, O] = (0, l.useState)(null), [we, Te] = (0, l.useState)(null), [Ee, De] = (0, l.useState)(!0), [k, A] = (0, l.useState)(!1), [Oe, ke] = (0, l.useState)(!1), [Ae, j] = (0, l.useState)(null), [M, je] = (0, l.useState)(null), [Me, Ne] = (0, l.useState)(() => v(i + "pending", null)), [Pe, Fe] = (0, l.useState)("layout"), [Ie, Le] = (0, l.useState)("");
+	let i = `ribbon:${e.id}:`, [a, o] = (0, l.useState)(0), [s, c] = (0, l.useState)(""), [u, p] = (0, l.useState)(!1), [m, b] = (0, l.useState)(""), ee = (0, l.useRef)(null), [S, te] = (0, l.useState)(null), [C, ne] = (0, l.useState)([]), [w, ie] = (0, l.useState)([]), [ae, ve] = (0, l.useState)([]), [D, Se] = (0, l.useState)(null), [O, k] = (0, l.useState)(le), [Ce, we] = (0, l.useState)(null), [Te, Ee] = (0, l.useState)("detail"), [De, A] = (0, l.useState)(""), [Oe, ke] = (0, l.useState)(""), [Ae, je] = (0, l.useState)(null), [Me, Ne] = (0, l.useState)(null), [Pe, Fe] = (0, l.useState)(!0), [Ie, Le] = (0, l.useState)(!1), [Re, ze] = (0, l.useState)(!1), [Be, j] = (0, l.useState)(null), [Ve, He] = (0, l.useState)(null), [Ue, We] = (0, l.useState)(() => v(i + "pending", null)), [Ge, Ke] = (0, l.useState)("layout"), [M, qe] = (0, l.useState)("");
 	(0, l.useEffect)(() => {
-		M !== "pattern" && M !== "background" && Le("");
-	}, [M]);
-	let [Re, ze] = (0, l.useState)(""), [Be, Ve] = (0, l.useState)(!1), [He, Ue] = (0, l.useState)(null), [We, Ge] = (0, l.useState)(!1), [Ke, qe] = (0, l.useState)(null), [Je, Ye] = (0, l.useState)(0), [Xe, Ze] = (0, l.useState)(null), [Qe, $e] = (0, l.useState)(null), [et, tt] = (0, l.useState)([]), [nt, rt] = (0, l.useState)(!1), [it, at] = (0, l.useState)(!1), [ot, st] = (0, l.useState)(null), [ct, lt] = (0, l.useState)(null), ut = (0, l.useRef)(null);
+		Ve !== "pattern" && Ve !== "background" && qe("");
+	}, [Ve]);
+	let [Je, Ye] = (0, l.useState)(""), [Xe, Ze] = (0, l.useState)(!1), [Qe, $e] = (0, l.useState)(null), [et, tt] = (0, l.useState)(!1), [nt, rt] = (0, l.useState)(null), [it, at] = (0, l.useState)(0), [ot, st] = (0, l.useState)(null), [ct, lt] = (0, l.useState)(null), [ut, dt] = (0, l.useState)([]), [ft, pt] = (0, l.useState)(!1), [mt, ht] = (0, l.useState)(!1), [gt, _t] = (0, l.useState)(null), [vt, yt] = (0, l.useState)(null), bt = (0, l.useRef)(null);
 	(0, l.useEffect)(() => {
-		n && r === "ribbon" || (qe(null), ut.current = null);
+		n && r === "ribbon" || (rt(null), bt.current = null);
 	}, [n, r]);
-	let dt = (0, l.useRef)(!1), ft = (0, l.useRef)(null), pt = (0, l.useRef)(null), mt = (0, l.useRef)(!1), ht = (0, l.useRef)(null), gt = (0, l.useRef)(!0), _t = (0, l.useRef)(null), vt = (0, l.useRef)(null), yt = (0, l.useRef)(0), bt = (0, l.useRef)(null), xt = (0, l.useRef)(null);
-	(0, l.useEffect)(() => (gt.current = !0, () => {
-		gt.current = !1, ht.current?.abort(), bt.current?.abort(), xt.current?.abort();
+	let xt = (0, l.useRef)(!1), St = (0, l.useRef)(null), Ct = (0, l.useRef)(null), wt = (0, l.useRef)(!1), Tt = (0, l.useRef)(null), Et = (0, l.useRef)(!0), Dt = (0, l.useRef)(null), N = (0, l.useRef)(null), Ot = (0, l.useRef)(0), kt = (0, l.useRef)(null), At = (0, l.useRef)(null);
+	(0, l.useEffect)(() => (Et.current = !0, () => {
+		Et.current = !1, Tt.current?.abort(), kt.current?.abort(), At.current?.abort(), ee.current?.abort();
 	}), []);
-	let St = e.role === "admin", N = S?.versions?.find((e) => e.id === S.current_version_id), P = S?.versions?.find((e) => e.id === te) || N, Ct = Math.max(0, 2 - (S?.successful_refinement_count || 0)), wt = !!S?.active_job_id || g(D), F = g(we), I = k || wt || !!Me || Be || !!Xe, Tt = !!P && P.id !== S?.current_version_id, Et = P?.snapshot?.output_profile, Dt = ["seamless-unit-v1", "seamless-unit-v2"].includes(P?.snapshot.loop?.engine || ""), Ot = !N || N.snapshot.layout_engine === "seamless-unit-v2", kt = Et?.width && Et?.height && Et?.dpi ? `${Et.width}×${Et.height}px · ${Et.dpi} DPI · ${(Et.width / Et.dpi * 2.54).toFixed(1)}×${(Et.height / Et.dpi * 2.54).toFixed(1)} cm` : "", At = (0, l.useMemo)(() => new Map(s.map((e) => [e.id, e])), [s]), jt = (0, l.useMemo)(() => {
+	let jt = e.role === "admin", P = D?.versions?.find((e) => e.id === D.current_version_id), F = D?.versions?.find((e) => e.id === Ce) || P, Mt = Math.max(0, 2 - (D?.successful_refinement_count || 0)), Nt = !!D?.active_job_id || g(Ae), Pt = g(Me), I = Ie || Nt || !!Ue || Xe || !!ot, Ft = !!F && F.id !== D?.current_version_id, It = F?.snapshot?.output_profile, Lt = ["seamless-unit-v1", "seamless-unit-v2"].includes(F?.snapshot.loop?.engine || ""), L = !P || P.snapshot.layout_engine === "seamless-unit-v2", Rt = It?.width && It?.height && It?.dpi ? `${It.width}×${It.height}px · ${It.dpi} DPI · ${(It.width / It.dpi * 2.54).toFixed(1)}×${(It.height / It.dpi * 2.54).toFixed(1)} cm` : "", zt = (0, l.useMemo)(() => new Map(C.map((e) => [e.id, e])), [C]), Bt = (0, l.useMemo)(() => {
 		let e = {
 			pattern: [],
 			background: []
 		};
-		for (let t of s) e[t.kind].push({
+		for (let t of C) e[t.kind].push({
 			asset: t,
 			query: t.name.toLocaleLowerCase()
 		});
 		return e;
-	}, [s]), L = u.find((e) => e.id === C.template_id), Mt = Ot && pe[L?.mode || ""] || [], Nt = he(L?.mode, C.asset_ids.length, Ot), Pt = C.asset_ids.length > 0 && !!C.background_id && !!L && !Nt, Ft = !!N && (JSON.stringify(N.snapshot.asset_refs) !== JSON.stringify(C.asset_ids) || N.snapshot.background_ref !== C.background_id || N.snapshot.template_id !== C.template_id || (N.snapshot.border_ref || "") !== (C.border_ref || "") || Mt.some((e) => N.snapshot.zone_background_refs?.[e] !== C.zone_background_refs?.[e]) || (N.snapshot.background_tone || "original") !== (C.background_tone || "original") || (N.snapshot.design_density || "balanced") !== (C.design_density || "balanced")), It = C.asset_ids.map((e) => At.get(e)).filter(Boolean), R = At.get(C.background_id), Lt = u.filter((e) => e.enabled || e.id === C.template_id), Rt = Lt.filter((e) => ue.has(e.mode)), zt = Lt.filter((e) => !ue.has(e.mode)), Bt = a?.provider === "test", Vt = Bt ? a?.auth_mode !== "hsd" : a?.ai_ready === !0, Ht = a?.provider === "deepseek_seedream" && a?.ai_ready === !0 && a?.ai_draft_available === !0, Ut = !N && !S?.versions?.length, Wt = Ut && Ht && ot !== !1, Gt = Wt && ct?.mode === L?.mode ? ct : null, z = Ft && (!ve.trim() || ["应用所选配置", "应用新的素材与排版"].includes(ve.trim())), Kt = N?.editing || a?.editing, qt = Ft && Kt && [
+	}, [C]), R = w.find((e) => e.id === O.template_id), Vt = L && pe[R?.mode || ""] || [], Ht = he(R?.mode, O.asset_ids.length, L), Ut = O.asset_ids.length > 0 && !!O.background_id && !!R && !Ht, Wt = !!P && (JSON.stringify(P.snapshot.asset_refs) !== JSON.stringify(O.asset_ids) || P.snapshot.background_ref !== O.background_id || P.snapshot.template_id !== O.template_id || (P.snapshot.border_ref || "") !== (O.border_ref || "") || Vt.some((e) => P.snapshot.zone_background_refs?.[e] !== O.zone_background_refs?.[e]) || (P.snapshot.background_tone || "original") !== (O.background_tone || "original") || (P.snapshot.design_density || "balanced") !== (O.design_density || "balanced")), Gt = O.asset_ids.map((e) => zt.get(e)).filter(Boolean), z = zt.get(O.background_id), Kt = w.filter((e) => e.enabled || e.id === O.template_id), qt = Kt.filter((e) => ue.has(e.mode)), Jt = Kt.filter((e) => !ue.has(e.mode)), Yt = S?.provider === "test", Xt = Yt ? S?.auth_mode !== "hsd" : S?.ai_ready === !0, Zt = S?.provider === "deepseek_seedream" && S?.ai_ready === !0 && S?.ai_draft_available === !0, Qt = !P && !D?.versions?.length, $t = Qt && Zt && gt !== !1, en = $t && vt?.mode === R?.mode ? vt : null, tn = Wt && (!De.trim() || ["应用所选配置", "应用新的素材与排版"].includes(De.trim())), nn = P?.editing || S?.editing, rn = Wt && nn && [
 		"test",
 		"openai",
 		"deepseek_seedream"
-	].includes(a?.provider || "") ? {
-		...Kt,
+	].includes(S?.provider || "") ? {
+		...nn,
 		allowed_operations: [
 			"parameters",
 			"edit_asset",
 			"edit_background",
-			...Kt.composite_edit ? ["edit_composite"] : []
+			...nn.composite_edit ? ["edit_composite"] : []
 		],
 		allowed_parameters: [
 			"scale",
@@ -10123,34 +10167,34 @@ function Se({ user: e, onLogout: t, active: n, view: r }) {
 			"offset_x",
 			"offset_y",
 			"background_color",
-			...Ot || !["fullwidth", "ends_open"].includes(L?.mode || "") ? ["spacing"] : []
+			...L || !["fullwidth", "ends_open"].includes(R?.mode || "") ? ["spacing"] : []
 		]
-	} : Kt, Jt = !z && (!Vt || qt?.allowed_operations.length === 0), Yt = (e) => !qt || qt.allowed_operations.includes(e), Xt = (Ot || L?.mode !== "fullwidth" && L?.mode !== "ends_open") && (!qt || qt.allowed_parameters.includes("spacing")), Zt = Pe === "layout" ? [
-		...Yt("parameters") ? [Xt ? "图案缩小一些，间距拉开一点" : "图案缩小一些"] : [],
-		...Yt("edit_background") ? ["背景添加波点"] : [],
-		...Yt("edit_asset") ? ["给第一个图案添加星光"] : [],
-		...Yt("edit_composite") ? ["给画面添加星光"] : []
-	] : Pe.startsWith("zone:") || Pe === "background" ? ["添加细小波点"] : ["缩小一点", "向右移动10像素"];
-	function Qt(e) {
-		return Ot && e.id === e.mode && e.version === 1 ? `/static/ribbon/layout-v2/${e.mode}.webp` : e.thumbnail_url;
+	} : nn, an = !tn && (!Xt || rn?.allowed_operations.length === 0), on = (e) => !rn || rn.allowed_operations.includes(e), sn = (L || R?.mode !== "fullwidth" && R?.mode !== "ends_open") && (!rn || rn.allowed_parameters.includes("spacing")), cn = Ge === "layout" ? [
+		...on("parameters") ? [sn ? "图案缩小一些，间距拉开一点" : "图案缩小一些"] : [],
+		...on("edit_background") ? ["背景添加波点"] : [],
+		...on("edit_asset") ? ["给第一个图案添加星光"] : [],
+		...on("edit_composite") ? ["给画面添加星光"] : []
+	] : Ge.startsWith("zone:") || Ge === "background" ? ["添加细小波点"] : Ge === "border" ? ["保留边饰图案，添加细小星光"] : ["缩小一点", "向右移动10像素"];
+	function ln(e) {
+		return L && e.id === e.mode && e.version === 1 ? `/static/ribbon/layout-v2/${e.mode}.webp` : e.thumbnail_url;
 	}
-	function $t(e) {
+	function un(e) {
 		return /* @__PURE__ */ (0, x.jsxs)("div", {
 			className: "template-option",
 			children: [/* @__PURE__ */ (0, x.jsxs)("button", {
-				className: `template-card ${C.template_id === e.id ? "selected" : ""}`,
+				className: `template-card ${O.template_id === e.id ? "selected" : ""}`,
 				disabled: I,
-				"aria-pressed": C.template_id === e.id,
-				onClick: () => en({
-					...C,
+				"aria-pressed": O.template_id === e.id,
+				onClick: () => dn({
+					...O,
 					template_id: e.id
 				}),
-				children: [/* @__PURE__ */ (0, x.jsx)("img", {
-					src: Qt(e),
+				children: [/* @__PURE__ */ (0, x.jsx)(be, {
+					src: ln(e),
 					alt: `${e.name}样式图`,
 					loading: "lazy",
 					decoding: "async"
-				}), /* @__PURE__ */ (0, x.jsxs)("span", { children: [e.name, C.template_id === e.id && /* @__PURE__ */ (0, x.jsx)(E, {
+				}), /* @__PURE__ */ (0, x.jsxs)("span", { children: [e.name, O.template_id === e.id && /* @__PURE__ */ (0, x.jsx)(T, {
 					name: "check",
 					size: 14
 				})] })]
@@ -10159,7 +10203,7 @@ function Se({ user: e, onLogout: t, active: n, view: r }) {
 				className: "template-example-button",
 				"aria-label": `查看${e.name}案例`,
 				onClick: () => {
-					je(null), qe({
+					He(null), rt({
 						mode: e.mode,
 						name: e.name
 					});
@@ -10168,19 +10212,19 @@ function Se({ user: e, onLogout: t, active: n, view: r }) {
 			})]
 		}, e.id);
 	}
-	function en(e) {
-		e.template_id !== C.template_id && (lt(null), delete e.zone_background_refs, delete e.border_ref), Pe !== "layout" && Fe("layout"), w(e), y(i + "selection", {
-			design_id: vt.current?.id || null,
-			base_version_id: vt.current?.current_version_id || null,
+	function dn(e) {
+		e.template_id !== O.template_id && (yt(null), delete e.zone_background_refs, delete e.border_ref), Ge !== "layout" && Ke("layout"), k(e), y(i + "selection", {
+			design_id: N.current?.id || null,
+			base_version_id: N.current?.current_version_id || null,
 			value: e
 		});
 	}
-	function tn(e, t = !1) {
-		let n = _t.current !== e.current_version_id;
-		if (vt.current = e, ee(e), y(i + "design", e.id), b((t) => [e, ...t.filter((t) => t.id !== e.id)]), t || n) {
-			Fe("layout");
+	function fn(e, t = !1) {
+		let n = Dt.current !== e.current_version_id;
+		if (N.current = e, Se(e), y(i + "design", e.id), ve((t) => [e, ...t.filter((t) => t.id !== e.id)]), t || n) {
+			Ke("layout");
 			let r = e.versions?.find((t) => t.id === e.current_version_id);
-			ie(r && ["ends", "ends_open"].includes(r.snapshot.template_mode) ? "fit" : "detail");
+			Ee(r && ["ends", "ends_open"].includes(r.snapshot.template_mode) ? "fit" : "detail");
 			let a = v(i + "selection", null), o = t && a?.design_id === e.id && a.base_version_id === e.current_version_id ? a.value : r ? {
 				asset_ids: r.snapshot.asset_refs,
 				background_id: r.snapshot.background_ref,
@@ -10195,315 +10239,326 @@ function Se({ user: e, onLogout: t, active: n, view: r }) {
 					"seamless-unit-v2"
 				].includes(r.snapshot.layout_engine || "") ? { design_density: r.snapshot.design_density || "balanced" } : {}
 			} : le;
-			w(_e(o, r)), T(e.current_version_id), _t.current = e.current_version_id, n && xe("");
+			k(_e(o, r)), we(e.current_version_id), Dt.current = e.current_version_id, n && A("");
 		}
-		e.active_job && O(e.active_job);
+		e.active_job && je(e.active_job);
 	}
-	async function nn() {
+	async function pn() {
 		let [e, t, n] = await Promise.all([
 			f("/assets"),
 			f("/templates"),
 			f("/config")
 		]);
-		c(e), p(t), o(n);
+		ne(e), ie(t), te(n);
 	}
 	(0, l.useEffect)(() => {
-		let e = !1;
-		async function n() {
+		let e = !1, n = new AbortController();
+		async function r() {
+			Fe(!0), c("");
 			try {
-				let [t, n, r, a] = await Promise.all([
-					f("/assets"),
-					f("/templates"),
-					f("/config"),
-					f("/designs")
+				let t = await Promise.allSettled([
+					f("/assets", { signal: n.signal }),
+					f("/templates", { signal: n.signal }),
+					f("/config", { signal: n.signal }),
+					f("/designs?summary=true", { signal: n.signal })
 				]);
 				if (e) return;
-				c(t), p(n), o(r), b(a);
-				let s = v(i + "design", null), l = a.find((e) => e.id === s)?.id || a[0]?.id;
-				if (l) {
-					let t = await f(`/designs/${l}`);
-					e || (tn(t, !0), t.active_job_id && j({
+				let [r, a, o, s] = t;
+				r.status === "fulfilled" && ne(r.value), a.status === "fulfilled" && ie(a.value), o.status === "fulfilled" && te(o.value), s.status === "fulfilled" && ve(s.value);
+				let c = t.find((e) => e.status === "rejected");
+				if (c?.status === "rejected") throw c.reason;
+				let l = r.status === "fulfilled" ? r.value : [], u = a.status === "fulfilled" ? a.value : [], d = s.status === "fulfilled" ? s.value : [], p = v(i + "design", null), m = d.find((e) => e.id === p)?.id || d[0]?.id;
+				if (m) {
+					let t = await f(`/designs/${m}`, { signal: n.signal });
+					e || (fn(t, !0), t.active_job_id && j({
 						text: "已恢复作品，正在同步后台任务。离开页面不会中断处理。",
 						type: "info"
 					}));
 				} else {
 					let e = v(i + "selection", null);
-					w(_e(e?.value || ge(t, n)));
+					k(_e(e?.value || ge(l, u)));
 				}
-				let u = v(i + "backgroundJob", null);
-				if (u) {
-					let t = await f(`/jobs/${u}`);
-					e || Te(t);
+				let h = v(i + "backgroundJob", null);
+				if (h) {
+					let t = await f(`/jobs/${h}`, { signal: n.signal });
+					e || Ne(t);
 				}
 			} catch (n) {
-				e || (j({
-					text: ce(n),
-					type: "error"
-				}), n instanceof d && n.status === 401 && t());
+				e || (c(E(n)), n instanceof d && n.status === 401 && t());
 			} finally {
-				e || De(!1);
+				e || Fe(!1);
 			}
 		}
-		return n(), () => {
-			e = !0;
+		return r(), () => {
+			e = !0, n.abort();
 		};
-	}, []), (0, l.useEffect)(() => {
-		if (!n || !S?.id && !we?.id) return;
-		let e = new AbortController(), r = yt.current, a = S?.id, o = () => s || !gt.current || r !== yt.current || a !== void 0 && vt.current?.id !== a, s = !1, l = !1, u = async () => {
-			if (!(l || document.hidden)) {
-				l = !0;
+	}, [a]), (0, l.useEffect)(() => {
+		if (!n || !D?.id && !Me?.id) return;
+		let e = new AbortController(), r = Ot.current, a = D?.id, o = () => s || !Et.current || r !== Ot.current || a !== void 0 && N.current?.id !== a, s = !1, c = !1, l = async () => {
+			if (!(c || document.hidden)) {
+				c = !0;
 				try {
-					if (S?.id) {
-						let t = await f(`/designs/${S.id}`, { signal: e.signal });
+					if (Re && !D?.id && !g(Me) && await f("/config", { signal: e.signal }), D?.id) {
+						let t = await f(`/designs/${D.id}`, { signal: e.signal });
 						if (o()) return;
-						let n = vt.current;
-						tn(t);
-						let r = t.active_job_id || n?.active_job_id || D?.id;
+						let n = N.current;
+						fn(t);
+						let r = t.active_job_id || n?.active_job_id || Ae?.id;
 						if (r) {
 							let t = await f(`/jobs/${r}`, { signal: e.signal });
 							if (o()) return;
-							O(t), t.status === "FAILED" && D?.status !== "FAILED" && j({
+							je(t), t.status === "FAILED" && Ae?.status !== "FAILED" && j({
 								text: t.error || "此次处理未完成，已保留原结果，不扣精修次数。",
 								type: "error"
 							});
 						}
 					}
-					if (we && g(we)) {
-						let t = await f(`/jobs/${we.id}`, { signal: e.signal });
+					if (Me && g(Me)) {
+						let t = await f(`/jobs/${Me.id}`, { signal: e.signal });
 						if (o()) return;
-						if (Te(t), t.status === "SUCCEEDED" && t.result_asset_id) {
-							let n = await f("/assets", { signal: e.signal });
-							if (o()) return;
-							c(n);
-							let r = v(i + "backgroundTarget", null);
-							r && r.design_id !== (vt.current?.id || null) || w((e) => {
-								let n = {
-									...e,
-									background_id: t.result_asset_id
-								};
-								return y(i + "selection", {
-									design_id: vt.current?.id || null,
-									base_version_id: vt.current?.current_version_id || null,
-									value: n
-								}), n;
-							}), y(i + "backgroundJob", null), j({
-								text: Bt ? "测试底图已生成并选中。" : "AI 底图已生成并选中。",
-								type: "success"
-							});
-						} else t.status === "FAILED" && (y(i + "backgroundJob", null), j({
+						Ne(t), t.status === "FAILED" && (y(i + "backgroundJob", null), j({
 							text: t.error || "底图未能生成，请重试。",
 							type: "error"
 						}));
 					}
-					ke(!1);
+					ze(!1);
 				} catch (e) {
-					o() || (ke(!0), e instanceof d && e.status === 401 && t());
+					o() || (ze(!0), e instanceof d && e.status === 401 && t());
 				} finally {
-					l = !1;
+					c = !1;
 				}
 			}
 		};
-		u();
-		let p = wt || F ? window.setInterval(u, 1200) : void 0;
-		return document.addEventListener("visibilitychange", u), window.addEventListener("focus", u), () => {
-			s = !0, e.abort(), clearInterval(p), document.removeEventListener("visibilitychange", u), window.removeEventListener("focus", u);
+		Re || l();
+		let u = Nt || Pt || Re ? window.setInterval(l, Re && !Nt && !Pt ? 2500 : 1200) : void 0;
+		return document.addEventListener("visibilitychange", l), window.addEventListener("focus", l), () => {
+			s = !0, e.abort(), clearInterval(u), document.removeEventListener("visibilitychange", l), window.removeEventListener("focus", l);
 		};
 	}, [
 		n,
-		S?.id,
-		S?.active_job_id,
-		we?.id,
-		we?.status,
+		Re,
 		D?.id,
-		D?.status
+		D?.active_job_id,
+		Me?.id,
+		Me?.status,
+		Ae?.id,
+		Ae?.status
 	]), (0, l.useEffect)(() => {
-		if (!S?.current_version_id) return;
-		let e = new AbortController(), t = yt.current;
-		return f("/assets", { signal: e.signal }).then((n) => {
-			!e.signal.aborted && gt.current && t === yt.current && c(n);
+		let e = D?.versions.find((e) => e.id === D.current_version_id)?.snapshot;
+		if (!e || Re || [
+			...e.asset_refs,
+			e.background_ref,
+			...Object.values(e.zone_background_refs || {}),
+			...e.border_ref ? [e.border_ref] : []
+		].every((e) => C.some((t) => t.id === e))) return;
+		let t = new AbortController(), n = Ot.current;
+		return f("/assets", { signal: t.signal }).then((e) => {
+			!t.signal.aborted && Et.current && n === Ot.current && ne(e);
 		}).catch(() => {
-			!e.signal.aborted && t === yt.current && ke(!0);
-		}), () => e.abort();
-	}, [S?.current_version_id]), (0, l.useEffect)(() => {
-		we?.status === "SUCCEEDED" && we.result_asset_id && v(i + "backgroundJob", null) === we.id && f("/assets").then((e) => {
-			c(e);
-			let t = v(i + "backgroundTarget", null);
-			t && t.design_id !== (vt.current?.id || null) || w((e) => {
+			!t.signal.aborted && n === Ot.current && ze(!0);
+		}), () => t.abort();
+	}, [D?.current_version_id, Re]), (0, l.useEffect)(() => {
+		if (Me?.status !== "SUCCEEDED" || !Me.result_asset_id || v(i + "backgroundJob", null) !== Me.id || Re) return;
+		let e = new AbortController();
+		return f("/assets", { signal: e.signal }).then((t) => {
+			if (e.signal.aborted || !Et.current) return;
+			ne(t);
+			let n = v(i + "backgroundTarget", null);
+			n && n.design_id !== (N.current?.id || null) || k((e) => {
 				let t = {
 					...e,
-					background_id: we.result_asset_id
+					background_id: Me.result_asset_id
 				};
 				return y(i + "selection", {
-					design_id: vt.current?.id || null,
-					base_version_id: vt.current?.current_version_id || null,
+					design_id: N.current?.id || null,
+					base_version_id: N.current?.current_version_id || null,
 					value: t
 				}), t;
 			}), y(i + "backgroundJob", null), j({
 				text: "已恢复上次完成的底图。",
 				type: "success"
 			});
-		}).catch(() => ke(!0));
-	}, [we?.id, we?.status]);
-	async function rn(e) {
-		Ne(e), y(i + "pending", e);
+		}).catch(() => {
+			!e.signal.aborted && Et.current && ze(!0);
+		}), () => e.abort();
+	}, [
+		Me?.id,
+		Me?.status,
+		Re
+	]);
+	async function mn(e) {
+		We(e), y(i + "pending", e);
 		try {
 			let t = await h(e.path, e.body);
-			if (Ne(null), y(i + "pending", null), j(null), e.kind === "background") y(i + "backgroundTarget", { design_id: e.designId || null }), Te(t), y(i + "backgroundJob", t.id);
-			else if (O(t), e.designId) try {
-				tn(await f(`/designs/${e.designId}`));
+			if (We(null), y(i + "pending", null), j(null), e.kind === "background") y(i + "backgroundTarget", { design_id: e.designId || null }), Ne(t), y(i + "backgroundJob", t.id);
+			else if (je(t), e.designId) try {
+				fn(await f(`/designs/${e.designId}`));
 			} catch {
-				ke(!0), j({
+				ze(!0), j({
 					text: "任务已接受，正在等待连接恢复以同步结果。",
 					type: "info"
 				});
 			}
 		} catch (e) {
-			e instanceof d && e.status >= 400 && e.status < 500 && e.status !== 408 && (Ne(null), y(i + "pending", null)), j({
-				text: e instanceof d && e.status >= 400 && e.status < 500 && e.status !== 408 ? ce(e) : "连接中断，提交结果尚未确认。请点击“恢复提交”，将使用原请求安全查询或继续。",
+			e instanceof d && e.status >= 400 && e.status < 500 && e.status !== 408 && (We(null), y(i + "pending", null)), j({
+				text: e instanceof d && e.status >= 400 && e.status < 500 && e.status !== 408 ? E(e) : "连接中断，提交结果尚未确认。请点击“恢复提交”，将使用原请求安全查询或继续。",
 				type: "error"
 			});
 		}
 	}
-	async function an(e) {
-		if (!dt.current) {
-			dt.current = !0, A(!0);
+	async function hn(e) {
+		if (!xt.current) {
+			xt.current = !0, Le(!0);
 			try {
 				await e();
 			} catch (e) {
 				j({
-					text: ce(e),
+					text: E(e),
 					type: "error"
 				});
 			} finally {
-				dt.current = !1, A(!1);
+				xt.current = !1, Le(!1);
 			}
 		}
 	}
-	async function on() {
-		!I && Pt && await an(async () => {
-			let e = S;
-			e || (e = await h("/designs", { name: `丝带设计 ${(/* @__PURE__ */ new Date()).toLocaleDateString("zh-CN")}` }), tn(e)), await rn({
+	async function gn() {
+		!I && Ut && await hn(async () => {
+			let e = D;
+			e || (e = await h("/designs", { name: `丝带设计 ${(/* @__PURE__ */ new Date()).toLocaleDateString("zh-CN")}` }), fn(e)), await mn({
 				path: `/designs/${e.id}/generate`,
 				body: {
 					idempotency_key: crypto.randomUUID(),
-					...C,
-					ai_assisted: Wt,
-					reference_code: Gt?.code || null
+					...O,
+					ai_assisted: $t,
+					reference_code: en?.code || null
 				},
 				kind: "design",
 				designId: e.id
 			});
 		});
 	}
-	async function sn() {
-		I || !N || Ct === 0 || Tt || !Pt || Jt || !ve.trim() && !Ft || await an(() => rn({
-			path: `/designs/${S.id}/refinements`,
+	async function _n() {
+		I || !P || Mt === 0 || Ft || !Ut || an || !De.trim() && !Wt || await hn(() => mn({
+			path: `/designs/${D.id}/refinements`,
 			body: {
 				idempotency_key: crypto.randomUUID(),
-				base_version_id: N.id,
-				...Ot && Pe !== "layout" ? { edit_target: Pe } : {},
-				prompt: ve.trim() || (Ft ? "应用所选配置" : ""),
-				...Ft ? { selection: C } : {}
+				base_version_id: P.id,
+				...L && Ge !== "layout" ? { edit_target: Ge } : {},
+				prompt: De.trim() || (Wt ? "应用所选配置" : ""),
+				...Wt ? { selection: O } : {}
 			},
 			kind: "design",
-			designId: S.id
+			designId: D.id
 		}));
 	}
-	async function cn() {
-		!I && N?.parent_version_id && await an(async () => {
-			tn(await h(`/designs/${S.id}/rollback`, { expected_version_id: N.id })), O(null), j({
+	async function vn() {
+		!I && P?.parent_version_id && await hn(async () => {
+			fn(await h(`/designs/${D.id}/rollback`, { expected_version_id: P.id })), je(null), j({
 				text: "已回退到当前版本的父版本。累计精修次数保持不变。",
 				type: "success"
 			});
 		});
 	}
-	async function ln() {
-		k || Me || F || Be || (++yt.current, bt.current?.abort(), Ze(null), st(null), lt(null), await an(async () => {
-			let e = await h("/designs", { name: `丝带设计 ${m.length + 1}` });
-			_t.current = null, tn(e, !0), en(ge(s, u)), xe(""), O(null), j(null), je(null);
+	async function yn() {
+		Ie || Ue || Pt || Xe || (++Ot.current, kt.current?.abort(), st(null), _t(null), yt(null), await hn(async () => {
+			let e = await h("/designs", { name: `丝带设计 ${ae.length + 1}` });
+			Dt.current = null, fn(e, !0), dn(ge(C, w)), A(""), je(null), j(null), He(null);
 		}));
 	}
-	async function un(e) {
-		if (k || Me || F || Be) return;
-		let n = ++yt.current;
-		bt.current?.abort();
+	async function bn(e) {
+		if (Ie || Ue || Pt || Xe) return;
+		let n = ++Ot.current;
+		kt.current?.abort();
 		let r = new AbortController();
-		bt.current = r;
-		let i = m.find((t) => t.id === e)?.name || "所选作品";
-		Ze({
+		kt.current = r;
+		let i = ae.find((t) => t.id === e)?.name || "所选作品";
+		st({
 			id: e,
 			name: i,
 			loading: !0
-		}), vt.current = null, ee(null), T(null), w(le), _t.current = null, O(null), xe(""), st(null), lt(null), j(null), je(null);
+		}), N.current = null, Se(null), we(null), k(le), Dt.current = null, je(null), A(""), _t(null), yt(null), j(null), He(null);
 		try {
 			let t = await f(`/designs/${e}`, { signal: r.signal });
-			if (!gt.current || n !== yt.current || r.signal.aborted) return;
-			tn(t, !0), Ze(null), O(t.active_job || null), ke(!1);
+			if (!Et.current || n !== Ot.current || r.signal.aborted) return;
+			fn(t, !0), st(null), je(t.active_job || null), ze(!1);
 		} catch (a) {
-			if (!gt.current || n !== yt.current || r.signal.aborted) return;
-			Ze({
+			if (!Et.current || n !== Ot.current || r.signal.aborted) return;
+			st({
 				id: e,
 				name: i,
 				loading: !1
 			}), j({
-				text: ce(a),
+				text: E(a),
 				type: "error"
 			}), a instanceof d && a.status === 401 && t();
 		}
 	}
-	async function dn() {
-		xt.current?.abort();
+	async function xn() {
+		He("designs"), pt(!1), lt(null), b(""), ee.current?.abort();
 		let e = new AbortController();
-		xt.current = e, at(!0);
+		ee.current = e, p(!0);
 		try {
-			let t = await f("/designs?deleted=true", { signal: e.signal });
-			!e.signal.aborted && gt.current && tt(t);
+			let t = await f("/designs?summary=true", { signal: e.signal });
+			!e.signal.aborted && Et.current && ve(t);
 		} catch (t) {
-			!e.signal.aborted && gt.current && j({
-				text: ce(t),
+			!e.signal.aborted && Et.current && b(E(t));
+		} finally {
+			!e.signal.aborted && Et.current && p(!1);
+		}
+	}
+	async function Sn() {
+		At.current?.abort();
+		let e = new AbortController();
+		At.current = e, ht(!0);
+		try {
+			let t = await f("/designs?deleted=true&summary=true", { signal: e.signal });
+			!e.signal.aborted && Et.current && dt(t);
+		} catch (t) {
+			!e.signal.aborted && Et.current && j({
+				text: E(t),
 				type: "error"
 			});
 		} finally {
-			!e.signal.aborted && gt.current && at(!1);
+			!e.signal.aborted && Et.current && ht(!1);
 		}
 	}
-	async function fn(e) {
-		k || Me || Be || F || Xe?.loading || e.active_job_id || await an(async () => {
-			await f(`/designs/${e.id}`, { method: "DELETE" }), gt.current && (xt.current?.abort(), at(!1), b((t) => t.filter((t) => t.id !== e.id)), tt((t) => [e, ...t.filter((t) => t.id !== e.id)]), (vt.current?.id === e.id || Xe?.id === e.id) && (++yt.current, bt.current?.abort(), vt.current = null, ee(null), Ze(null), T(null), _t.current = null, O(null), xe(""), st(null), lt(null), w(ge(s, u)), y(i + "design", null), y(i + "selection", null)), $e(null), j({
-				text: `作品已删除，可在“已删除作品”中恢复；保留 ${a?.retention_hours ?? 50} 小时，累计精修次数不变。`,
+	async function Cn(e) {
+		Ie || Ue || Xe || Pt || ot?.loading || e.active_job_id || await hn(async () => {
+			await f(`/designs/${e.id}`, { method: "DELETE" }), Et.current && (At.current?.abort(), ht(!1), ve((t) => t.filter((t) => t.id !== e.id)), dt((t) => [e, ...t.filter((t) => t.id !== e.id)]), (N.current?.id === e.id || ot?.id === e.id) && (++Ot.current, kt.current?.abort(), N.current = null, Se(null), st(null), we(null), Dt.current = null, je(null), A(""), _t(null), yt(null), k(ge(C, w)), y(i + "design", null), y(i + "selection", null)), lt(null), j({
+				text: `作品已删除，可在“已删除作品”中恢复；保留 ${S?.retention_hours ?? 50} 小时，累计精修次数不变。`,
 				type: "success"
 			}));
 		});
 	}
-	async function pn(e) {
-		xt.current?.abort(), at(!1), await an(async () => {
+	async function wn(e) {
+		At.current?.abort(), ht(!1), await hn(async () => {
 			let t = await h(`/designs/${e.id}/restore`, {});
-			gt.current && (b((n) => [t, ...n.filter((t) => t.id !== e.id)]), tt((t) => t.filter((t) => t.id !== e.id)), j({
+			Et.current && (ve((n) => [t, ...n.filter((t) => t.id !== e.id)]), dt((t) => t.filter((t) => t.id !== e.id)), j({
 				text: "作品已恢复，版本与累计精修次数保持不变。",
 				type: "success"
 			}));
 		});
 	}
-	async function mn() {
-		I || F || (Vt ? await an(() => rn({
+	async function Tn() {
+		I || Pt || (Xt ? await hn(() => mn({
 			path: "/background-jobs",
 			body: {
 				idempotency_key: crypto.randomUUID(),
-				prompt: Se.trim()
+				prompt: Oe.trim()
 			},
 			kind: "background",
-			designId: S?.id
+			designId: D?.id
 		})) : j({
 			text: "AI 服务尚未配置，请联系管理员；仍可使用已有底图生成首稿。",
 			type: "info"
 		}));
 	}
-	async function hn(e, n) {
-		if (!e?.length || mt.current || I) return;
-		let r = Array.from(e), a = St && We;
-		mt.current = !0;
+	async function En(e, n) {
+		if (!e?.length || wt.current || I) return;
+		let r = Array.from(e), a = jt && et;
+		wt.current = !0;
 		let o = new AbortController();
-		ht.current = o, Ve(!0), Ue({
+		Tt.current = o, Ze(!0), $e({
 			completed: 0,
 			total: r.length
 		}), j({
@@ -10513,29 +10568,29 @@ function Se({ user: e, onLogout: t, active: n, view: r }) {
 		let s = [];
 		try {
 			for (let [e, t] of r.entries()) {
-				if (!gt.current) return;
-				let l = new FormData();
-				l.append("file", t), l.append("kind", n), l.append("name", t.name.replace(/\.[^.]+$/, "")), l.append("shared", String(a));
-				let u = await f("/assets", {
+				if (!Et.current) return;
+				let c = new FormData();
+				c.append("file", t), c.append("kind", n), c.append("name", t.name.replace(/\.[^.]+$/, "")), c.append("shared", String(a));
+				let l = await f("/assets", {
 					method: "POST",
-					body: l,
+					body: c,
 					signal: o.signal
 				});
-				if (!gt.current) return;
-				s.push(u), c((e) => e.some((e) => e.id === u.id) ? e.map((e) => e.id === u.id ? u : e) : [...e, u]), w((e) => {
+				if (!Et.current) return;
+				s.push(l), ne((e) => e.some((e) => e.id === l.id) ? e.map((e) => e.id === l.id ? l : e) : [...e, l]), k((e) => {
 					let t = n === "pattern" ? {
 						...e,
-						asset_ids: [.../* @__PURE__ */ new Set([...e.asset_ids, u.id])].slice(0, 12)
+						asset_ids: [.../* @__PURE__ */ new Set([...e.asset_ids, l.id])].slice(0, 12)
 					} : {
 						...e,
-						background_id: u.id
+						background_id: l.id
 					};
 					return y(i + "selection", {
-						design_id: vt.current?.id || null,
-						base_version_id: vt.current?.current_version_id || null,
+						design_id: N.current?.id || null,
+						base_version_id: N.current?.current_version_id || null,
 						value: t
 					}), t;
-				}), Ue({
+				}), $e({
 					completed: s.length,
 					total: r.length
 				}), e + 1 < r.length && j({
@@ -10548,143 +10603,152 @@ function Se({ user: e, onLogout: t, active: n, view: r }) {
 				type: "success"
 			});
 		} catch (e) {
-			if (!gt.current) return;
+			if (!Et.current) return;
 			e instanceof d && e.status === 401 && t();
-			let n = e instanceof d ? ce(e) : "本张上传结果尚未确认。请重新载入网页，在素材库查看后再决定是否重传。";
+			let n = e instanceof d ? E(e) : "本张上传结果尚未确认。请重新载入网页，在素材库查看后再决定是否重传。";
 			j({
 				text: s.length ? `已上传 ${s.length} 个，其余未完成：${n}` : n,
 				type: "error"
 			});
 		} finally {
-			mt.current = !1, ht.current = null, gt.current && (Ve(!1), Ue(null)), ft.current && (ft.current.value = ""), pt.current && (pt.current.value = "");
+			wt.current = !1, Tt.current = null, Et.current && (Ze(!1), $e(null)), St.current && (St.current.value = ""), Ct.current && (Ct.current.value = "");
 		}
 	}
-	function gn(e) {
-		I || (!C.asset_ids.includes(e) && C.asset_ids.length >= 12 ? j({
+	function Dn(e) {
+		I || (!O.asset_ids.includes(e) && O.asset_ids.length >= 12 ? j({
 			text: "每份设计最多选择 12 个图案。",
 			type: "info"
-		}) : en({
-			...C,
-			asset_ids: C.asset_ids.includes(e) ? C.asset_ids.filter((t) => t !== e) : [...C.asset_ids, e]
+		}) : dn({
+			...O,
+			asset_ids: O.asset_ids.includes(e) ? O.asset_ids.filter((t) => t !== e) : [...O.asset_ids, e]
 		}));
 	}
 	(0, l.useEffect)(() => {
-		n ? r === "ribbon-admin" && (St ? je("admin") : j({
+		n ? r === "ribbon-admin" && (jt ? He("admin") : j({
 			text: "排版与规格维护仅供管理员使用。",
 			type: "error"
-		})) : je(null);
+		})) : He(null);
 	}, [
 		n,
 		r,
-		St
+		jt
 	]);
-	async function _n(e) {
-		await an(async () => {
-			await f(`/assets/${e.id}`, { method: "DELETE" }), c((t) => t.filter((t) => t.id !== e.id)), en({
-				...C,
-				asset_ids: C.asset_ids.filter((t) => t !== e.id),
-				background_id: C.background_id === e.id ? "" : C.background_id,
-				border_ref: C.border_ref === e.id ? void 0 : C.border_ref,
-				zone_background_refs: C.zone_background_refs && Object.fromEntries(Object.entries(C.zone_background_refs).filter(([, t]) => t !== e.id))
+	async function On(e) {
+		await hn(async () => {
+			await f(`/assets/${e.id}`, { method: "DELETE" }), ne((t) => t.filter((t) => t.id !== e.id)), dn({
+				...O,
+				asset_ids: O.asset_ids.filter((t) => t !== e.id),
+				background_id: O.background_id === e.id ? "" : O.background_id,
+				border_ref: O.border_ref === e.id ? void 0 : O.border_ref,
+				zone_background_refs: O.zone_background_refs && Object.fromEntries(Object.entries(O.zone_background_refs).filter(([, t]) => t !== e.id))
 			});
 		});
 	}
-	let vn = Xe ? Xe.loading ? "正在打开作品" : "作品打开失败" : wt ? be[D?.phase || ""] || D?.phase || be[D?.status || ""] || "正在处理" : N ? Ct ? "可继续精修" : "精修已用完" : Pt ? "可以生成首稿" : "等待选择素材", yn = (0, l.useMemo)(() => {
-		if (M !== "pattern" && M !== "background") return [];
-		let e = Re.toLocaleLowerCase().trim();
-		return e ? jt[M].filter((t) => t.query.includes(e)).map((e) => e.asset) : jt[M].map((e) => e.asset);
+	let kn = ot ? ot.loading ? "正在打开作品" : "作品打开失败" : Nt ? xe[Ae?.phase || ""] || Ae?.phase || xe[Ae?.status || ""] || "正在处理" : P ? Mt ? "可继续精修" : "精修已用完" : Ut ? "可以生成首稿" : "等待选择素材", An = (0, l.useMemo)(() => {
+		if (Ve !== "pattern" && Ve !== "background") return [];
+		let e = Je.toLocaleLowerCase().trim();
+		return e ? Bt[Ve].filter((t) => t.query.includes(e)).map((e) => e.asset) : Bt[Ve].map((e) => e.asset);
 	}, [
-		jt,
-		M,
-		Re
-	]), bn = Math.max(1, Math.ceil(yn.length / 36)), xn = Math.min(Je, bn - 1), Sn = yn.slice(xn * 36, (xn + 1) * 36);
+		Bt,
+		Ve,
+		Je
+	]), jn = Math.max(1, Math.ceil(An.length / 36)), Mn = Math.min(it, jn - 1), Nn = An.slice(Mn * 36, (Mn + 1) * 36);
 	return (0, l.useEffect)(() => {
-		Ye(0);
-	}, [M, Re]), /* @__PURE__ */ (0, x.jsxs)("div", {
+		at(0);
+	}, [Ve, Je]), /* @__PURE__ */ (0, x.jsxs)("div", {
 		className: "app-shell",
 		children: [
 			/* @__PURE__ */ (0, x.jsxs)("header", {
 				className: "topbar",
-				children: [/* @__PURE__ */ (0, x.jsx)(se, {}), /* @__PURE__ */ (0, x.jsxs)("div", {
+				children: [/* @__PURE__ */ (0, x.jsx)(ce, {}), /* @__PURE__ */ (0, x.jsxs)("div", {
 					className: "header-actions",
 					children: [
 						/* @__PURE__ */ (0, x.jsxs)("button", {
 							className: "secondary",
-							disabled: k || !!Me || F || Be,
-							onClick: () => void ln(),
-							children: [/* @__PURE__ */ (0, x.jsx)(E, { name: "plus" }), "新建作品"]
+							disabled: Ie || !!Ue || Pt || Xe,
+							onClick: () => void yn(),
+							children: [/* @__PURE__ */ (0, x.jsx)(T, { name: "plus" }), "新建作品"]
 						}),
 						/* @__PURE__ */ (0, x.jsxs)("button", {
 							className: "text-button",
-							onClick: () => je("designs"),
+							onClick: () => void xn(),
 							children: [
-								/* @__PURE__ */ (0, x.jsx)(E, { name: "folder" }),
+								/* @__PURE__ */ (0, x.jsx)(T, { name: "folder" }),
 								"我的作品",
 								/* @__PURE__ */ (0, x.jsx)("span", {
 									className: "count",
-									children: m.length
+									children: ae.length
 								})
 							]
 						}),
-						St && /* @__PURE__ */ (0, x.jsxs)("button", {
+						jt && /* @__PURE__ */ (0, x.jsxs)("button", {
 							className: "text-button",
-							onClick: () => je("admin"),
-							children: [/* @__PURE__ */ (0, x.jsx)(E, { name: "settings" }), "排版与规格"]
+							onClick: () => He("admin"),
+							children: [/* @__PURE__ */ (0, x.jsx)(T, { name: "settings" }), "排版与规格"]
 						})
 					]
 				})]
 			}),
 			/* @__PURE__ */ (0, x.jsxs)("main", { children: [
-				a && (Bt || !Vt || a.output_profile?.is_demo) && /* @__PURE__ */ (0, x.jsxs)("div", {
+				S && (Yt || !Xt || S.output_profile?.is_demo) && /* @__PURE__ */ (0, x.jsxs)("div", {
 					className: "environment-strip compact-status",
 					children: [
-						Bt && /* @__PURE__ */ (0, x.jsx)("span", {
-							className: N ? void 0 : "test-limit",
+						Yt && /* @__PURE__ */ (0, x.jsx)("span", {
+							className: P ? void 0 : "test-limit",
 							children: "测试模型 · 演示模式（测试替身）"
 						}),
-						a.output_profile?.is_demo && /* @__PURE__ */ (0, x.jsx)("span", { children: "演示输出 · 未经业务验收" }),
-						!Vt && /* @__PURE__ */ (0, x.jsx)("span", { children: "AI 尚未配置，可用已有素材排版。" })
+						S.output_profile?.is_demo && /* @__PURE__ */ (0, x.jsx)("span", { children: "演示输出 · 未经业务验收" }),
+						!Xt && /* @__PURE__ */ (0, x.jsx)("span", { children: "AI 尚未配置，可用已有素材排版。" })
 					]
 				}),
-				Ae && /* @__PURE__ */ (0, x.jsxs)("div", {
-					className: `notice ${Ae.type}`,
-					role: Ae.type === "error" ? "alert" : "status",
-					children: [/* @__PURE__ */ (0, x.jsx)("span", { children: Ae.text }), /* @__PURE__ */ (0, x.jsx)("button", {
+				Be && /* @__PURE__ */ (0, x.jsxs)("div", {
+					className: `notice ${Be.type}`,
+					role: Be.type === "error" ? "alert" : "status",
+					children: [/* @__PURE__ */ (0, x.jsx)("span", { children: Be.text }), /* @__PURE__ */ (0, x.jsx)("button", {
 						"aria-label": "关闭提示",
 						className: "icon-button",
 						onClick: () => j(null),
-						children: /* @__PURE__ */ (0, x.jsx)(E, {
+						children: /* @__PURE__ */ (0, x.jsx)(T, {
 							name: "close",
 							size: 15
 						})
 					})]
 				}),
-				Oe && /* @__PURE__ */ (0, x.jsx)("div", {
+				Re && /* @__PURE__ */ (0, x.jsx)("div", {
 					className: "notice error",
 					role: "status",
 					children: "连接暂时中断，正在重连。后台任务和已保存版本不会因此重置。"
 				}),
-				Me && /* @__PURE__ */ (0, x.jsxs)("div", {
+				Ue && /* @__PURE__ */ (0, x.jsxs)("div", {
 					className: "notice info",
 					children: [/* @__PURE__ */ (0, x.jsx)("span", { children: "有一项提交尚未确认；恢复使用原幂等键，不会重复扣次。" }), /* @__PURE__ */ (0, x.jsx)("button", {
 						className: "secondary small",
-						disabled: k,
-						onClick: () => void an(() => rn(Me)),
+						disabled: Ie,
+						onClick: () => void hn(() => mn(Ue)),
 						children: "恢复提交"
 					})]
 				}),
-				Ee ? /* @__PURE__ */ (0, x.jsxs)("div", {
+				s && /* @__PURE__ */ (0, x.jsxs)("div", {
+					className: "notice error",
+					role: "alert",
+					children: [/* @__PURE__ */ (0, x.jsxs)("span", { children: ["工作台读取未完成：", s] }), /* @__PURE__ */ (0, x.jsx)("button", {
+						className: "secondary small",
+						onClick: () => o((e) => e + 1),
+						children: "重新读取工作台"
+					})]
+				}),
+				Pe ? /* @__PURE__ */ (0, x.jsxs)("div", {
 					className: "page-loader in-page",
 					children: [/* @__PURE__ */ (0, x.jsx)("span", { className: "spinner" }), "正在恢复作品和素材…"]
 				}) : /* @__PURE__ */ (0, x.jsxs)("div", {
-					className: `workspace-grid ${N ? "" : "draft-workspace"}`,
+					className: `workspace-grid ${P ? "" : "draft-workspace"}`,
 					children: [
 						/* @__PURE__ */ (0, x.jsxs)("aside", {
 							className: "panel source-panel",
 							children: [
 								/* @__PURE__ */ (0, x.jsxs)("div", {
 									className: "panel-heading",
-									children: [/* @__PURE__ */ (0, x.jsx)("div", { children: /* @__PURE__ */ (0, x.jsx)("h2", { children: "素材与排版" }) }), /* @__PURE__ */ (0, x.jsx)(E, { name: "grid" })]
+									children: [/* @__PURE__ */ (0, x.jsx)("div", { children: /* @__PURE__ */ (0, x.jsx)("h2", { children: "素材与排版" }) }), /* @__PURE__ */ (0, x.jsx)(T, { name: "grid" })]
 								}),
 								/* @__PURE__ */ (0, x.jsxs)("section", {
 									className: "source-section",
@@ -10693,7 +10757,7 @@ function Se({ user: e, onLogout: t, active: n, view: r }) {
 											className: "section-label",
 											children: [/* @__PURE__ */ (0, x.jsx)("h3", { children: "图案" }), /* @__PURE__ */ (0, x.jsxs)("span", { children: [
 												"已选 ",
-												C.asset_ids.length,
+												O.asset_ids.length,
 												" 个"
 											] })]
 										}),
@@ -10701,41 +10765,41 @@ function Se({ user: e, onLogout: t, active: n, view: r }) {
 											className: "two-actions",
 											children: [/* @__PURE__ */ (0, x.jsxs)("button", {
 												className: "secondary",
-												disabled: I || Be,
+												disabled: I || Xe,
 												onClick: () => {
-													Ge(!1), ft.current?.click();
+													tt(!1), St.current?.click();
 												},
-												children: [/* @__PURE__ */ (0, x.jsx)(E, {
+												children: [/* @__PURE__ */ (0, x.jsx)(T, {
 													name: "upload",
 													size: 16
-												}), Be ? `上传 ${He?.completed || 0}/${He?.total || 0}` : "上传图案"]
+												}), Xe ? `上传 ${Qe?.completed || 0}/${Qe?.total || 0}` : "上传图案"]
 											}), /* @__PURE__ */ (0, x.jsxs)("button", {
 												className: "secondary",
 												disabled: I,
 												onClick: () => {
-													ze(""), je("pattern");
+													Ye(""), He("pattern");
 												},
-												children: [/* @__PURE__ */ (0, x.jsx)(E, {
+												children: [/* @__PURE__ */ (0, x.jsx)(T, {
 													name: "folder",
 													size: 16
 												}), "素材库"]
 											})]
 										}),
 										/* @__PURE__ */ (0, x.jsx)("input", {
-											ref: ft,
+											ref: St,
 											type: "file",
 											accept: "image/png,image/jpeg,image/webp",
 											multiple: !0,
 											hidden: !0,
-											onChange: (e) => void hn(e.target.files, "pattern")
+											onChange: (e) => void En(e.target.files, "pattern")
 										}),
-										It.length ? /* @__PURE__ */ (0, x.jsx)("div", {
+										Gt.length ? /* @__PURE__ */ (0, x.jsx)("div", {
 											className: "selected-patterns",
-											children: It.map((e, t) => /* @__PURE__ */ (0, x.jsxs)("div", {
+											children: Gt.map((e, t) => /* @__PURE__ */ (0, x.jsxs)("div", {
 												className: "pattern-tile",
 												children: [/* @__PURE__ */ (0, x.jsxs)("div", {
 													className: "checker",
-													children: [/* @__PURE__ */ (0, x.jsx)("img", {
+													children: [/* @__PURE__ */ (0, x.jsx)(be, {
 														src: e.thumbnail_url || e.url,
 														alt: e.name,
 														decoding: "async"
@@ -10743,7 +10807,7 @@ function Se({ user: e, onLogout: t, active: n, view: r }) {
 														className: "remove-asset",
 														disabled: I,
 														"aria-label": `移除${e.name}`,
-														onClick: () => gn(e.id),
+														onClick: () => Dn(e.id),
 														children: "×"
 													})]
 												}), /* @__PURE__ */ (0, x.jsxs)("span", {
@@ -10759,10 +10823,10 @@ function Se({ user: e, onLogout: t, active: n, view: r }) {
 											className: "empty-patterns",
 											disabled: I,
 											onClick: () => {
-												ze(""), je("pattern");
+												Ye(""), He("pattern");
 											},
 											children: [
-												/* @__PURE__ */ (0, x.jsx)(E, { name: "plus" }),
+												/* @__PURE__ */ (0, x.jsx)(T, { name: "plus" }),
 												/* @__PURE__ */ (0, x.jsx)("span", { children: "从素材库开始，或上传已有图案" }),
 												/* @__PURE__ */ (0, x.jsx)("small", { children: "支持多个透明 PNG 图案" })
 											]
@@ -10777,7 +10841,7 @@ function Se({ user: e, onLogout: t, active: n, view: r }) {
 											children: [/* @__PURE__ */ (0, x.jsx)("h3", { children: "排版模式" }), /* @__PURE__ */ (0, x.jsx)("button", {
 												type: "button",
 												className: "template-examples-all",
-												onClick: () => qe({
+												onClick: () => rt({
 													mode: null,
 													name: "全部排版案例"
 												}),
@@ -10786,19 +10850,19 @@ function Se({ user: e, onLogout: t, active: n, view: r }) {
 										}),
 										/* @__PURE__ */ (0, x.jsx)("div", {
 											className: "template-grid",
-											children: Rt.map($t)
+											children: qt.map(un)
 										}),
-										zt.length > 0 && /* @__PURE__ */ (0, x.jsx)("div", {
+										Jt.length > 0 && /* @__PURE__ */ (0, x.jsx)("div", {
 											className: "more-layouts",
 											children: /* @__PURE__ */ (0, x.jsxs)("button", {
 												type: "button",
 												className: "more-layouts-toggle",
-												"aria-expanded": M === "layouts",
+												"aria-expanded": Ve === "layouts",
 												"aria-haspopup": "dialog",
-												onClick: () => je("layouts"),
+												onClick: () => He("layouts"),
 												children: [/* @__PURE__ */ (0, x.jsxs)("span", { children: [
 													"更多排法（",
-													zt.length,
+													Jt.length,
 													"）"
 												] }), /* @__PURE__ */ (0, x.jsx)("span", {
 													"aria-hidden": "true",
@@ -10806,45 +10870,45 @@ function Se({ user: e, onLogout: t, active: n, view: r }) {
 												})]
 											})
 										}),
-										L && !ue.has(L.mode) && /* @__PURE__ */ (0, x.jsxs)("div", {
+										R && !ue.has(R.mode) && /* @__PURE__ */ (0, x.jsxs)("div", {
 											className: "chosen-layout",
-											children: [/* @__PURE__ */ (0, x.jsxs)("strong", { children: ["已选：", L.name] }), /* @__PURE__ */ (0, x.jsxs)("button", {
+											children: [/* @__PURE__ */ (0, x.jsxs)("strong", { children: ["已选：", R.name] }), /* @__PURE__ */ (0, x.jsxs)("button", {
 												type: "button",
 												className: "template-example-button",
-												onClick: () => qe({
-													mode: L.mode,
-													name: L.name
+												onClick: () => rt({
+													mode: R.mode,
+													name: R.name
 												}),
 												children: [
 													"查看",
-													L.name,
+													R.name,
 													"案例"
 												]
 											})]
 										}),
-										L && (Ot && me[L.mode] || de[L.mode]) && /* @__PURE__ */ (0, x.jsx)("p", {
+										R && (L && me[R.mode] || de[R.mode]) && /* @__PURE__ */ (0, x.jsx)("p", {
 											className: "layout-selection-help",
-											children: Ot && me[L.mode] || de[L.mode]
+											children: L && me[R.mode] || de[R.mode]
 										}),
-										Nt && /* @__PURE__ */ (0, x.jsx)("p", {
+										Ht && /* @__PURE__ */ (0, x.jsx)("p", {
 											className: "layout-selection-issue",
 											id: "ribbon-layout-issue",
 											role: "alert",
-											children: Nt
+											children: Ht
 										}),
-										(!N || [
+										(!P || [
 											"design-rhythm-v1",
 											"design-rhythm-v2",
 											"seamless-unit-v1",
 											"seamless-unit-v2"
-										].includes(N.snapshot.layout_engine || "")) && /* @__PURE__ */ (0, x.jsxs)("label", {
+										].includes(P.snapshot.layout_engine || "")) && /* @__PURE__ */ (0, x.jsxs)("label", {
 											className: "density-control",
 											children: ["画面密度", /* @__PURE__ */ (0, x.jsxs)("select", {
 												"aria-label": "画面密度",
-												value: C.design_density || "balanced",
+												value: O.design_density || "balanced",
 												disabled: I,
-												onChange: (e) => en({
-													...C,
+												onChange: (e) => dn({
+													...O,
 													design_density: e.target.value
 												}),
 												children: [
@@ -10865,10 +10929,10 @@ function Se({ user: e, onLogout: t, active: n, view: r }) {
 										})
 									]
 								}),
-								Ot && (Mt.length > 0 || L?.mode === "bordered") && /* @__PURE__ */ (0, x.jsxs)("details", {
+								L && (Vt.length > 0 || R?.mode === "bordered") && /* @__PURE__ */ (0, x.jsxs)("details", {
 									className: "optional-layers",
-									children: [/* @__PURE__ */ (0, x.jsx)("summary", { children: Mt.length ? "分区底纹" : "独立边饰" }), (Mt.length ? Mt : ["border"]).map((e) => {
-										let t = e === "border" ? C.border_ref : C.zone_background_refs?.[e];
+									children: [/* @__PURE__ */ (0, x.jsx)("summary", { children: Vt.length ? "分区底纹" : "独立边饰" }), (Vt.length ? Vt : ["border"]).map((e) => {
+										let t = e === "border" ? O.border_ref : O.zone_background_refs?.[e];
 										return /* @__PURE__ */ (0, x.jsxs)("div", { children: [
 											/* @__PURE__ */ (0, x.jsx)("span", { children: fe[e] || "上下边饰" }),
 											/* @__PURE__ */ (0, x.jsx)("button", {
@@ -10876,31 +10940,31 @@ function Se({ user: e, onLogout: t, active: n, view: r }) {
 												disabled: I,
 												className: "secondary small",
 												onClick: () => {
-													Le(e), ze(""), je(e === "border" ? "pattern" : "background");
+													qe(e), Ye(""), He(e === "border" ? "pattern" : "background");
 												},
-												children: t && At.get(t)?.name || (e === "border" ? "选择边饰" : "选择底纹")
+												children: t && zt.get(t)?.name || (e === "border" ? "选择边饰" : "选择底纹")
 											}),
 											t && /* @__PURE__ */ (0, x.jsx)("button", {
 												disabled: I,
 												className: "text-button",
 												onClick: () => {
 													let t = {
-														...C,
-														zone_background_refs: { ...C.zone_background_refs }
+														...O,
+														zone_background_refs: { ...O.zone_background_refs }
 													};
-													e === "border" ? delete t.border_ref : delete t.zone_background_refs[e], en(t);
+													e === "border" ? delete t.border_ref : delete t.zone_background_refs[e], dn(t);
 												},
 												children: "恢复默认"
 											})
 										] }, e);
 									})]
-								}, L?.mode),
+								}, R?.mode),
 								/* @__PURE__ */ (0, x.jsxs)("section", {
 									className: "source-section background-section",
 									children: [
 										/* @__PURE__ */ (0, x.jsxs)("div", {
 											className: "section-label",
-											children: [/* @__PURE__ */ (0, x.jsx)("h3", { children: "底图" }), R?.is_demo && /* @__PURE__ */ (0, x.jsx)("span", {
+											children: [/* @__PURE__ */ (0, x.jsx)("h3", { children: "底图" }), z?.is_demo && /* @__PURE__ */ (0, x.jsx)("span", {
 												className: "tiny-pill",
 												children: "演示素材"
 											})]
@@ -10911,20 +10975,20 @@ function Se({ user: e, onLogout: t, active: n, view: r }) {
 												className: "secondary",
 												disabled: I,
 												onClick: () => {
-													ze(""), je("background");
+													Ye(""), He("background");
 												},
-												children: [/* @__PURE__ */ (0, x.jsx)(E, {
+												children: [/* @__PURE__ */ (0, x.jsx)(T, {
 													name: "folder",
 													size: 16
 												}), "底图库"]
 											}), /* @__PURE__ */ (0, x.jsxs)("button", {
 												className: "secondary",
-												disabled: I || F || !Vt,
-												onClick: () => void mn(),
-												children: [F ? /* @__PURE__ */ (0, x.jsx)("span", { className: "spinner tiny" }) : /* @__PURE__ */ (0, x.jsx)(E, {
+												disabled: I || Pt || !Xt,
+												onClick: () => void Tn(),
+												children: [Pt ? /* @__PURE__ */ (0, x.jsx)("span", { className: "spinner tiny" }) : /* @__PURE__ */ (0, x.jsx)(T, {
 													name: "spark",
 													size: 16
-												}), Bt ? "生成测试底图" : "AI 生成底图"]
+												}), Yt ? "生成测试底图" : "AI 生成底图"]
 											})]
 										}),
 										/* @__PURE__ */ (0, x.jsx)("label", {
@@ -10935,30 +10999,30 @@ function Se({ user: e, onLogout: t, active: n, view: r }) {
 										/* @__PURE__ */ (0, x.jsx)("textarea", {
 											id: "background-prompt",
 											className: "background-prompt",
-											value: Se,
-											onChange: (e) => Ce(e.target.value),
+											value: Oe,
+											onChange: (e) => ke(e.target.value),
 											maxLength: 2e3,
 											rows: 2,
-											disabled: I || F || !Vt,
+											disabled: I || Pt || !Xt,
 											placeholder: "例如：浅蓝色细条纹，不要文字；不填则随机生成。",
-											"aria-describedby": Vt ? void 0 : "background-ai-unavailable"
+											"aria-describedby": Xt ? void 0 : "background-ai-unavailable"
 										}),
-										!Vt && /* @__PURE__ */ (0, x.jsx)("p", {
+										!Xt && /* @__PURE__ */ (0, x.jsx)("p", {
 											className: "model-help",
 											id: "background-ai-unavailable",
 											children: "AI 尚未配置，仍可从底图库选图或上传后生成首稿。"
 										}),
-										R ? /* @__PURE__ */ (0, x.jsxs)("div", {
+										z ? /* @__PURE__ */ (0, x.jsxs)("div", {
 											className: "background-selected",
 											children: [
-												/* @__PURE__ */ (0, x.jsx)("img", {
-													src: R.thumbnail_url || R.url,
+												/* @__PURE__ */ (0, x.jsx)(be, {
+													src: z.thumbnail_url || z.url,
 													alt: "选中的底图",
 													loading: "lazy",
 													decoding: "async"
 												}),
-												/* @__PURE__ */ (0, x.jsxs)("div", { children: [/* @__PURE__ */ (0, x.jsx)("strong", { children: R.name }), /* @__PURE__ */ (0, x.jsx)("small", { children: R.source === "upload" ? "已上传" : "已选择" })] }),
-												/* @__PURE__ */ (0, x.jsx)(E, {
+												/* @__PURE__ */ (0, x.jsxs)("div", { children: [/* @__PURE__ */ (0, x.jsx)("strong", { children: z.name }), /* @__PURE__ */ (0, x.jsx)("small", { children: z.source === "upload" ? "已上传" : "已选择" })] }),
+												/* @__PURE__ */ (0, x.jsx)(T, {
 													name: "check",
 													size: 16
 												})
@@ -10967,10 +11031,10 @@ function Se({ user: e, onLogout: t, active: n, view: r }) {
 											className: "empty-background",
 											children: "选择底图，为图案定下基调"
 										}),
-										F && /* @__PURE__ */ (0, x.jsxs)("p", {
+										Pt && /* @__PURE__ */ (0, x.jsxs)("p", {
 											className: "microcopy",
 											children: [
-												Bt ? "正在生成测试底图…" : "AI 正在生成底图…",
+												Yt ? "正在生成测试底图…" : "AI 正在生成底图…",
 												" ",
 												"可离开后恢复。"
 											]
@@ -10979,17 +11043,17 @@ function Se({ user: e, onLogout: t, active: n, view: r }) {
 											className: "background-tone-control",
 											children: [/* @__PURE__ */ (0, x.jsx)("input", {
 												type: "checkbox",
-												checked: C.background_tone === "soft",
-												disabled: I || F,
-												onChange: (e) => en({
-													...C,
+												checked: O.background_tone === "soft",
+												disabled: I || Pt,
+												onChange: (e) => dn({
+													...O,
 													background_tone: e.target.checked ? "soft" : "original"
 												})
 											}), "柔和底纹，突出主图"]
 										})
 									]
 								}),
-								N && Ft && /* @__PURE__ */ (0, x.jsx)("div", {
+								P && Wt && /* @__PURE__ */ (0, x.jsx)("div", {
 									className: "selection-warning",
 									children: "素材或排版已更改。点击右侧“开始精修”应用，会计入本作品精修次数。"
 								})
@@ -11002,90 +11066,90 @@ function Se({ user: e, onLogout: t, active: n, view: r }) {
 								children: [
 									/* @__PURE__ */ (0, x.jsxs)("div", {
 										className: "panel-heading",
-										children: [/* @__PURE__ */ (0, x.jsx)("div", { children: /* @__PURE__ */ (0, x.jsx)("h2", { children: Xe?.name || S?.name || "设计预览" }) }), /* @__PURE__ */ (0, x.jsxs)("span", {
-											className: `state-pill ${wt ? "working" : ""}`,
-											children: [/* @__PURE__ */ (0, x.jsx)("span", { className: "status-dot" }), vn]
+										children: [/* @__PURE__ */ (0, x.jsx)("div", { children: /* @__PURE__ */ (0, x.jsx)("h2", { children: ot?.name || D?.name || "设计预览" }) }), /* @__PURE__ */ (0, x.jsxs)("span", {
+											className: `state-pill ${Nt ? "working" : ""}`,
+											children: [/* @__PURE__ */ (0, x.jsx)("span", { className: "status-dot" }), kn]
 										})]
 									}),
-									P ? /* @__PURE__ */ (0, x.jsxs)("div", {
+									F ? /* @__PURE__ */ (0, x.jsxs)("div", {
 										className: "result-actions",
 										children: [/* @__PURE__ */ (0, x.jsxs)("button", {
 											className: "secondary",
-											disabled: I || !N?.parent_version_id,
-											onClick: () => void cn(),
-											children: [/* @__PURE__ */ (0, x.jsx)(E, {
+											disabled: I || !P?.parent_version_id,
+											onClick: () => void vn(),
+											children: [/* @__PURE__ */ (0, x.jsx)(T, {
 												name: "back",
 												size: 17
 											}), "回退上一版"]
 										}), /* @__PURE__ */ (0, x.jsxs)("a", {
 											className: "primary",
-											href: P.download_url,
+											href: F.download_url,
 											download: !0,
-											children: [/* @__PURE__ */ (0, x.jsx)(E, {
+											children: [/* @__PURE__ */ (0, x.jsx)(T, {
 												name: "download",
 												size: 17
-											}), Tt ? "下载所选版本" : Dt ? "下载循环单元" : "下载当前图"]
+											}), Ft ? "下载所选版本" : Lt ? "下载循环单元" : "下载当前图"]
 										})]
 									}) : /* @__PURE__ */ (0, x.jsxs)("div", {
 										className: "generate-area",
 										children: [
 											/* @__PURE__ */ (0, x.jsxs)("button", {
 												className: "primary full",
-												disabled: !Pt || I || F,
-												"aria-describedby": Nt ? "ribbon-layout-issue" : void 0,
-												onClick: () => void on(),
+												disabled: !Ut || I || Pt,
+												"aria-describedby": Ht ? "ribbon-layout-issue" : void 0,
+												onClick: () => void gn(),
 												children: [
-													wt ? /* @__PURE__ */ (0, x.jsx)("span", { className: "spinner tiny" }) : /* @__PURE__ */ (0, x.jsx)(E, { name: "spark" }),
-													k && Me ? "正在提交…" : wt ? "正在生成首稿…" : "生成首稿",
-													/* @__PURE__ */ (0, x.jsx)(E, {
+													Nt ? /* @__PURE__ */ (0, x.jsx)("span", { className: "spinner tiny" }) : /* @__PURE__ */ (0, x.jsx)(T, { name: "spark" }),
+													Ie && Ue ? "正在提交…" : Nt ? "正在生成首稿…" : "生成首稿",
+													/* @__PURE__ */ (0, x.jsx)(T, {
 														name: "arrow",
 														size: 16
 													})
 												]
 											}),
-											Ut && !Xe && Ht && /* @__PURE__ */ (0, x.jsxs)("div", {
+											Qt && !ot && Zt && /* @__PURE__ */ (0, x.jsxs)("div", {
 												className: "ai-draft-options",
 												children: [/* @__PURE__ */ (0, x.jsxs)("label", { children: [/* @__PURE__ */ (0, x.jsx)("input", {
 													type: "checkbox",
-													checked: Wt,
-													disabled: I || F,
+													checked: $t,
+													disabled: I || Pt,
 													onChange: (e) => {
-														st(e.target.checked), e.target.checked || lt(null);
+														_t(e.target.checked), e.target.checked || yt(null);
 													}
-												}), "AI搭配底纹与装饰"] }), Wt ? /* @__PURE__ */ (0, x.jsxs)(x.Fragment, { children: [/* @__PURE__ */ (0, x.jsx)("p", { children: "按原图保留人物文字。选择的案例会发送给Seedream。" }), Gt ? /* @__PURE__ */ (0, x.jsxs)("div", {
+												}), "AI搭配底纹与装饰"] }), $t ? /* @__PURE__ */ (0, x.jsxs)(x.Fragment, { children: [/* @__PURE__ */ (0, x.jsx)("p", { children: "按原图保留人物文字。选择的案例会发送给Seedream。" }), en ? /* @__PURE__ */ (0, x.jsxs)("div", {
 													className: "ai-draft-reference",
-													children: [/* @__PURE__ */ (0, x.jsxs)("span", { children: ["参考案例：", /* @__PURE__ */ (0, x.jsx)("strong", { children: Gt.code })] }), /* @__PURE__ */ (0, x.jsx)("button", {
+													children: [/* @__PURE__ */ (0, x.jsxs)("span", { children: ["参考案例：", /* @__PURE__ */ (0, x.jsx)("strong", { children: en.code })] }), /* @__PURE__ */ (0, x.jsx)("button", {
 														type: "button",
 														disabled: I,
-														onClick: () => lt(null),
+														onClick: () => yt(null),
 														children: "取消案例参考"
 													})]
 												}) : /* @__PURE__ */ (0, x.jsx)("button", {
 													type: "button",
 													className: "ai-reference-picker",
-													disabled: I || !L,
-													onClick: () => qe({
-														mode: L?.mode || null,
-														name: L?.name || "全部排版案例"
+													disabled: I || !R,
+													onClick: () => rt({
+														mode: R?.mode || null,
+														name: R?.name || "全部排版案例"
 													}),
 													children: "选择案例参考"
 												})] }) : /* @__PURE__ */ (0, x.jsx)("p", { children: "按原素材直接排版，首稿不调用AI搭配。" })]
 											}),
-											/* @__PURE__ */ (0, x.jsx)("small", { children: C.asset_ids.length ? C.template_id ? C.background_id ? Nt || "首稿不占用精修次数" : "请选择或生成底图" : "请选择一种排版模式" : "请先选择至少一个图案" })
+											/* @__PURE__ */ (0, x.jsx)("small", { children: O.asset_ids.length ? O.template_id ? O.background_id ? Ht || "首稿不占用精修次数" : "请选择或生成底图" : "请选择一种排版模式" : "请先选择至少一个图案" })
 										]
 									}),
 									/* @__PURE__ */ (0, x.jsxs)("div", {
-										className: `preview-stage ${P ? "is-filled" : "is-empty"}`,
+										className: `preview-stage ${F ? "is-filled" : "is-empty"}`,
 										children: [
 											/* @__PURE__ */ (0, x.jsxs)("div", {
 												className: "stage-topline",
-												children: [/* @__PURE__ */ (0, x.jsx)("span", { children: P ? `V${P.sequence} · ${_(P)}` : "你的设计画布" }), P && /* @__PURE__ */ (0, x.jsx)("span", { children: P.id === S?.current_version_id ? "当前版本" : "历史版本" })]
+												children: [/* @__PURE__ */ (0, x.jsx)("span", { children: F ? `V${F.sequence} · ${_(F)}` : "你的设计画布" }), F && /* @__PURE__ */ (0, x.jsx)("span", { children: F.id === D?.current_version_id ? "当前版本" : "历史版本" })]
 											}),
-											Xe ? /* @__PURE__ */ (0, x.jsx)("div", {
+											ot ? /* @__PURE__ */ (0, x.jsx)("div", {
 												className: "empty-canvas design-loading",
 												role: "status",
 												"aria-live": "polite",
-												children: Xe.loading ? /* @__PURE__ */ (0, x.jsxs)(x.Fragment, { children: [
+												children: ot.loading ? /* @__PURE__ */ (0, x.jsxs)(x.Fragment, { children: [
 													/* @__PURE__ */ (0, x.jsx)("span", { className: "spinner" }),
 													/* @__PURE__ */ (0, x.jsx)("h3", { children: "正在打开作品…" }),
 													/* @__PURE__ */ (0, x.jsx)("p", { children: "正在读取所选作品的版本和素材。" })
@@ -11094,21 +11158,21 @@ function Se({ user: e, onLogout: t, active: n, view: r }) {
 													/* @__PURE__ */ (0, x.jsx)("p", { children: "请重试，或从“我的作品”选择其他作品。" }),
 													/* @__PURE__ */ (0, x.jsx)("button", {
 														className: "secondary",
-														onClick: () => void un(Xe.id),
+														onClick: () => void bn(ot.id),
 														children: "重试打开作品"
 													})
 												] })
-											}) : P && Dt ? /* @__PURE__ */ (0, x.jsx)(ye, {
-												version: P,
-												sizeLabel: kt,
-												target: Tt ? "layout" : Pe
-											}, `${S?.id}:${P.id}`) : P ? /* @__PURE__ */ (0, x.jsxs)(x.Fragment, { children: [/* @__PURE__ */ (0, x.jsx)("div", {
-												className: `ribbon-display ${re}`,
-												children: /* @__PURE__ */ (0, x.jsx)("img", {
+											}) : F && Lt ? /* @__PURE__ */ (0, x.jsx)(ye, {
+												version: F,
+												sizeLabel: Rt,
+												target: Ft ? "layout" : Ge
+											}, `${D?.id}:${F.id}`) : F ? /* @__PURE__ */ (0, x.jsxs)(x.Fragment, { children: [/* @__PURE__ */ (0, x.jsx)("div", {
+												className: `ribbon-display ${Te}`,
+												children: /* @__PURE__ */ (0, x.jsx)(be, {
 													decoding: "async",
-													src: re === "detail" && P.view_url || P.preview_url,
-													alt: `${_(P)}的设计预览`
-												}, `${S?.id}:${P.id}:${re}`)
+													src: Te === "detail" && F.view_url || F.preview_url,
+													alt: `${_(F)}的设计预览`
+												}, `${D?.id}:${F.id}:${Te}`)
 											}), /* @__PURE__ */ (0, x.jsxs)("div", {
 												className: "ribbon-tools",
 												children: [
@@ -11118,91 +11182,88 @@ function Se({ user: e, onLogout: t, active: n, view: r }) {
 														"aria-label": "预览缩放",
 														children: [/* @__PURE__ */ (0, x.jsx)("button", {
 															type: "button",
-															className: re === "detail" ? "is-active" : "",
-															"aria-pressed": re === "detail",
-															onClick: () => ie("detail"),
+															className: Te === "detail" ? "is-active" : "",
+															"aria-pressed": Te === "detail",
+															onClick: () => Ee("detail"),
 															children: "细节"
 														}), /* @__PURE__ */ (0, x.jsx)("button", {
 															type: "button",
-															className: re === "fit" ? "is-active" : "",
-															"aria-pressed": re === "fit",
-															onClick: () => ie("fit"),
+															className: Te === "fit" ? "is-active" : "",
+															"aria-pressed": Te === "fit",
+															onClick: () => Ee("fit"),
 															children: "整条"
 														})]
 													}),
 													/* @__PURE__ */ (0, x.jsx)("span", {
 														className: "ribbon-metrics",
-														children: kt
+														children: Rt
 													}),
 													/* @__PURE__ */ (0, x.jsx)("span", {
 														className: "ribbon-hint",
-														children: re === "detail" ? "左右拖动查看整条" : ""
+														children: Te === "detail" ? "左右拖动查看整条" : ""
 													})
 												]
 											})] }) : /* @__PURE__ */ (0, x.jsxs)("div", {
 												className: "empty-canvas",
-												children: [/* @__PURE__ */ (0, x.jsx)("h3", { children: "首稿预览" }), L && /* @__PURE__ */ (0, x.jsxs)("div", {
+												children: [/* @__PURE__ */ (0, x.jsx)("h3", { children: "首稿预览" }), R && /* @__PURE__ */ (0, x.jsxs)("div", {
 													className: "template-peek",
-													children: [/* @__PURE__ */ (0, x.jsx)("img", {
-														src: Qt(L),
+													children: [/* @__PURE__ */ (0, x.jsx)(be, {
+														src: ln(R),
 														alt: "当前排版参考"
-													}), /* @__PURE__ */ (0, x.jsxs)("span", { children: [L.name, " · 排版参考"] })]
+													}), /* @__PURE__ */ (0, x.jsxs)("span", { children: [R.name, " · 排版参考"] })]
 												})]
 											}),
-											wt && /* @__PURE__ */ (0, x.jsxs)("div", {
+											Nt && /* @__PURE__ */ (0, x.jsxs)("div", {
 												className: "processing-overlay",
 												role: "status",
 												children: [
 													/* @__PURE__ */ (0, x.jsx)("span", { className: "spinner" }),
-													/* @__PURE__ */ (0, x.jsx)("strong", { children: be[D?.phase || ""] || D?.phase || "正在处理设计…" }),
+													/* @__PURE__ */ (0, x.jsx)("strong", { children: xe[Ae?.phase || ""] || Ae?.phase || "正在处理设计…" }),
 													/* @__PURE__ */ (0, x.jsx)("span", { children: "完成后自动更新，已有版本仍可下载" })
 												]
 											})
 										]
 									}),
-									P ? /* @__PURE__ */ (0, x.jsxs)(x.Fragment, { children: [/* @__PURE__ */ (0, x.jsxs)("div", {
+									F ? /* @__PURE__ */ (0, x.jsxs)(x.Fragment, { children: [(Ft || F.provider === "test") && /* @__PURE__ */ (0, x.jsx)("div", {
 										className: "preview-caption",
-										children: [/* @__PURE__ */ (0, x.jsxs)("span", { children: [/* @__PURE__ */ (0, x.jsx)(E, {
-											name: "check",
-											size: 14
-										}), Tt ? "正在查看历史保存版本" : "当前设计已保存"] }), /* @__PURE__ */ (0, x.jsx)("span", { children: P.provider === "test" ? "测试模式结果" : "" })]
-									}), Tt && /* @__PURE__ */ (0, x.jsxs)("div", {
+										children: /* @__PURE__ */ (0, x.jsx)("span", { children: Ft ? "正在查看历史保存版本" : "测试模式结果" })
+									}), Ft && /* @__PURE__ */ (0, x.jsxs)("div", {
 										className: "history-hint",
 										children: ["历史预览不改变当前版本。", /* @__PURE__ */ (0, x.jsx)("button", {
-											onClick: () => T(S.current_version_id),
+											onClick: () => we(D.current_version_id),
 											children: "返回当前版本"
 										})]
 									})] }) : null
 								]
-							}), !!S?.versions?.length && /* @__PURE__ */ (0, x.jsxs)("details", {
+							}), !!D?.versions?.length && /* @__PURE__ */ (0, x.jsxs)("details", {
 								className: "panel history-panel",
 								children: [/* @__PURE__ */ (0, x.jsxs)("summary", {
 									className: "history-heading",
 									children: [
 										"版本记录（",
-										S.versions.length,
+										D.versions.length,
 										"）"
 									]
-								}), S?.versions?.length ? /* @__PURE__ */ (0, x.jsx)("div", {
+								}), D?.versions?.length ? /* @__PURE__ */ (0, x.jsx)("div", {
 									className: "version-grid",
-									children: S.versions.map((e) => /* @__PURE__ */ (0, x.jsxs)("button", {
-										className: `version-card ${e.id === P?.id ? "selected" : ""}`,
-										onClick: () => T(e.id),
-										"aria-pressed": e.id === P?.id,
+									children: D.versions.map((e) => /* @__PURE__ */ (0, x.jsxs)("button", {
+										className: `version-card ${e.id === F?.id ? "selected" : ""}`,
+										onClick: () => we(e.id),
+										"aria-pressed": e.id === F?.id,
 										children: [
-											/* @__PURE__ */ (0, x.jsx)("img", {
+											/* @__PURE__ */ (0, x.jsx)(be, {
 												src: e.preview_url,
 												loading: "lazy",
 												decoding: "async",
 												alt: `${_(e)}缩略图`
 											}),
-											/* @__PURE__ */ (0, x.jsxs)("div", { children: [/* @__PURE__ */ (0, x.jsx)("strong", { children: _(e) }), e.id === S.current_version_id ? /* @__PURE__ */ (0, x.jsx)("span", {
+											/* @__PURE__ */ (0, x.jsxs)("div", { children: [/* @__PURE__ */ (0, x.jsx)("strong", { children: _(e) }), e.id === D.current_version_id ? /* @__PURE__ */ (0, x.jsx)("span", {
 												className: "tiny-pill",
 												children: "当前"
 											}) : /* @__PURE__ */ (0, x.jsxs)("small", { children: ["V", e.sequence] })] }),
 											/* @__PURE__ */ (0, x.jsxs)("small", {
 												className: "version-parent",
-												children: [e.parent_version_id ? `基于 V${S.versions.find((t) => t.id === e.parent_version_id)?.sequence ?? "?"}` : "初始版本", e.prompt ? ` · ${e.prompt}` : ""]
+												children: [e.parent_version_id ? `基于 V${D.versions.find((t) => t.id === e.parent_version_id)?.sequence ?? "?"}` : "初始版本", e.prompt ? ` · ${e.prompt}` : ""]
 											})
 										]
 									}, e.id))
@@ -11214,20 +11275,20 @@ function Se({ user: e, onLogout: t, active: n, view: r }) {
 										/* @__PURE__ */ (0, x.jsx)("span", { className: "history-line" })
 									]
 								})]
-							}, S.id)]
+							}, D.id)]
 						}),
-						N && /* @__PURE__ */ (0, x.jsxs)("aside", {
+						P && /* @__PURE__ */ (0, x.jsxs)("aside", {
 							className: "panel refinement-panel",
 							children: [
 								/* @__PURE__ */ (0, x.jsxs)("div", {
 									className: "panel-heading",
-									children: [/* @__PURE__ */ (0, x.jsx)("div", { children: /* @__PURE__ */ (0, x.jsx)("h2", { children: "文字精修" }) }), /* @__PURE__ */ (0, x.jsx)(E, { name: "spark" })]
+									children: [/* @__PURE__ */ (0, x.jsx)("div", { children: /* @__PURE__ */ (0, x.jsx)("h2", { children: "文字精修" }) }), /* @__PURE__ */ (0, x.jsx)(T, { name: "spark" })]
 								}),
 								/* @__PURE__ */ (0, x.jsxs)("p", {
 									className: "remaining-edits",
 									children: [
 										"本作品还可精修 ",
-										/* @__PURE__ */ (0, x.jsx)("strong", { children: Ct }),
+										/* @__PURE__ */ (0, x.jsx)("strong", { children: Mt }),
 										" 次"
 									]
 								}),
@@ -11238,13 +11299,13 @@ function Se({ user: e, onLogout: t, active: n, view: r }) {
 											htmlFor: "refinement",
 											children: "告诉我们，你想怎么改"
 										}),
-										Ot && N && !Tt && /* @__PURE__ */ (0, x.jsxs)("label", {
+										L && P && !Ft && /* @__PURE__ */ (0, x.jsxs)("label", {
 											className: "target-picker",
 											children: ["精修范围", /* @__PURE__ */ (0, x.jsxs)("select", {
 												"aria-label": "精修范围",
-												disabled: I || Ft || Ct === 0,
-												value: Pe,
-												onChange: (e) => Fe(e.target.value),
+												disabled: I || Wt || Mt === 0,
+												value: Ge,
+												onChange: (e) => Ke(e.target.value),
 												children: [
 													/* @__PURE__ */ (0, x.jsx)("option", {
 														value: "layout",
@@ -11252,18 +11313,18 @@ function Se({ user: e, onLogout: t, active: n, view: r }) {
 													}),
 													/* @__PURE__ */ (0, x.jsx)("option", {
 														value: "background",
-														disabled: !!Mt.length && Mt.every((e) => N.snapshot.zone_background_refs?.[e] || N.snapshot.zone_colors?.[e]),
+														disabled: !!Vt.length && Vt.every((e) => P.snapshot.zone_background_refs?.[e] || P.snapshot.zone_colors?.[e]),
 														children: "共用底纹"
 													}),
-													(N.snapshot.pattern_slots || []).map((e, t) => /* @__PURE__ */ (0, x.jsx)("option", {
+													(P.snapshot.pattern_slots || []).map((e, t) => /* @__PURE__ */ (0, x.jsx)("option", {
 														value: e,
-														children: `图案 ${t + 1} · ${At.get(N.snapshot.asset_refs[t])?.name || "已保存图案"}（全部副本）`
+														children: `图案 ${t + 1} · ${zt.get(P.snapshot.asset_refs[t])?.name || "已保存图案"}（全部副本）`
 													}, e)),
-													(pe[N.snapshot.template_mode] || []).map((e) => /* @__PURE__ */ (0, x.jsxs)("option", {
+													(pe[P.snapshot.template_mode] || []).map((e) => /* @__PURE__ */ (0, x.jsxs)("option", {
 														value: `zone:${e}`,
 														children: [fe[e], "底纹"]
 													}, e)),
-													N.snapshot.border_ref && /* @__PURE__ */ (0, x.jsx)("option", {
+													P.snapshot.border_ref && /* @__PURE__ */ (0, x.jsx)("option", {
 														value: "border",
 														children: "上下边饰"
 													})
@@ -11272,33 +11333,33 @@ function Se({ user: e, onLogout: t, active: n, view: r }) {
 										}),
 										/* @__PURE__ */ (0, x.jsx)("textarea", {
 											id: "refinement",
-											value: ve,
-											onChange: (e) => xe(e.target.value),
+											value: De,
+											onChange: (e) => A(e.target.value),
 											maxLength: 2e3,
-											disabled: !N || I || Ct === 0 || Tt,
-											placeholder: Xt ? "例如：把图案缩小一些，间距拉开一点，保留现在的底色。" : "例如：把图案缩小一些，保留现在的底色。"
+											disabled: !P || I || Mt === 0 || Ft,
+											placeholder: sn ? "例如：把图案缩小一些，间距拉开一点，保留现在的底色。" : "例如：把图案缩小一些，保留现在的底色。"
 										}),
 										/* @__PURE__ */ (0, x.jsxs)("div", {
 											className: "text-limit",
-											children: [ve.length, " / 2000"]
+											children: [De.length, " / 2000"]
 										}),
 										/* @__PURE__ */ (0, x.jsxs)("button", {
 											className: "primary full refine-button",
-											"aria-describedby": Nt ? "ribbon-layout-issue" : void 0,
-											disabled: !N || I || Ct === 0 || Tt || !Pt || Jt || !ve.trim() && !Ft,
-											onClick: () => void sn(),
-											children: [wt ? /* @__PURE__ */ (0, x.jsx)("span", { className: "spinner tiny" }) : /* @__PURE__ */ (0, x.jsx)(E, { name: "spark" }), k && Me ? "正在提交…" : wt ? "正在处理…" : Ct === 0 ? "精修次数已用完" : "开始精修"]
+											"aria-describedby": Ht ? "ribbon-layout-issue" : void 0,
+											disabled: !P || I || Mt === 0 || Ft || !Ut || an || !De.trim() && !Wt,
+											onClick: () => void _n(),
+											children: [Nt ? /* @__PURE__ */ (0, x.jsx)("span", { className: "spinner tiny" }) : /* @__PURE__ */ (0, x.jsx)(T, { name: "spark" }), Ie && Ue ? "正在提交…" : Nt ? "正在处理…" : Mt === 0 ? "精修次数已用完" : "开始精修"]
 										}),
 										/* @__PURE__ */ (0, x.jsx)("p", {
 											className: "refine-help",
-											children: N ? Tt ? "请返回当前版本后继续精修。" : Ct === 0 ? "仍可查看历史、回退和下载。" : Vt ? qt?.allowed_operations.length === 0 && !z ? "当前版本不支持直接修改，请重新选择素材与排版后应用。" : Ft ? "本次将同时应用左侧的素材与排版选择。" : "成功完成后计一次，系统失败不扣次。" : Ft ? "AI 尚未配置；清空文字可仅应用所选素材与排版，成功后计一次。" : "AI 尚未配置，仍可查看、下载或更换素材后应用所选配置。" : "先生成首稿，再开始细化你的设计。"
+											children: P ? Ft ? "请返回当前版本后继续精修。" : Mt === 0 ? "仍可查看历史、回退和下载。" : Xt ? rn?.allowed_operations.length === 0 && !tn ? "当前版本不支持直接修改，请重新选择素材与排版后应用。" : Wt ? "本次将同时应用左侧的素材与排版选择。" : "成功完成后计一次，系统失败不扣次。" : Wt ? "AI 尚未配置；清空文字可仅应用所选素材与排版，成功后计一次。" : "AI 尚未配置，仍可查看、下载或更换素材后应用所选配置。" : "先生成首稿，再开始细化你的设计。"
 										}),
 										/* @__PURE__ */ (0, x.jsxs)("div", {
 											className: "suggestions",
-											children: [/* @__PURE__ */ (0, x.jsx)("span", { children: Bt ? "测试示例" : "可用示例" }), Zt.map((e) => /* @__PURE__ */ (0, x.jsxs)("button", {
-												disabled: !N || I || Ct === 0 || Tt || !Vt,
-												onClick: () => xe(e),
-												children: [e, /* @__PURE__ */ (0, x.jsx)(E, {
+											children: [/* @__PURE__ */ (0, x.jsx)("span", { children: Yt ? "测试示例" : "可用示例" }), cn.map((e) => /* @__PURE__ */ (0, x.jsxs)("button", {
+												disabled: !P || I || Mt === 0 || Ft || !Xt,
+												onClick: () => A(e),
+												children: [e, /* @__PURE__ */ (0, x.jsx)(T, {
 													name: "plus",
 													size: 13
 												})]
@@ -11312,15 +11373,15 @@ function Se({ user: e, onLogout: t, active: n, view: r }) {
 										className: "model-workflow-help",
 										children: [
 											/* @__PURE__ */ (0, x.jsx)("summary", { children: "精修说明" }),
-											qt && !qt.composite_edit && /* @__PURE__ */ (0, x.jsx)("p", {
+											rn && !rn.composite_edit && /* @__PURE__ */ (0, x.jsx)("p", {
 												className: "model-edit-boundary",
-												children: qt.composite_edit_reason
+												children: rn.composite_edit_reason
 											}),
 											/* @__PURE__ */ (0, x.jsx)("p", { children: "DeepSeek 根据文字和所选图案的名称、顺序理解要求；当前不把图片发给它审图。对象不明确时请补充说明。" }),
 											/* @__PURE__ */ (0, x.jsx)("p", { children: "Seedream 负责生成底图、修改图案或底图；程序负责原尺寸排版、版本与下载。首稿使用原素材，不由模型重画。" }),
 											/* @__PURE__ */ (0, x.jsx)("p", { children: "每次成功精修计一次。回退到父版本保留累计次数。" })
 										]
-									}), Bt && /* @__PURE__ */ (0, x.jsx)("p", {
+									}), Yt && /* @__PURE__ */ (0, x.jsx)("p", {
 										className: "test-limit",
 										children: "测试替身仅支持已列明的参数与内容示例。其他要求会提示补充说明，真实 AI 尚未接通。"
 									})]
@@ -11333,14 +11394,14 @@ function Se({ user: e, onLogout: t, active: n, view: r }) {
 					className: "page-footer",
 					children: /* @__PURE__ */ (0, x.jsxs)("span", { children: [
 						"个人作品与素材保留 ",
-						a?.retention_hours ?? 50,
+						S?.retention_hours ?? 50,
 						" 小时，请及时下载。"
 					] })
 				})
 			] }),
-			M === "layouts" && /* @__PURE__ */ (0, x.jsxs)(oe, {
+			Ve === "layouts" && /* @__PURE__ */ (0, x.jsxs)(se, {
 				title: "选择排版模式",
-				onClose: () => je(null),
+				onClose: () => He(null),
 				wide: !0,
 				className: "layout-picker-modal",
 				children: [
@@ -11350,14 +11411,14 @@ function Se({ user: e, onLogout: t, active: n, view: r }) {
 					}),
 					/* @__PURE__ */ (0, x.jsx)("div", {
 						className: "layout-picker-grid template-grid",
-						children: Lt.map($t)
+						children: Kt.map(un)
 					}),
 					/* @__PURE__ */ (0, x.jsxs)("div", {
 						className: "modal-footer",
-						children: [/* @__PURE__ */ (0, x.jsxs)("span", { children: ["已选：", L?.name || "尚未选择排版"] }), /* @__PURE__ */ (0, x.jsxs)("button", {
+						children: [/* @__PURE__ */ (0, x.jsxs)("span", { children: ["已选：", R?.name || "尚未选择排版"] }), /* @__PURE__ */ (0, x.jsxs)("button", {
 							className: "primary",
-							onClick: () => je(null),
-							children: ["完成选择", /* @__PURE__ */ (0, x.jsx)(E, {
+							onClick: () => He(null),
+							children: ["完成选择", /* @__PURE__ */ (0, x.jsx)(T, {
 								name: "check",
 								size: 16
 							})]
@@ -11365,31 +11426,31 @@ function Se({ user: e, onLogout: t, active: n, view: r }) {
 					})
 				]
 			}),
-			Ke && n && r === "ribbon" && /* @__PURE__ */ (0, x.jsx)(oe, {
-				title: Ke.mode ? `${Ke.name} · 案例` : "全部排版案例",
-				onClose: () => qe(null),
+			nt && n && r === "ribbon" && /* @__PURE__ */ (0, x.jsx)(se, {
+				title: nt.mode ? `${nt.name} · 案例` : "全部排版案例",
+				onClose: () => rt(null),
 				wide: !0,
 				className: "layout-examples-modal",
-				children: /* @__PURE__ */ (0, x.jsx)(ae, {
-					mode: Ke.mode,
-					cache: ut,
+				children: /* @__PURE__ */ (0, x.jsx)(oe, {
+					mode: nt.mode,
+					cache: bt,
 					onUnauthorized: t,
-					onViewAll: () => qe({
+					onViewAll: () => rt({
 						mode: null,
 						name: "全部排版案例"
 					}),
-					referenceMode: L?.mode,
-					onChooseReference: Wt && !I && !F ? (e) => {
-						L && e.available && !e.reference_only && e.mode_tags.includes(L.mode) && (lt({
+					referenceMode: R?.mode,
+					onChooseReference: $t && !I && !Pt ? (e) => {
+						R && e.available && !e.reference_only && e.mode_tags.includes(R.mode) && (yt({
 							code: e.code,
-							mode: L.mode
-						}), qe(null));
+							mode: R.mode
+						}), rt(null));
 					} : void 0
 				})
 			}),
-			(M === "pattern" || M === "background") && /* @__PURE__ */ (0, x.jsxs)(oe, {
-				title: Ie === "border" ? "选择边饰" : Ie ? fe[Ie] + "底纹" : M === "pattern" ? "图案素材库" : "底图素材库",
-				onClose: () => je(null),
+			(Ve === "pattern" || Ve === "background") && /* @__PURE__ */ (0, x.jsxs)(se, {
+				title: M === "border" ? "选择边饰" : M ? fe[M] + "底纹" : Ve === "pattern" ? "图案素材库" : "底图素材库",
+				onClose: () => He(null),
 				wide: !0,
 				className: "asset-library-modal",
 				children: [
@@ -11398,76 +11459,76 @@ function Se({ user: e, onLogout: t, active: n, view: r }) {
 						children: [/* @__PURE__ */ (0, x.jsx)("input", {
 							"aria-label": "搜索素材",
 							placeholder: "搜索素材名称…",
-							value: Re,
-							onChange: (e) => ze(e.target.value)
-						}), !Ie && /* @__PURE__ */ (0, x.jsxs)("label", {
-							className: `secondary upload-label ${Be ? "disabled" : ""}`,
+							value: Je,
+							onChange: (e) => Ye(e.target.value)
+						}), !M && /* @__PURE__ */ (0, x.jsxs)("label", {
+							className: `secondary upload-label ${Xe ? "disabled" : ""}`,
 							children: [
-								/* @__PURE__ */ (0, x.jsx)(E, { name: "upload" }),
-								Be ? `上传 ${He?.completed || 0}/${He?.total || 0}` : "上传素材",
+								/* @__PURE__ */ (0, x.jsx)(T, { name: "upload" }),
+								Xe ? `上传 ${Qe?.completed || 0}/${Qe?.total || 0}` : "上传素材",
 								/* @__PURE__ */ (0, x.jsx)("input", {
-									ref: pt,
+									ref: Ct,
 									type: "file",
 									accept: "image/png,image/jpeg,image/webp",
 									multiple: !0,
 									hidden: !0,
-									disabled: Be || I,
-									onChange: (e) => void hn(e.target.files, M)
+									disabled: Xe || I,
+									onChange: (e) => void En(e.target.files, Ve)
 								})
 							]
 						})]
 					}),
-					St && /* @__PURE__ */ (0, x.jsxs)("label", {
+					jt && /* @__PURE__ */ (0, x.jsxs)("label", {
 						className: "checkbox-line",
 						children: [/* @__PURE__ */ (0, x.jsx)("input", {
 							type: "checkbox",
-							checked: We,
+							checked: et,
 							disabled: I,
-							onChange: (e) => Ge(e.target.checked)
+							onChange: (e) => tt(e.target.checked)
 						}), "上传为共享素材，供所有账号使用"]
 					}),
 					/* @__PURE__ */ (0, x.jsxs)("p", {
 						className: "muted library-note",
 						children: [
-							M === "pattern" ? "可选择多个已处理好的图案。" : "选择一种底图，作为设计背景。",
+							Ve === "pattern" ? "可选择多个已处理好的图案。" : "选择一种底图，作为设计背景。",
 							" ",
 							"标记“演示”的素材仅供联调。"
 						]
 					}),
 					/* @__PURE__ */ (0, x.jsx)("div", {
 						className: "library-grid",
-						children: Sn.map((e) => {
-							let t = Ie ? (Ie === "border" ? C.border_ref : C.zone_background_refs?.[Ie]) === e.id : M === "pattern" ? C.asset_ids.includes(e.id) : C.background_id === e.id;
+						children: Nn.map((e) => {
+							let t = M ? (M === "border" ? O.border_ref : O.zone_background_refs?.[M]) === e.id : Ve === "pattern" ? O.asset_ids.includes(e.id) : O.background_id === e.id;
 							return /* @__PURE__ */ (0, x.jsxs)("div", {
 								className: "library-item",
 								children: [/* @__PURE__ */ (0, x.jsxs)("button", {
 									className: `library-card ${t ? "selected" : ""}`,
 									disabled: I,
 									"aria-pressed": t,
-									onClick: () => Ie === "border" ? en({
-										...C,
+									onClick: () => M === "border" ? dn({
+										...O,
 										border_ref: e.id
-									}) : Ie ? en({
-										...C,
+									}) : M ? dn({
+										...O,
 										zone_background_refs: {
-											...C.zone_background_refs,
-											[Ie]: e.id
+											...O.zone_background_refs,
+											[M]: e.id
 										}
-									}) : M === "pattern" ? gn(e.id) : en({
-										...C,
+									}) : Ve === "pattern" ? Dn(e.id) : dn({
+										...O,
 										background_id: e.id
 									}),
 									children: [
 										/* @__PURE__ */ (0, x.jsxs)("div", {
-											className: `library-image ${M === "pattern" ? "checker" : ""}`,
-											children: [/* @__PURE__ */ (0, x.jsx)("img", {
+											className: `library-image ${Ve === "pattern" ? "checker" : ""}`,
+											children: [/* @__PURE__ */ (0, x.jsx)(be, {
 												src: e.thumbnail_url || e.url,
 												alt: e.name,
 												loading: "lazy",
 												decoding: "async"
 											}), t && /* @__PURE__ */ (0, x.jsx)("span", {
 												className: "check-mark",
-												children: /* @__PURE__ */ (0, x.jsx)(E, {
+												children: /* @__PURE__ */ (0, x.jsx)(T, {
 													name: "check",
 													size: 14
 												})
@@ -11476,55 +11537,55 @@ function Se({ user: e, onLogout: t, active: n, view: r }) {
 										/* @__PURE__ */ (0, x.jsx)("strong", { children: e.name }),
 										/* @__PURE__ */ (0, x.jsxs)("span", { children: [e.is_demo ? "演示 · " : "", e.shared ? "共享素材" : "私有素材"] })
 									]
-								}), (!e.shared || St) && /* @__PURE__ */ (0, x.jsx)("button", {
+								}), (!e.shared || jt) && /* @__PURE__ */ (0, x.jsx)("button", {
 									className: "hide-asset",
 									disabled: I,
-									onClick: () => void _n(e),
+									onClick: () => void On(e),
 									children: "从素材库移除"
 								})]
 							}, e.id);
 						})
 					}),
-					!yn.length && /* @__PURE__ */ (0, x.jsx)("div", {
+					!An.length && /* @__PURE__ */ (0, x.jsx)("div", {
 						className: "empty-library",
 						children: "没有找到素材，可上传新的图案或底图。"
 					}),
-					yn.length > 36 && /* @__PURE__ */ (0, x.jsxs)("nav", {
+					An.length > 36 && /* @__PURE__ */ (0, x.jsxs)("nav", {
 						className: "library-pagination",
 						"aria-label": "素材分页",
 						children: [
 							/* @__PURE__ */ (0, x.jsx)("button", {
 								className: "secondary small",
-								disabled: xn === 0,
-								onClick: () => Ye(xn - 1),
+								disabled: Mn === 0,
+								onClick: () => at(Mn - 1),
 								children: "上一页"
 							}),
 							/* @__PURE__ */ (0, x.jsxs)("span", {
 								role: "status",
 								children: [
 									"第 ",
-									xn + 1,
+									Mn + 1,
 									" / ",
-									bn,
+									jn,
 									" 页 · 共 ",
-									yn.length,
+									An.length,
 									" 项"
 								]
 							}),
 							/* @__PURE__ */ (0, x.jsx)("button", {
 								className: "secondary small",
-								disabled: xn + 1 >= bn,
-								onClick: () => Ye(xn + 1),
+								disabled: Mn + 1 >= jn,
+								onClick: () => at(Mn + 1),
 								children: "下一页"
 							})
 						]
 					}),
 					/* @__PURE__ */ (0, x.jsxs)("div", {
 						className: "modal-footer",
-						children: [/* @__PURE__ */ (0, x.jsx)("span", { children: Ie ? Ie === "border" ? "选择一个完整边饰" : "选择该区域的底纹" : M === "pattern" ? `已选 ${C.asset_ids.length} 个图案` : R ? `已选：${R.name}` : "尚未选择底图" }), /* @__PURE__ */ (0, x.jsxs)("button", {
+						children: [/* @__PURE__ */ (0, x.jsx)("span", { children: M ? M === "border" ? "选择一个完整边饰" : "选择该区域的底纹" : Ve === "pattern" ? `已选 ${O.asset_ids.length} 个图案` : z ? `已选：${z.name}` : "尚未选择底图" }), /* @__PURE__ */ (0, x.jsxs)("button", {
 							className: "primary",
-							onClick: () => je(null),
-							children: ["完成选择", /* @__PURE__ */ (0, x.jsx)(E, {
+							onClick: () => He(null),
+							children: ["完成选择", /* @__PURE__ */ (0, x.jsx)(T, {
 								name: "check",
 								size: 16
 							})]
@@ -11532,10 +11593,10 @@ function Se({ user: e, onLogout: t, active: n, view: r }) {
 					})
 				]
 			}),
-			M === "designs" && /* @__PURE__ */ (0, x.jsxs)(oe, {
+			Ve === "designs" && /* @__PURE__ */ (0, x.jsxs)(se, {
 				title: "我的作品",
 				onClose: () => {
-					je(null), $e(null);
+					He(null), lt(null);
 				},
 				wide: !0,
 				className: "design-library-modal",
@@ -11545,57 +11606,70 @@ function Se({ user: e, onLogout: t, active: n, view: r }) {
 						role: "group",
 						"aria-label": "作品列表",
 						children: [/* @__PURE__ */ (0, x.jsx)("button", {
-							className: nt ? "" : "selected",
+							className: ft ? "" : "selected",
 							onClick: () => {
-								rt(!1), $e(null);
+								pt(!1), lt(null);
 							},
 							children: "我的作品"
 						}), /* @__PURE__ */ (0, x.jsx)("button", {
-							className: nt ? "selected" : "",
+							className: ft ? "selected" : "",
 							onClick: () => {
-								rt(!0), $e(null), dn();
+								pt(!0), lt(null), Sn();
 							},
 							children: "已删除作品"
 						})]
 					}),
-					Qe && /* @__PURE__ */ (0, x.jsxs)("div", {
+					ct && /* @__PURE__ */ (0, x.jsxs)("div", {
 						className: "delete-design-confirm",
 						role: "alert",
 						children: [/* @__PURE__ */ (0, x.jsxs)("p", { children: [
 							"删除“",
-							Qe.name,
+							ct.name,
 							"”？删除后保留 ",
-							a?.retention_hours ?? 50,
+							S?.retention_hours ?? 50,
 							" 小时，可恢复；已有下载仍绑定原版本。"
 						] }), /* @__PURE__ */ (0, x.jsxs)("div", { children: [/* @__PURE__ */ (0, x.jsx)("button", {
 							className: "secondary small",
-							disabled: k,
-							onClick: () => $e(null),
+							disabled: Ie,
+							onClick: () => lt(null),
 							children: "取消"
 						}), /* @__PURE__ */ (0, x.jsx)("button", {
 							className: "danger-button",
-							disabled: k,
-							onClick: () => void fn(Qe),
+							disabled: Ie,
+							onClick: () => void Cn(ct),
 							children: "确认删除"
 						})] })]
 					}),
-					it && nt && /* @__PURE__ */ (0, x.jsx)("p", {
+					u && !ft && /* @__PURE__ */ (0, x.jsx)("p", {
+						role: "status",
+						children: "正在更新作品列表…"
+					}),
+					m && !ft && /* @__PURE__ */ (0, x.jsxs)("div", {
+						className: "notice error",
+						role: "alert",
+						children: [/* @__PURE__ */ (0, x.jsx)("span", { children: m }), /* @__PURE__ */ (0, x.jsx)("button", {
+							className: "secondary small",
+							onClick: () => void xn(),
+							children: "重试读取作品"
+						})]
+					}),
+					mt && ft && /* @__PURE__ */ (0, x.jsx)("p", {
 						role: "status",
 						children: "正在读取已删除作品…"
 					}),
 					/* @__PURE__ */ (0, x.jsx)("div", {
 						className: "design-library",
-						children: (nt ? et : m).map((e) => /* @__PURE__ */ (0, x.jsxs)("div", {
+						children: (ft ? ut : ae).map((e) => /* @__PURE__ */ (0, x.jsxs)("div", {
 							className: "design-list-row",
 							children: [/* @__PURE__ */ (0, x.jsxs)("button", {
-								disabled: k || !!Me || F || Be,
-								className: `design-list-item ${e.id === S?.id ? "selected" : ""}`,
-								onClick: () => nt ? void pn(e) : void un(e.id),
-								"aria-label": nt ? `恢复${e.name}` : void 0,
+								disabled: Ie || !!Ue || Pt || Xe,
+								className: `design-list-item ${e.id === D?.id ? "selected" : ""}`,
+								onClick: () => ft ? void wn(e) : void bn(e.id),
+								"aria-label": ft ? `恢复${e.name}` : void 0,
 								children: [
 									/* @__PURE__ */ (0, x.jsx)("span", {
 										className: "design-list-icon",
-										children: /* @__PURE__ */ (0, x.jsx)(E, {
+										children: /* @__PURE__ */ (0, x.jsx)(T, {
 											name: "folder",
 											size: 23
 										})
@@ -11610,50 +11684,50 @@ function Se({ user: e, onLogout: t, active: n, view: r }) {
 										className: "tiny-pill",
 										children: "处理中"
 									}),
-									nt ? /* @__PURE__ */ (0, x.jsx)("span", { children: "恢复" }) : /* @__PURE__ */ (0, x.jsx)(E, { name: "arrow" })
+									ft ? /* @__PURE__ */ (0, x.jsx)("span", { children: "恢复" }) : /* @__PURE__ */ (0, x.jsx)(T, { name: "arrow" })
 								]
-							}), !nt && /* @__PURE__ */ (0, x.jsx)("button", {
+							}), !ft && /* @__PURE__ */ (0, x.jsx)("button", {
 								type: "button",
 								className: "delete-design-button",
 								"aria-label": `删除${e.name}`,
 								title: e.active_job_id ? "作品正在处理，完成后可删除" : `删除${e.name}`,
-								disabled: k || !!Me || Be || F || !!Xe?.loading || !!e.active_job_id,
-								onClick: () => $e(e),
+								disabled: Ie || !!Ue || Xe || Pt || !!ot?.loading || !!e.active_job_id,
+								onClick: () => lt(e),
 								children: "删除"
 							})]
 						}, e.id))
 					}),
-					!(nt ? et : m).length && !it && /* @__PURE__ */ (0, x.jsx)("div", {
+					!(ft ? ut : ae).length && !mt && /* @__PURE__ */ (0, x.jsx)("div", {
 						className: "empty-library",
-						children: nt ? "没有可恢复的已删除作品。" : "你的第一份作品，即将从这里开始。"
+						children: ft ? "没有可恢复的已删除作品。" : "你的第一份作品，即将从这里开始。"
 					}),
 					/* @__PURE__ */ (0, x.jsxs)("div", {
 						className: "modal-footer",
-						children: [/* @__PURE__ */ (0, x.jsx)("span", { children: nt ? `删除后保留 ${a?.retention_hours ?? 50} 小时，可恢复` : "作品、额度和版本均保存在服务端" }), /* @__PURE__ */ (0, x.jsxs)("button", {
+						children: [/* @__PURE__ */ (0, x.jsx)("span", { children: ft ? `删除后保留 ${S?.retention_hours ?? 50} 小时，可恢复` : "作品、额度和版本均保存在服务端" }), /* @__PURE__ */ (0, x.jsxs)("button", {
 							className: "primary",
-							disabled: k || !!Me || F || Be,
-							onClick: () => void ln(),
-							children: [/* @__PURE__ */ (0, x.jsx)(E, { name: "plus" }), "新建作品"]
+							disabled: Ie || !!Ue || Pt || Xe,
+							onClick: () => void yn(),
+							children: [/* @__PURE__ */ (0, x.jsx)(T, { name: "plus" }), "新建作品"]
 						})]
 					})
 				]
 			}),
-			M === "admin" && St && /* @__PURE__ */ (0, x.jsx)(ne, {
-				onClose: () => je(null),
-				onChanged: nn
+			Ve === "admin" && jt && /* @__PURE__ */ (0, x.jsx)(re, {
+				onClose: () => He(null),
+				onChanged: pn
 			})
 		]
 	});
 }
 // src/styles.css?inline
-var Ce = ":host{color:#233d35;font-synthesis:none;--green:#215b4d;--deep:#163d33;--pale:#edf3e9;--line:#e3e9e2;--muted:#839087;--gold:#b7a66a;--radius:16px;background:#f7f8f4;min-width:0;font-family:Noto Sans SC,Microsoft YaHei,sans-serif;font-size:14px;font-weight:400;line-height:1.55;display:block;container-type:inline-size}*{box-sizing:border-box}.app-shell{min-width:0;margin:0}button,input,textarea,select{font:inherit}button,a,input,textarea,select{-webkit-tap-highlight-color:transparent}button{cursor:pointer}button:disabled{cursor:not-allowed;opacity:.45}button,a{transition:background .16s,border-color .16s,box-shadow .16s,transform .16s}button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline-offset:3px;outline:3px solid #a6c6a8}button{color:inherit}a{color:inherit;text-decoration:none}img{max-width:100%;display:block}h1,h2,h3,p{margin:0}h1,h2,h3{font-weight:650}h3{font-size:14px}button svg,a svg{flex-shrink:0}input,textarea,select{width:100%;color:var(--deep);background:#fff;border:1px solid #dfe6df;border-radius:8px;padding:11px 12px}input:focus,textarea:focus,select:focus{border-color:#7ba28c;outline:none}textarea{resize:vertical}input[type=checkbox]{width:15px;height:15px;accent-color:var(--green)}small{font-size:11px}.muted{color:var(--muted)}.microcopy{color:#7c8a80;font-size:11px;line-height:1.8}.eyebrow,.step-label{letter-spacing:1.9px;color:#94a395;font-size:10px;font-weight:500}.primary,.secondary,.text-button,.icon-button{white-space:nowrap;border:0;border-radius:8px;justify-content:center;align-items:center;gap:8px;font-weight:550;display:inline-flex}.primary{background:var(--green);color:#fff;border:1px solid var(--green);padding:13px 22px}.primary:hover:not(:disabled){background:#174b3f;box-shadow:0 4px 14px #184f3c16}.secondary{background:#fff;border:1px solid #dce4dc;padding:10px 16px;font-size:12px}.secondary:hover:not(:disabled){background:#fafcf8;border-color:#8fae99}.text-button{background:0 0;padding:7px;font-size:12px}.text-button:hover{background:#edf1e9}.icon-button{color:#7b8980;background:0 0;flex-shrink:0;width:32px;height:32px}.icon-button:hover{color:var(--green);background:#e9f0e5}.full{width:100%}.small{padding:7px 11px;font-size:11px}.tiny-pill{color:#52735b;white-space:nowrap;background:#edf3e9;border-radius:4px;padding:2px 6px;font-size:10px}.outline-pill{color:#8b8e72;white-space:nowrap;border:1px solid #dddfcf;border-radius:4px;padding:3px 9px;font-size:10px}.spinner{border:2px solid #becfbe;border-top-color:var(--green);border-radius:50%;flex-shrink:0;width:25px;height:25px;animation:.8s linear infinite spin;display:inline-block}.spinner.tiny{width:16px;height:16px}.primary .spinner{border-color:#fff #ffffff45 #ffffff45}@keyframes spin{to{transform:rotate(360deg)}}.page-loader{color:#7a897f;justify-content:center;align-items:center;gap:14px;min-height:90vh;display:flex}.page-loader.in-page{min-height:430px}.notice{border:1px solid;border-radius:8px;justify-content:space-between;align-items:center;gap:14px;margin-bottom:14px;padding:10px 15px;font-size:12px;display:flex}.notice.error{color:#945d41;background:#fff4ef;border-color:#eddbc9}.notice.success{color:#477047;background:#edf5e9;border-color:#dbe8d2}.notice.info{color:#536c7e;background:#f0f4f7;border-color:#dfe7ef}.topbar{background:#fff;border-bottom:1px solid #e6eae1;justify-content:space-between;align-items:center;min-height:64px;padding:12px 20px;display:flex}.brand{align-items:center;gap:10px;display:flex}.brand-icon{color:var(--green);justify-content:center;align-items:center;display:flex}.brand strong{letter-spacing:1px;font-size:20px;line-height:1.5;display:block}.brand small{letter-spacing:2px;color:#94a38f;font-size:8px;font-weight:500;display:block}.version-tag{color:#77906c;border:1px solid #dce3d7;border-radius:4px;align-self:flex-start;margin-top:6px;margin-left:3px;padding:1px 5px;font-size:9px}.header-actions{color:#627268;align-items:center;gap:15px;display:flex}.header-divider{background:#e4e9e0;width:1px;height:24px;margin:0 5px}.count{background:#eef2e9;border-radius:4px;padding:1px 5px;font-size:9px}.avatar{color:#638059;background:#e6eddf;border-radius:50%;justify-content:center;align-items:center;width:29px;height:29px;font-size:12px;display:flex}.user-name{margin-left:-8px;font-size:12px}.app-shell main{max-width:1700px;margin:auto;padding:20px 20px 12px}.workspace-title{justify-content:space-between;align-items:center;margin-bottom:24px;display:flex}.workspace-title h1{letter-spacing:.2px;margin:4px 0;font-size:27px;line-height:1.7}.workspace-title p{color:#8a968b;font-size:12px}.title-dot{color:#b8c59f}.workspace-title>.secondary{margin-top:9px}.environment-strip{color:#91957f;background:#f0f2e8;border:1px solid #e4e7d8;border-radius:7px;justify-content:space-between;align-items:center;gap:15px;margin-bottom:21px;padding:10px 14px;font-size:10px;display:flex}.environment-strip>div{align-items:center;gap:8px;display:flex}.environment-strip strong{color:#7f8268;font-weight:500}.status-dot{background:#6b956d;border-radius:50%;flex-shrink:0;width:6px;height:6px;display:inline-block}.status-dot.amber{background:#baab70}.workspace-grid{grid-template-columns:294px minmax(350px,1fr) 290px;align-items:start;gap:20px;display:grid}.panel{border:1px solid var(--line);border-radius:var(--radius);background:#fff;overflow:hidden;box-shadow:0 2px 5px #274c2402}.panel-heading{justify-content:space-between;align-items:center;gap:9px;padding:22px 23px 0;display:flex}.panel-heading h2{letter-spacing:.3px;text-overflow:ellipsis;white-space:nowrap;max-width:320px;margin-top:4px;font-size:17px;overflow:hidden}.panel-heading>svg{color:#a6b49b}.source-panel .panel-heading{margin-bottom:3px}.source-section{border-bottom:1px solid #edf0e9;padding:21px 22px}.source-section:last-of-type{border:0}.section-label{justify-content:space-between;align-items:center;margin-bottom:12px;display:flex}.section-label h3{font-size:13px}.section-label>span{color:#a0aa9c;font-size:10px}.two-actions{grid-template-columns:1fr 1fr;gap:9px;display:grid}.two-actions .secondary{padding:9px 5px;font-size:11px}.selected-patterns{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:13px;display:grid}.pattern-tile .checker{background-color:#f9fbf5;border:1px solid #e8ece4;border-radius:7px;justify-content:center;align-items:center;height:64px;padding:10px;display:flex;position:relative}.checker{background-image:linear-gradient(45deg,#e9ede31a 25%,#0000 25%),linear-gradient(-45deg,#e9ede333 25%,#0000 25%),linear-gradient(45deg,#0000 75%,#e9ede333 75%),linear-gradient(-45deg,#0000 75%,#e9ede333 75%);background-position:0 0,0 6px,6px -6px,-6px 0;background-size:12px 12px}.pattern-tile img{object-fit:contain;width:46px;height:46px}.pattern-tile>span{text-align:center;white-space:nowrap;text-overflow:ellipsis;color:#677b68;margin-top:6px;font-size:10px;display:block;overflow:hidden}.remove-asset{color:#73906e;background:#fff;border:0;border-radius:50%;justify-content:center;align-items:center;width:17px;height:17px;padding:0;font-size:14px;line-height:1;display:flex;position:absolute;top:3px;right:3px}.remove-asset:hover{background:#e2ebda}.empty-patterns{color:#9aaa91;background:#fafcf7;border:1px dashed #d8e2d1;border-radius:8px;flex-direction:column;align-items:center;gap:6px;width:100%;margin-top:13px;padding:18px 8px;display:flex}.empty-patterns span{font-size:10px}.empty-patterns small{color:#b0baaa;font-size:9px}.template-grid{grid-template-columns:1fr 1fr;gap:9px;display:grid}.template-card{background:#fff;border:1px solid #e2e8df;border-radius:7px;min-width:0;padding:6px;position:relative;overflow:hidden}.template-card img{object-fit:cover;opacity:.85;border-radius:3px;width:100%;height:42px}.template-card>span{color:#82927d;justify-content:center;align-items:center;gap:6px;padding:6px 0 2px;font-size:11px;display:flex}.template-card.selected{background:#fbfcf8;border-color:#648666;box-shadow:inset 0 0 0 1px #648666}.template-card.selected>span{color:#3d6546;font-weight:600}.template-card:hover:not(:disabled){border-color:#719774}.background-selected{background:#f4f7ee;border:1px solid #e3e9db;border-radius:7px;align-items:center;gap:10px;margin-top:12px;padding:9px;display:flex}.background-selected img{object-fit:cover;border-radius:4px;width:39px;height:34px}.background-selected>div{flex:1;min-width:0}.background-selected strong{white-space:nowrap;text-overflow:ellipsis;font-size:11px;font-weight:500;display:block;overflow:hidden}.background-selected small{color:#95a28d;margin-top:2px;font-size:9px;display:block}.background-selected>svg{color:#799371}.empty-background{color:#a3ac9c;text-align:center;padding:17px 4px 0;font-size:10px}.background-section .microcopy{margin-top:9px}.selection-warning{color:#aa8650;background:#fff6e8;border-radius:7px;margin:0 15px 18px;padding:10px;font-size:11px;line-height:1.8}.center-column{flex-direction:column;gap:17px;min-width:0;display:flex}.preview-panel{padding-bottom:22px}.preview-panel .panel-heading{padding:22px 24px 20px}.state-pill{color:#7c9672;white-space:nowrap;background:#f1f6ec;border-radius:5px;align-items:center;gap:5px;padding:5px 8px;font-size:9px;display:inline-flex}.state-pill.working{color:#a58c55;background:#f6f2e6}.state-pill.working .status-dot{background:#bfa363}.preview-stage{background-color:#f5f7ef;background-image:linear-gradient(#e7ebdf55 5%,#eff2e700 5%),linear-gradient(90deg,#eff2e700 95%,#e7ebdf55 95%);background-position:0 0;background-repeat:repeat;background-size:20px 20px;background-attachment:scroll;background-origin:padding-box;background-clip:border-box;border:1px solid #e6eadd;border-radius:10px;flex-direction:column;min-height:330px;margin:0 23px;display:flex;position:relative;overflow:hidden}.stage-topline,.stage-bottomline{color:#a4b095;justify-content:space-between;align-items:center;padding:14px 15px;font-size:9px;display:flex}.stage-topline>span:first-child{color:#899f79;font-size:10px}.stage-bottomline{letter-spacing:1px;margin-top:auto;font-size:8px}.stage-bottomline>span:first-child{letter-spacing:.2px}.preview-stage.is-filled{min-height:0}.ribbon-display{scrollbar-width:thin;scrollbar-color:#cfd8c2 transparent;flex:1;align-items:center;min-height:0;padding:18px 0;display:flex;overflow:auto hidden}.ribbon-display::-webkit-scrollbar{height:6px}.ribbon-display::-webkit-scrollbar-thumb{background:#cfd8c2;border-radius:3px}.ribbon-display img{border-radius:2px;flex:none;display:block;box-shadow:0 7px 12px #3351350a}.ribbon-display.detail img{width:auto;max-width:none;height:168px}.ribbon-display.fit img{width:100%;height:auto;max-height:none}.ribbon-tools{color:#94a385;align-items:center;gap:12px;padding:0 15px 14px;font-size:10px;display:flex}.ribbon-zoom{border:1px solid #dfe5d5;border-radius:6px;flex:none;display:inline-flex;overflow:hidden}.ribbon-zoom button{color:#7d8f6f;cursor:pointer;background:#fff;border:0;padding:4px 10px;font-size:10px}.ribbon-zoom button.is-active{color:#4e6343;background:#eef2e6;font-weight:500}.ribbon-metrics{font-variant-numeric:tabular-nums;letter-spacing:.2px;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}.ribbon-hint{white-space:nowrap;color:#b0bc9f;margin-left:auto}.preview-stage.is-empty{min-height:330px}.empty-canvas{text-align:center;flex-direction:column;flex:1;justify-content:center;align-items:center;padding:10px 15px 15px;display:flex}.empty-symbol{color:#98ad7f;background:#e9efdf;border-radius:18px;justify-content:center;align-items:center;width:56px;height:56px;margin-bottom:12px;display:flex}.empty-canvas h3{color:#839575;font-size:14px;font-weight:500}.empty-canvas p{color:#a6b09a;margin-top:7px;font-size:10px;line-height:1.9}.template-peek{color:#a1af90;border-top:1px solid #e2e9d9;align-items:center;gap:8px;margin-top:15px;padding-top:12px;font-size:9px;display:flex}.template-peek img{object-fit:cover;opacity:.65;border-radius:3px;width:85px;height:24px}.processing-overlay{-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);background:#f8faf1d9;flex-direction:column;justify-content:center;align-items:center;gap:10px;display:flex;position:absolute;inset:0}.processing-overlay strong{font-size:13px;font-weight:500}.processing-overlay>span:last-child{color:#91a086;font-size:10px}.preview-caption{color:#a4af9a;justify-content:space-between;align-items:center;padding:11px 24px 0;font-size:9px;display:flex}.preview-caption>span:first-child{align-items:center;gap:5px;display:flex}.result-actions{grid-template-columns:1fr 1fr;gap:12px;padding:19px 23px 0;display:grid}.result-actions .primary,.result-actions .secondary{padding:12px 8px;font-size:12px}.generate-area{padding:20px 23px 0}.generate-area>.primary{font-size:13px}.generate-area>.primary svg:last-child{margin-left:auto}.generate-area>.primary svg:first-child{margin-right:auto}.generate-area>small{text-align:center;color:#9eaa94;padding-top:10px;font-size:10px;display:block}.history-hint{color:#9caa90;padding:12px 24px 0;font-size:10px}.history-hint button{color:#507644;background:0 0;border:0;padding:0 0 0 5px;font-size:10px;text-decoration:underline}.history-panel{padding:20px 22px 21px}.history-heading{justify-content:space-between;align-items:center;gap:7px;margin-bottom:16px;display:flex}.history-heading h3{font-size:13px}.history-heading>span{color:#a9b19f;font-size:9px}.version-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;display:grid}.version-card{text-align:left;background:#fff;border:1px solid #e5eadf;border-radius:8px;min-width:0;padding:8px}.version-card.selected{background:#fcfdf9;border-color:#7a9969;box-shadow:inset 0 0 0 1px #7a9969}.version-card>img{object-fit:cover;background:#f4f6ed;border-radius:3px;width:100%;height:46px}.version-card>div{justify-content:space-between;align-items:center;gap:5px;margin-top:8px;display:flex}.version-card strong{font-size:11px;font-weight:500}.version-card>div>small{color:#a9b19d;font-size:9px}.version-card .tiny-pill{padding:1px 5px;font-size:8px}.version-parent{white-space:nowrap;text-overflow:ellipsis;color:#a8b29c;margin-top:5px;font-size:8px;display:block;overflow:hidden}.empty-history{color:#aab69f;justify-content:center;align-items:center;gap:12px;min-height:63px;font-size:10px;display:flex}.history-line{background:#e2e9d9;width:25px;height:1px}.handoff-note{color:#9baa92;align-items:center;gap:11px;padding:1px 9px;display:flex}.note-icon{color:#94a681;background:#eaf0e2;border-radius:50%;flex-shrink:0;justify-content:center;align-items:center;width:34px;height:34px;display:flex}.handoff-note strong{color:#91a180;font-size:10px;font-weight:500;display:block}.handoff-note span:not(.note-icon){margin-top:2px;font-size:9px;display:block}.refinement-panel .panel-heading{padding:22px 22px 21px}.quota-card{background:#edf3e5;border:1px solid #e6eddc;border-radius:9px;margin:0 21px;padding:15px 17px 12px}.quota-card>div:first-child{justify-content:space-between;align-items:center;display:flex}.quota-card>div:first-child>span{color:#749263;font-size:11px}.quota-card strong{color:#547944;font-size:27px;font-weight:500;line-height:1}.quota-card strong small{color:#a1b48d;font-size:12px;font-weight:400}.quota-dots{gap:5px;margin-top:13px;display:flex}.quota-dots>span{background:#dfe8d5;border-radius:2px;flex:1;height:3px}.quota-dots>span.available{background:#9fbb83}.quota-card.exhausted{background:#f2f1eb;border-color:#eae8de}.refinement-body{padding:24px 21px 18px}.refinement-body>label{font-size:13px;font-weight:600}.refinement-body>p{color:#a0ac95;margin:7px 0 14px;font-size:10px;line-height:1.9}.refinement-body textarea{resize:vertical;background:#fcfdf9;border-color:#e2e9da;border-radius:8px;min-height:150px;padding:13px;font-size:11px;line-height:2.1}.refinement-body textarea::placeholder{color:#b1bba6}.refinement-body textarea:disabled{background:#f8faf4}.text-limit{text-align:right;color:#aeb9a1;margin-top:4px;font-size:8px}.suggestions{flex-direction:column;align-items:start;gap:6px;margin-top:15px;display:flex}.suggestions>span{color:#a6b099;margin-bottom:2px;font-size:9px}.suggestions>button{color:#97a587;text-align:left;background:#fcfdf9;border:1px solid #e8eddf;border-radius:5px;justify-content:space-between;align-items:center;gap:4px;width:100%;padding:6px 8px;font-size:9px;display:flex}.suggestions>button:hover:not(:disabled){color:#52753f;background:#f0f5e7;border-color:#bace9d}.refine-button{margin-top:22px;font-size:12px}.refinement-body p.refine-help{text-align:center;color:#a9b39c;margin:10px 0 0;font-size:9px;line-height:1.8}.refine-footer{background:#fdfefb;border-top:1px solid #edf0e7;padding:20px 22px}.refine-footer>div{color:#93a380;align-items:center;gap:6px;display:flex}.refine-footer strong{font-size:10px;font-weight:500}.refine-footer p{color:#a6b199;margin-top:7px;font-size:9px;line-height:1.9}.refine-footer .test-limit{color:#a8a88b;border-top:1px dashed #e7eddf;padding-top:10px}.page-footer{color:#b2bba7;justify-content:space-between;align-items:center;margin-top:29px;font-size:9px;display:flex}.page-footer>span:first-child{letter-spacing:1px}.page-footer>span:nth-child(2){letter-spacing:2px}.modal-scrim{-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);z-index:20;background:#16392a55;justify-content:center;align-items:center;padding:24px;display:flex;position:fixed;inset:0}.modal{background:#fff;border-radius:18px;width:520px;max-width:100%;max-height:90vh;padding:27px 30px;overflow:auto;box-shadow:0 20px 80px #142f2733}.modal-wide{width:840px}.modal-heading{justify-content:space-between;align-items:center;margin-bottom:25px;display:flex}.modal-heading h2{margin-top:5px;font-size:23px}.modal-heading .eyebrow{font-size:8px}.modal-footer{border-top:1px solid var(--line);justify-content:space-between;align-items:center;gap:15px;margin-top:22px;padding-top:20px;display:flex}.modal-footer>span{color:#8fa180;font-size:11px}.modal-footer>.primary{padding:10px 17px;font-size:12px}.library-toolbar{gap:12px;display:flex}.library-toolbar>input{flex:1;font-size:12px}.upload-label{cursor:pointer;font-size:12px}.upload-label.disabled{opacity:.5;pointer-events:none}.checkbox-line{color:#859775;align-items:center;gap:8px;margin:12px 0;font-size:11px;display:flex!important}.library-note{margin:15px 0;font-size:11px}.library-grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:15px;display:grid}.library-card{text-align:left;background:#fff;border:1px solid #e2e9da;border-radius:9px;width:100%;padding:7px;overflow:hidden}.library-card.selected{background:#fafcf6;border-color:#7b9a67;box-shadow:inset 0 0 0 1px #7b9a67}.library-image{background-color:#f7f9f1;border-radius:5px;justify-content:center;align-items:center;height:100px;display:flex;position:relative}.library-image img{object-fit:contain;width:100%;max-height:100%;padding:8px}.library-image:not(.checker) img{object-fit:cover;height:100%;padding:0}.check-mark{color:#fff;background:#3b6c41;border-radius:50%;justify-content:center;align-items:center;width:20px;height:20px;display:flex;position:absolute;top:6px;right:6px}.library-card strong{text-overflow:ellipsis;white-space:nowrap;margin:9px 4px 4px;font-size:12px;font-weight:500;display:block;overflow:hidden}.library-card>span{color:#a0ad92;margin:0 4px 5px;font-size:9px;display:block}.hide-asset{color:#a5af9c;background:0 0;border:0;padding:5px 3px;font-size:9px}.hide-asset:hover{color:#a2765c}.empty-library{text-align:center;color:#9fae91;padding:45px 10px;font-size:12px}.design-library{flex-direction:column;gap:10px;display:flex}.design-list-item{text-align:left;background:#fff;border:1px solid #e4eadc;border-radius:9px;align-items:center;gap:15px;padding:15px;display:flex}.design-list-item.selected{background:#f6f9ef;border-color:#afc299}.design-list-item>div{flex:1}.design-list-item strong{font-size:13px;font-weight:500;display:block}.design-list-item small{color:#a0ae90;margin-top:4px;font-size:10px;display:block}.design-list-icon{color:#95ae79;background:#edf3e4;border-radius:10px;justify-content:center;align-items:center;width:42px;height:42px;display:flex}.design-list-item>svg{color:#a5b890}.admin-tabs{border-bottom:1px solid #e5eadf;gap:8px;margin-bottom:18px;padding-bottom:15px;display:flex}.admin-tabs button{color:#899a7b;background:0 0;border:0;border-radius:7px;padding:9px 15px;font-size:12px}.admin-tabs button.active{color:#50713a;background:#eaf2df}.admin-intro{color:#91a17f;justify-content:space-between;align-items:center;margin-bottom:16px;font-size:12px;display:flex}.table-scroll{max-height:450px;overflow:auto}.table-scroll table{border-collapse:collapse;width:100%;font-size:11px}.table-scroll th{text-align:left;color:#95a582;white-space:nowrap;background:#f5f8ed;font-size:10px;font-weight:500}.table-scroll th,.table-scroll td{border-bottom:1px solid #e9efdf;padding:12px 10px}.table-scroll td{word-break:break-word;color:#7e936a;max-width:240px}.table-scroll td strong{font-size:10px;font-weight:500;display:block}.table-scroll td small{color:#a2b48c;margin-top:4px;font-size:9px;display:block}.job-status{background:#f3f4ec;border-radius:4px;padding:3px 5px;font-size:9px}.job-status.succeeded{background:#ebf3e0}.job-status.failed{color:#a88463;background:#fff1e6}.admin-columns{grid-template-columns:1fr 1fr;gap:28px;display:grid}.admin-columns h3{margin-bottom:14px}.admin-form label{color:#849970;margin-bottom:15px;font-size:11px;display:block}.admin-form label input,.admin-form label select,.admin-form label textarea{margin-top:6px;font-size:12px}.admin-form>small{color:#a0b18a;margin-top:-8px;margin-bottom:15px;font-size:9px;display:block}.admin-form>.primary{width:100%;margin-top:12px;font-size:12px}.admin-form>.text-button{justify-content:center;width:100%;margin-top:7px;font-size:10px}.admin-form .checkbox-line input{margin:0}.code-input{font-family:Consolas,monospace}.admin-existing{max-height:530px;overflow:auto}.admin-template{text-align:left;background:#fff;border:1px solid #e4ecd9;border-radius:7px;align-items:center;gap:10px;width:100%;margin-bottom:9px;padding:9px;display:flex}.admin-template.selected{background:#f5f9ec;border-color:#acc58d}.admin-template img{object-fit:cover;border-radius:4px;width:87px;height:35px}.admin-template>div{flex:1}.admin-template strong{font-size:11px;font-weight:500;display:block}.admin-template small{color:#a4b58e;margin-top:3px;font-size:9px;display:block}.admin-template>svg{color:#a5b58e}.profile-item{border:1px solid #e6eddb;border-radius:8px;margin-top:10px;padding:13px 10px}.profile-item strong{justify-content:space-between;align-items:center;gap:7px;font-size:12px;font-weight:500;display:flex}.profile-item small,.profile-item>span{color:#a1b28a;margin-top:5px;font-size:10px;display:block}.form-two{grid-template-columns:1fr 1fr;gap:12px;display:grid}.admin-intro+.table-scroll+.microcopy{margin-top:15px}.login-page{grid-template-columns:1.1fr 1fr;min-height:100vh;display:grid}.login-illustration{background:#edf2e5;flex-direction:column;justify-content:space-between;padding:50px 9%;display:flex;position:relative;overflow:hidden}.login-illustration>div:nth-child(2){margin:60px 0 30px}.login-illustration h1{letter-spacing:1px;color:#385b36;margin:17px 0 20px;font-size:49px;font-weight:550;line-height:1.5}.login-illustration p{color:#92a77f;font-size:13px;line-height:2.1}.login-illustration .eyebrow{color:#8da478;letter-spacing:1px;font-size:11px}.decorative-ribbon{background:#dce9ca;border-top:1px solid #cfdfbd;border-bottom:1px solid #cfdfbd;justify-content:space-around;align-items:center;gap:20px;width:140%;margin-left:-20%;padding:28px 23px;display:flex;transform:rotate(-8deg);box-shadow:0 15px 30px #6e855518}.decorative-ribbon span{color:#9caf76;font-size:45px}.decorative-ribbon span:nth-child(3n+1){color:#d3aa7d;font-size:54px}.decorative-ribbon span:nth-child(3n+2){color:#cebf7c}.login-illustration>small{letter-spacing:3px;color:#a3b58f;margin-top:60px;font-size:9px}.login-form-wrap{background:#fff;justify-content:center;align-items:center;padding:40px;display:flex}.login-form{width:350px;max-width:100%}.login-form>h2{margin:9px 0 12px;font-size:27px}.login-form>.muted{margin-bottom:30px;font-size:12px}.login-form>label{color:#6e8563;margin-bottom:19px;font-size:12px;display:block}.login-form>label>input{margin-top:8px;padding:12px 14px}.login-form>.primary{justify-content:space-between;margin-top:10px}.login-demo{color:#a0af91;border-top:1px solid #e9efdf;margin-top:30px;padding-top:20px;font-size:11px}.login-demo strong{margin-bottom:8px;font-size:10px;font-weight:500;display:block}.login-demo span{margin:3px 0;font-size:10px;display:block}.login-demo small{color:#b0bda3;margin-top:12px;font-size:9px;display:block}@media (width>=1500px){.workspace-grid{grid-template-columns:315px minmax(480px,1fr) 310px;gap:24px}.source-section{padding:23px}.preview-stage{min-height:380px}.refinement-body textarea{min-height:185px}.template-card img{height:48px}.empty-canvas{min-height:280px}.panel-heading{padding-top:25px}.preview-stage.is-empty{min-height:380px}}@media (width<=1200px){.workspace-grid{grid-template-columns:260px minmax(300px,1fr) 255px;gap:14px}.app-shell main{padding:25px 2.5% 20px}.topbar{padding:0 2.5%}.source-section{padding:20px 17px}.panel-heading,.refinement-panel .panel-heading{padding-left:18px;padding-right:18px}.quota-card{margin-left:17px;margin-right:17px}.refinement-body{padding-left:17px;padding-right:17px}.preview-panel .panel-heading{padding:22px 17px 19px}.preview-stage{margin:0 17px}.result-actions{padding-left:17px;padding-right:17px}.panel-heading h2{max-width:190px;font-size:15px}.preview-stage{min-height:310px}.state-pill{font-size:8px}.stage-topline,.stage-bottomline{padding:11px}.refine-footer{padding:18px}.preview-caption{padding-left:17px;padding-right:17px}.history-panel{padding:18px 16px}.history-heading>span{font-size:8px}.template-card>span{font-size:10px}.selected-patterns{gap:7px}.pattern-tile .checker{height:59px;padding:7px}.template-card img{height:38px}.source-section .section-label>span{font-size:9px}.brand strong{font-size:18px}}@media (width<=1000px){.workspace-grid{grid-template-columns:250px minmax(360px,1fr);gap:18px}.refinement-panel{grid-area:2/2}.source-panel{grid-row:span 2}.center-column{grid-column:2}.refinement-panel .refinement-body{grid-template-columns:1fr 1fr;column-gap:15px;display:grid}.refinement-body>label,.refinement-body>p,.refinement-body textarea,.refinement-body>.text-limit{grid-column:1/-1}.refinement-body .suggestions{grid-column:1}.refinement-body>.refine-button{grid-area:5/2;align-self:center;height:45px}.refinement-body>.refine-help{grid-area:6/2}.refinement-body textarea{min-height:100px}.refinement-panel .panel-heading{padding-bottom:15px}.quota-card{padding:12px 17px}.quota-card>div:first-child>span{font-size:12px}.quota-dots{margin-top:8px}.refine-footer{padding:15px 20px}.refine-footer .test-limit{margin-top:7px}.environment-strip>div>span:last-child{display:none}.workspace-title h1{font-size:23px}.page-footer>span:nth-child(2){display:none}.login-illustration h1{font-size:38px}}@media (width<=700px){.topbar{height:70px;padding:0 18px}.brand strong{font-size:16px}.brand small{letter-spacing:1.5px;font-size:6px}.brand-icon svg{width:20px}.version-tag{display:none}.header-actions{gap:5px}.header-actions>.text-button{gap:0;padding:8px;font-size:0}.header-actions>.text-button .count,.header-divider,.user-name{display:none}.avatar{width:25px;height:25px;margin-left:5px}.app-shell main{padding:22px 16px 18px}.workspace-title{align-items:start;gap:10px}.workspace-title h1{margin:7px 0;font-size:21px;line-height:1.6}.workspace-title p{max-width:240px;font-size:10px;line-height:1.8}.workspace-title .eyebrow{font-size:8px}.workspace-title>.secondary{gap:0;margin-top:20px;padding:10px;font-size:0}.workspace-grid{grid-template-columns:1fr;gap:17px}.source-panel,.center-column,.refinement-panel{grid-area:auto/1}.source-panel{overflow:visible}.source-section{padding:18px}.source-panel .panel-heading{padding:20px 18px 0}.source-section:first-of-type .two-actions{max-width:300px}.selected-patterns{flex-wrap:wrap;gap:10px;display:flex}.pattern-tile{width:65px}.empty-patterns{padding:12px}.template-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}.template-card img{height:34px}.template-card>span{font-size:10px}.template-card{padding:5px}.environment-strip{gap:7px;padding:9px 10px;font-size:9px}.environment-strip strong{font-size:9px}.outline-pill{padding:3px 5px;font-size:8px}.environment-strip>div{gap:6px}.background-section .two-actions,.background-selected{max-width:300px}.preview-stage{min-height:285px}.preview-stage.is-empty{min-height:300px}.preview-panel .panel-heading h2{max-width:225px}.history-panel{padding:20px 18px}.refinement-panel .refinement-body{display:block}.refinement-body textarea{min-height:130px}.suggestions{display:flex}.suggestions>button,.refine-footer p{font-size:10px}.page-footer{gap:12px;font-size:8px}.modal-scrim{padding:10px}.modal{border-radius:12px;max-height:94vh;padding:22px 18px}.modal-heading{margin-bottom:20px}.modal-heading h2{font-size:21px}.library-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.library-image{height:80px}.library-card strong{font-size:10px}.library-card>span{font-size:8px}.library-toolbar{gap:7px}.upload-label{padding:10px;font-size:10px}.library-toolbar input{min-width:0;font-size:11px}.modal-footer{gap:10px}.modal-footer>span{font-size:10px}.modal-footer>.primary{padding:10px 12px;font-size:11px}.admin-columns{grid-template-columns:1fr}.admin-existing{max-height:240px}.login-page{flex-direction:column;min-height:100vh;display:flex}.login-illustration{min-height:320px;padding:25px 30px 30px}.login-illustration>div:nth-child(2){margin:30px 0 0}.login-illustration h1{margin:10px 0 14px;font-size:30px;line-height:1.4}.login-illustration h1 br{display:none}.login-illustration p{font-size:11px}.decorative-ribbon,.login-illustration>small{display:none}.login-form-wrap{flex:1;padding:35px 30px 40px}.login-form>h2{font-size:24px}.login-form>.eyebrow{font-size:8px}.login-demo{margin-top:23px}.notice{font-size:11px}}@media (prefers-reduced-motion:reduce){*{transition:none!important;animation-duration:.01ms!important}}@container (width<=950px){.workspace-grid{grid-template-columns:250px minmax(0,1fr);gap:16px}.source-panel{grid-row:span 2}.center-column{grid-column:2}.refinement-panel{grid-area:2/2}.refinement-body textarea{min-height:120px}.topbar{flex-wrap:wrap;gap:12px}.workspace-title h1{font-size:22px}}@container (width<=700px){.workspace-grid{grid-template-columns:minmax(0,1fr)}.source-panel,.center-column,.refinement-panel{grid-area:auto/1}.topbar,.app-shell main{padding:14px}.workspace-title,.environment-strip{flex-wrap:wrap}.header-actions>.text-button{gap:5px;font-size:12px}.workspace-title>.secondary{margin-top:0;font-size:12px}}.template-option{flex-direction:column;gap:3px;min-width:0;display:flex}.template-option>.template-card{width:100%}.more-layouts{border-top:1px solid var(--line);margin-top:12px}.more-layouts-toggle{color:#345e45;background:0 0;border:0;justify-content:space-between;align-items:center;width:100%;min-height:40px;padding:9px 2px;font-size:13px;font-weight:600;display:flex}.more-layouts-toggle:hover{background:#edf3e9}.chosen-layout{justify-content:space-between;align-items:center;gap:8px;margin-top:8px;font-size:12px;display:flex}.chosen-layout .template-example-button{font-size:11px}.layout-picker-modal,.asset-library-modal,.design-library-modal{flex-direction:column;max-height:calc(100dvh - 48px);display:flex;overflow:hidden}.layout-picker-modal>.modal-heading,.asset-library-modal>.modal-heading,.design-library-modal>.modal-heading,.asset-library-modal>.library-toolbar,.asset-library-modal>.library-note,.asset-library-modal>.checkbox-line,.layout-picker-modal>.library-note,.layout-picker-modal>.modal-footer,.asset-library-modal>.modal-footer,.design-library-modal>.modal-footer{flex-shrink:0}.layout-picker-grid.template-grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;min-height:0;padding:3px;overflow:auto}.asset-library-modal>.library-grid,.design-library-modal>.design-library{min-height:0;padding:3px;overflow:auto}.library-pagination{color:#526a5d;flex-shrink:0;justify-content:space-between;align-items:center;gap:12px;padding-top:16px;font-size:12px;display:flex}.design-loading{gap:12px}.preview-panel>.result-actions,.preview-panel>.generate-area{padding-top:0;padding-bottom:16px}.ai-draft-options{color:#3d5a43;background:#f7faf3;border:1px solid #e1e9da;border-radius:7px;margin-top:12px;padding:10px 12px;font-size:12px}.ai-draft-options>label{align-items:center;gap:8px;font-weight:600;display:flex}.ai-draft-options input{accent-color:#3b6c41;width:auto;margin:0}.ai-draft-options p{color:#65765f;margin:7px 0 0;font-size:11px;line-height:1.7}.ai-draft-reference{flex-wrap:wrap;align-items:center;gap:8px;margin-top:7px;font-size:11px;display:flex}.ai-draft-reference button,.ai-reference-picker{color:#345e45;text-underline-offset:3px;background:0 0;border:0;padding:4px 0;font-size:11px;text-decoration:underline}.ai-reference-picker{margin-top:5px}.layout-reference-help{color:#526a5d;margin-top:12px;font-size:13px;line-height:1.8}.choose-ai-reference{margin-top:14px;font-size:13px}.design-list-row{align-items:center;gap:10px;display:flex}.design-list-row>.design-list-item{flex:1;min-width:0}.design-list-item>div{min-width:0}.design-list-item strong{overflow-wrap:anywhere}.design-list-tabs{flex-shrink:0;gap:10px;padding-bottom:16px;display:flex}.design-list-tabs>button{border:1px solid var(--line);color:#526a5d;background:#fff;border-radius:6px;padding:8px 16px}.design-list-tabs>button.selected{color:#345e45;background:#edf3e9;border-color:#afc299}.delete-design-button{color:#965246;background:0 0;border:1px solid #eadbd7;border-radius:6px;flex-shrink:0;padding:9px 12px}.delete-design-confirm{color:#724638;background:#fff8f3;border:1px solid #e9d7cb;border-radius:8px;flex-shrink:0;margin-bottom:15px;padding:14px;font-size:13px}.delete-design-confirm>div{justify-content:flex-end;gap:10px;margin-top:12px;display:flex}.danger-button{color:#fff;background:#9e4634;border:1px solid #9e4634;border-radius:6px;padding:8px 14px;font-size:12px}@media (width<=700px){.layout-picker-grid.template-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.library-pagination{gap:6px;font-size:11px}.library-pagination .secondary{padding:8px}}.layout-selection-help,.layout-selection-issue{margin-top:12px;font-size:12px;line-height:1.7}.layout-selection-help{color:#526a5d}.layout-selection-issue{color:#9e4634}.template-rules-help{color:#526a5d;font-size:12px;line-height:1.7;display:block}.template-example-button,.template-examples-all{color:#345e45;text-underline-offset:3px;background:0 0;border:0;font-size:12px;font-weight:500;line-height:1.5;text-decoration:underline}.template-example-button{min-height:30px;padding:4px 6px}.template-examples-all{padding:4px 0 4px 8px}.template-example-button:hover,.template-examples-all:hover{color:#193f29;background:#edf3e9}.template-example-button:focus-visible,.template-examples-all:focus-visible{outline-offset:2px;outline:2px solid #507857}.layout-examples-modal{width:1160px}.layout-examples-modal .modal-heading{z-index:2;background:#fff;margin-top:-12px;margin-bottom:14px;padding-top:12px;padding-bottom:12px;position:sticky;top:-27px}.layout-examples-intro{margin-bottom:22px}.layout-mode-summary{color:#284a36;margin:0 0 8px;font-size:16px;line-height:1.65}.layout-mode-note{color:#455b49;background:#f2f6ee;border-left:3px solid #90a77f;margin:8px 0 12px;padding:10px 13px;font-size:14px;line-height:1.7}.layout-examples-tools{flex-wrap:wrap;align-items:center;gap:14px;display:flex}.layout-examples-tools>button{min-height:34px;font-size:13px}.layout-examples-loading,.layout-examples-error{color:#37513d;flex-wrap:wrap;align-items:center;gap:14px;min-height:140px;display:flex}.layout-examples-error{padding:20px 0;display:block}.layout-examples-error>p{margin:0 0 16px;font-size:15px;line-height:1.7}.layout-examples-list{flex-direction:column;gap:22px;display:flex}.layout-example{border-top:1px solid #dbe5d7;min-width:0;padding-top:18px}.layout-example-heading{flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:12px;display:flex}.layout-example-heading h3{color:#284a36;margin:0;font-size:19px;line-height:1.5}.layout-example-heading>div{flex-wrap:wrap;align-items:center;gap:12px;display:flex}.layout-example-code{color:#50624d;font-variant-numeric:tabular-nums;font-size:13px}.layout-reference-tag{color:#6b5828;background:#f4f1e6;border-radius:4px;padding:3px 7px;font-size:12px}.layout-example-description{color:#304f3a;margin:8px 0 0;font-size:15px;line-height:1.7}.layout-example-image-tools{align-items:center;gap:12px;min-height:38px;display:flex}.layout-example-image-tools>button{color:#335c40;min-height:34px;padding:5px 0;font-size:13px}.layout-example-image-tools>span{color:#53644d;font-size:12px}.layout-example-viewport{background:#f7f9f5;border:1px solid #e3e9df;border-radius:5px;overflow:auto hidden}.layout-example-viewport>img{width:100%;max-width:none;height:auto;display:block}.layout-example-viewport.is-zoomed>img{width:max(100%, var(--example-width))}.layout-example-viewport:focus-visible{outline-offset:3px;outline:2px solid #507857}.layout-example-look{color:#3e5941;margin:10px 0 0;font-size:14px;line-height:1.7}.layout-example-look strong{font-weight:600}.layout-example-reference{color:#6b5828;margin:8px 0 0;font-size:13px;line-height:1.7}.layout-example-unavailable{color:#465d48;background:#f7f9f5;border:1px dashed #b8c7b1;border-radius:5px;margin-top:14px;padding:18px;font-size:14px;line-height:1.7}.layout-example-unavailable p{margin:0}.layout-example-unavailable button{margin-top:12px;font-size:13px}.layout-examples-source{color:#53644d;border-top:1px solid #dbe5d7;margin:20px 0 0;padding-top:14px;font-size:12px;line-height:1.8}.background-prompt-label{color:var(--ink);margin:12px 0 6px;font-size:13px;font-weight:600;display:block}.background-prompt{box-sizing:border-box;border:1px solid var(--line);width:100%;min-height:66px;color:var(--ink);font:inherit;resize:vertical;background:#fff;border-radius:6px;padding:9px 10px;font-size:13px;line-height:1.65;display:block}.background-prompt:focus{outline-offset:2px;outline:2px solid #91a88a}.model-help,.model-edit-boundary{color:#4c634f;font-size:13px;line-height:1.7}.refinement-body .model-edit-boundary{border-left:2px solid #b4c6ab;margin:0 0 12px;padding-left:9px}.model-workflow-help{color:#4c634f;margin-bottom:16px;font-size:13px;line-height:1.7}.model-workflow-help summary{cursor:pointer;font-weight:600}.model-workflow-help p{margin:8px 0 0}@media (width<=600px){.layout-examples-modal .modal-heading{top:-20px}.layout-examples-modal .modal-heading h2{font-size:20px}.layout-mode-summary{font-size:15px}.layout-example-heading h3{font-size:17px}.layout-example-heading{gap:4px}}.background-tone-control{color:#42584b;align-items:center;gap:8px;margin-top:12px;font-size:13px;display:flex}.background-tone-control input[type=checkbox]{accent-color:#386b43;width:16px;height:16px;margin:0}.density-control{align-items:center;gap:12px;margin-top:12px;font-size:13px;display:flex}.density-control select{color:#203c2a;background:#fff;border:1px solid #d7dfd6;border-radius:6px;flex:1;min-width:0;padding:6px 10px}.loop-preview{min-width:0;padding:0 15px 12px}.loop-view-heading{color:#35523d;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:8px;margin:0 0 10px;display:flex}.loop-view-heading strong{font-size:13px;font-weight:600}.loop-view-heading>span{font-variant-numeric:tabular-nums;font-size:10px}.loop-unit-view{justify-content:center;align-items:center;min-height:150px;padding:14px 0;display:flex}.loop-unit-view .target-layer>img{width:auto;max-width:100%;height:auto;max-height:220px;display:block;box-shadow:0 5px 14px #33513514}.loop-continuity{min-width:0;padding:14px 0}.loop-unit-view[hidden],.loop-continuity[hidden]{display:none}.loop-continuity-track{grid-template-columns:repeat(3,minmax(0,1fr));align-items:stretch;display:grid}.loop-repeat{min-width:0;position:relative}.loop-repeat>img{border:0;border-radius:0;width:100%;max-width:none;height:auto;display:block}.loop-continuity-track.show-seams>.loop-repeat+.loop-repeat:before{content:\"\";z-index:1;pointer-events:none;border-left:2px dashed #aa3d4c;width:0;position:absolute;top:-9px;bottom:-9px;left:-1px}.loop-preview-tools{flex-wrap:wrap;align-items:center;gap:14px;padding-top:8px;display:flex}.loop-view-button{color:#305e3d;background:#fff;border:1px solid #bacbb1;border-radius:6px;min-height:32px;padding:6px 10px;font-size:12px}.loop-view-button[aria-pressed=true]{background:#e8f0e2}.loop-seam-toggle{color:#486044;align-items:center;gap:6px;font-size:12px;display:inline-flex}.loop-seam-toggle input{accent-color:#386b43;width:15px;height:15px;margin:0}.loop-preview-note{color:#53664d;margin:9px 0 0;font-size:11px;line-height:1.7}.loop-check{color:#3e5d38;background:#edf4e8;border:1px solid #d5e1ce;border-radius:6px;margin-top:10px;padding:9px 11px;font-size:11px;line-height:1.7}.loop-check>strong{margin-right:9px;font-weight:600;display:inline}.loop-check.needs-review{color:#73552a;background:#fff8e9;border-color:#e7d7b4}.loop-check ul{margin:6px 0 0;padding-left:17px}.loop-check li.error{color:#933f35}.loop-mode-notice{color:#725832;margin-top:8px;font-size:11px;line-height:1.7}.loop-technical-details{color:#53664d;margin-top:9px;font-size:11px;line-height:1.7}.loop-technical-details summary{cursor:pointer;width:fit-content}.loop-technical-details dl{margin:7px 0 0}.loop-technical-details dl>div{gap:12px;display:flex}.loop-technical-details dt{flex:none}.loop-technical-details dd{overflow-wrap:anywhere;margin:0}@media (width<=600px){.loop-preview{padding-left:10px;padding-right:10px}.loop-unit-view{min-height:110px}.loop-unit-view .target-layer>img{max-height:170px}.loop-view-heading{display:block}.loop-view-heading>span{margin-top:3px;display:block}}.target-layer{max-width:100%;position:relative}.target-overlay{pointer-events:none;width:100%;height:100%;position:absolute;inset:0;overflow:hidden}.target-overlay rect{fill:#3c81661f;stroke:#16674d;stroke-width:2px}.optional-layers,.target-picker{padding:12px 0}.optional-layers summary{cursor:pointer;font-weight:600}.optional-layers>div,.target-picker{flex-wrap:wrap;align-items:center;gap:8px;display:flex}.optional-layers>div{margin-top:8px}.target-picker select{flex:1;min-width:0;max-width:100%}.compact-status.environment-strip{color:#485c4d;flex-wrap:wrap;justify-content:flex-start;min-height:0;margin:8px 0;padding:7px 12px}.compact-status.environment-strip span{font-size:12px;display:inline}.workspace-grid{margin-top:12px}.remaining-edits{color:#375646;margin:0 20px 4px;font-size:14px}.refinement-body .target-picker{padding:8px 0}.panel-heading h2{margin:0}.refine-footer p{color:#42584b}@media (width>=850px){.workspace-grid.draft-workspace{grid-template-columns:minmax(232px,300px) minmax(0,1fr)}}.history-panel summary{cursor:pointer;color:#344b3e;font-size:14px;font-weight:600}.suggestions{margin-top:12px}";
+var O = ":host{color:#233d35;font-synthesis:none;--green:#215b4d;--deep:#163d33;--pale:#edf3e9;--line:#e3e9e2;--muted:#839087;--gold:#b7a66a;--radius:16px;background:#f7f8f4;min-width:0;font-family:Noto Sans SC,Microsoft YaHei,sans-serif;font-size:14px;font-weight:400;line-height:1.55;display:block;container-type:inline-size}*{box-sizing:border-box}.app-shell{min-width:0;margin:0}button,input,textarea,select{font:inherit}button,a,input,textarea,select{-webkit-tap-highlight-color:transparent}button{cursor:pointer}button:disabled{cursor:not-allowed;opacity:.45}button,a{transition:background .16s,border-color .16s,box-shadow .16s,transform .16s}button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline-offset:3px;outline:3px solid #a6c6a8}button{color:inherit}a{color:inherit;text-decoration:none}img{max-width:100%;display:block}h1,h2,h3,p{margin:0}h1,h2,h3{font-weight:650}h3{font-size:14px}button svg,a svg{flex-shrink:0}input,textarea,select{width:100%;color:var(--deep);background:#fff;border:1px solid #dfe6df;border-radius:8px;padding:11px 12px}input:focus,textarea:focus,select:focus{border-color:#7ba28c;outline:none}textarea{resize:vertical}input[type=checkbox]{width:15px;height:15px;accent-color:var(--green)}small{font-size:11px}.muted{color:var(--muted)}.microcopy{color:#7c8a80;font-size:11px;line-height:1.8}.eyebrow,.step-label{letter-spacing:1.9px;color:#94a395;font-size:10px;font-weight:500}.primary,.secondary,.text-button,.icon-button{white-space:nowrap;border:0;border-radius:8px;justify-content:center;align-items:center;gap:8px;font-weight:550;display:inline-flex}.primary{background:var(--green);color:#fff;border:1px solid var(--green);padding:13px 22px}.primary:hover:not(:disabled){background:#174b3f;box-shadow:0 4px 14px #184f3c16}.secondary{background:#fff;border:1px solid #dce4dc;padding:10px 16px;font-size:12px}.secondary:hover:not(:disabled){background:#fafcf8;border-color:#8fae99}.text-button{background:0 0;padding:7px;font-size:12px}.text-button:hover{background:#edf1e9}.icon-button{color:#7b8980;background:0 0;flex-shrink:0;width:32px;height:32px}.icon-button:hover{color:var(--green);background:#e9f0e5}.full{width:100%}.small{padding:7px 11px;font-size:11px}.tiny-pill{color:#52735b;white-space:nowrap;background:#edf3e9;border-radius:4px;padding:2px 6px;font-size:10px}.outline-pill{color:#8b8e72;white-space:nowrap;border:1px solid #dddfcf;border-radius:4px;padding:3px 9px;font-size:10px}.spinner{border:2px solid #becfbe;border-top-color:var(--green);border-radius:50%;flex-shrink:0;width:25px;height:25px;animation:.8s linear infinite spin;display:inline-block}.spinner.tiny{width:16px;height:16px}.primary .spinner{border-color:#fff #ffffff45 #ffffff45}@keyframes spin{to{transform:rotate(360deg)}}.page-loader{color:#7a897f;justify-content:center;align-items:center;gap:14px;min-height:90vh;display:flex}.page-loader.in-page{min-height:430px}.notice{border:1px solid;border-radius:8px;justify-content:space-between;align-items:center;gap:14px;margin-bottom:14px;padding:10px 15px;font-size:12px;display:flex}.notice.error{color:#945d41;background:#fff4ef;border-color:#eddbc9}.notice.success{color:#477047;background:#edf5e9;border-color:#dbe8d2}.notice.info{color:#536c7e;background:#f0f4f7;border-color:#dfe7ef}.topbar{background:#fff;border-bottom:1px solid #e6eae1;justify-content:space-between;align-items:center;min-height:64px;padding:12px 20px;display:flex}.brand{align-items:center;gap:10px;display:flex}.brand-icon{color:var(--green);justify-content:center;align-items:center;display:flex}.brand strong{letter-spacing:1px;font-size:20px;line-height:1.5;display:block}.brand small{letter-spacing:2px;color:#94a38f;font-size:8px;font-weight:500;display:block}.version-tag{color:#77906c;border:1px solid #dce3d7;border-radius:4px;align-self:flex-start;margin-top:6px;margin-left:3px;padding:1px 5px;font-size:9px}.header-actions{color:#627268;align-items:center;gap:15px;display:flex}.header-divider{background:#e4e9e0;width:1px;height:24px;margin:0 5px}.count{background:#eef2e9;border-radius:4px;padding:1px 5px;font-size:9px}.avatar{color:#638059;background:#e6eddf;border-radius:50%;justify-content:center;align-items:center;width:29px;height:29px;font-size:12px;display:flex}.user-name{margin-left:-8px;font-size:12px}.app-shell main{max-width:1700px;margin:auto;padding:20px 20px 12px}.workspace-title{justify-content:space-between;align-items:center;margin-bottom:24px;display:flex}.workspace-title h1{letter-spacing:.2px;margin:4px 0;font-size:27px;line-height:1.7}.workspace-title p{color:#8a968b;font-size:12px}.title-dot{color:#b8c59f}.workspace-title>.secondary{margin-top:9px}.environment-strip{color:#91957f;background:#f0f2e8;border:1px solid #e4e7d8;border-radius:7px;justify-content:space-between;align-items:center;gap:15px;margin-bottom:21px;padding:10px 14px;font-size:10px;display:flex}.environment-strip>div{align-items:center;gap:8px;display:flex}.environment-strip strong{color:#7f8268;font-weight:500}.status-dot{background:#6b956d;border-radius:50%;flex-shrink:0;width:6px;height:6px;display:inline-block}.status-dot.amber{background:#baab70}.workspace-grid{grid-template-columns:294px minmax(350px,1fr) 290px;align-items:start;gap:20px;display:grid}.panel{border:1px solid var(--line);border-radius:var(--radius);background:#fff;overflow:hidden;box-shadow:0 2px 5px #274c2402}.panel-heading{justify-content:space-between;align-items:center;gap:9px;padding:22px 23px 0;display:flex}.panel-heading h2{letter-spacing:.3px;text-overflow:ellipsis;white-space:nowrap;max-width:320px;margin-top:4px;font-size:17px;overflow:hidden}.panel-heading>svg{color:#a6b49b}.source-panel .panel-heading{margin-bottom:3px}.source-section{border-bottom:1px solid #edf0e9;padding:21px 22px}.source-section:last-of-type{border:0}.section-label{justify-content:space-between;align-items:center;margin-bottom:12px;display:flex}.section-label h3{font-size:13px}.section-label>span{color:#a0aa9c;font-size:10px}.two-actions{grid-template-columns:1fr 1fr;gap:9px;display:grid}.two-actions .secondary{padding:9px 5px;font-size:11px}.selected-patterns{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:13px;display:grid}.pattern-tile .checker{background-color:#f9fbf5;border:1px solid #e8ece4;border-radius:7px;justify-content:center;align-items:center;height:64px;padding:10px;display:flex;position:relative}.checker{background-image:linear-gradient(45deg,#e9ede31a 25%,#0000 25%),linear-gradient(-45deg,#e9ede333 25%,#0000 25%),linear-gradient(45deg,#0000 75%,#e9ede333 75%),linear-gradient(-45deg,#0000 75%,#e9ede333 75%);background-position:0 0,0 6px,6px -6px,-6px 0;background-size:12px 12px}.pattern-tile img{object-fit:contain;width:46px;height:46px}.pattern-tile>span{text-align:center;white-space:nowrap;text-overflow:ellipsis;color:#677b68;margin-top:6px;font-size:10px;display:block;overflow:hidden}.remove-asset{color:#73906e;background:#fff;border:0;border-radius:50%;justify-content:center;align-items:center;width:17px;height:17px;padding:0;font-size:14px;line-height:1;display:flex;position:absolute;top:3px;right:3px}.remove-asset:hover{background:#e2ebda}.empty-patterns{color:#9aaa91;background:#fafcf7;border:1px dashed #d8e2d1;border-radius:8px;flex-direction:column;align-items:center;gap:6px;width:100%;margin-top:13px;padding:18px 8px;display:flex}.empty-patterns span{font-size:10px}.empty-patterns small{color:#b0baaa;font-size:9px}.template-grid{grid-template-columns:1fr 1fr;gap:9px;display:grid}.template-card{background:#fff;border:1px solid #e2e8df;border-radius:7px;min-width:0;padding:6px;position:relative;overflow:hidden}.template-card img{object-fit:cover;opacity:.85;border-radius:3px;width:100%;height:42px}.template-card>span{color:#82927d;justify-content:center;align-items:center;gap:6px;padding:6px 0 2px;font-size:11px;display:flex}.template-card.selected{background:#fbfcf8;border-color:#648666;box-shadow:inset 0 0 0 1px #648666}.template-card.selected>span{color:#3d6546;font-weight:600}.template-card:hover:not(:disabled){border-color:#719774}.background-selected{background:#f4f7ee;border:1px solid #e3e9db;border-radius:7px;align-items:center;gap:10px;margin-top:12px;padding:9px;display:flex}.background-selected img{object-fit:cover;border-radius:4px;width:39px;height:34px}.background-selected>div{flex:1;min-width:0}.background-selected strong{white-space:nowrap;text-overflow:ellipsis;font-size:11px;font-weight:500;display:block;overflow:hidden}.background-selected small{color:#95a28d;margin-top:2px;font-size:9px;display:block}.background-selected>svg{color:#799371}.empty-background{color:#a3ac9c;text-align:center;padding:17px 4px 0;font-size:10px}.background-section .microcopy{margin-top:9px}.selection-warning{color:#aa8650;background:#fff6e8;border-radius:7px;margin:0 15px 18px;padding:10px;font-size:11px;line-height:1.8}.center-column{flex-direction:column;gap:17px;min-width:0;display:flex}.preview-panel{padding-bottom:22px}.preview-panel .panel-heading{padding:22px 24px 20px}.state-pill{color:#7c9672;white-space:nowrap;background:#f1f6ec;border-radius:5px;align-items:center;gap:5px;padding:5px 8px;font-size:9px;display:inline-flex}.state-pill.working{color:#a58c55;background:#f6f2e6}.state-pill.working .status-dot{background:#bfa363}.preview-stage{background-color:#f5f7ef;background-image:linear-gradient(#e7ebdf55 5%,#eff2e700 5%),linear-gradient(90deg,#eff2e700 95%,#e7ebdf55 95%);background-position:0 0;background-repeat:repeat;background-size:20px 20px;background-attachment:scroll;background-origin:padding-box;background-clip:border-box;border:1px solid #e6eadd;border-radius:10px;flex-direction:column;min-height:330px;margin:0 23px;display:flex;position:relative;overflow:hidden}.stage-topline,.stage-bottomline{color:#a4b095;justify-content:space-between;align-items:center;padding:14px 15px;font-size:9px;display:flex}.stage-topline>span:first-child{color:#899f79;font-size:10px}.stage-bottomline{letter-spacing:1px;margin-top:auto;font-size:8px}.stage-bottomline>span:first-child{letter-spacing:.2px}.preview-stage.is-filled{min-height:0}.ribbon-display{scrollbar-width:thin;scrollbar-color:#cfd8c2 transparent;flex:1;align-items:center;min-height:0;padding:18px 0;display:flex;overflow:auto hidden}.ribbon-display::-webkit-scrollbar{height:6px}.ribbon-display::-webkit-scrollbar-thumb{background:#cfd8c2;border-radius:3px}.ribbon-display img{border-radius:2px;flex:none;display:block;box-shadow:0 7px 12px #3351350a}.ribbon-display.detail img{width:auto;max-width:none;height:168px}.ribbon-display.fit img{width:100%;height:auto;max-height:none}.ribbon-tools{color:#94a385;align-items:center;gap:12px;padding:0 15px 14px;font-size:10px;display:flex}.ribbon-zoom{border:1px solid #dfe5d5;border-radius:6px;flex:none;display:inline-flex;overflow:hidden}.ribbon-zoom button{color:#7d8f6f;cursor:pointer;background:#fff;border:0;padding:4px 10px;font-size:10px}.ribbon-zoom button.is-active{color:#4e6343;background:#eef2e6;font-weight:500}.ribbon-metrics{font-variant-numeric:tabular-nums;letter-spacing:.2px;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}.ribbon-hint{white-space:nowrap;color:#b0bc9f;margin-left:auto}.preview-stage.is-empty{min-height:330px}.empty-canvas{text-align:center;flex-direction:column;flex:1;justify-content:center;align-items:center;padding:10px 15px 15px;display:flex}.empty-symbol{color:#98ad7f;background:#e9efdf;border-radius:18px;justify-content:center;align-items:center;width:56px;height:56px;margin-bottom:12px;display:flex}.empty-canvas h3{color:#839575;font-size:14px;font-weight:500}.empty-canvas p{color:#a6b09a;margin-top:7px;font-size:10px;line-height:1.9}.template-peek{color:#a1af90;border-top:1px solid #e2e9d9;align-items:center;gap:8px;margin-top:15px;padding-top:12px;font-size:9px;display:flex}.template-peek img{object-fit:cover;opacity:.65;border-radius:3px;width:85px;height:24px}.processing-overlay{-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);background:#f8faf1d9;flex-direction:column;justify-content:center;align-items:center;gap:10px;display:flex;position:absolute;inset:0}.processing-overlay strong{font-size:13px;font-weight:500}.processing-overlay>span:last-child{color:#91a086;font-size:10px}.preview-caption{color:#a4af9a;justify-content:space-between;align-items:center;padding:11px 24px 0;font-size:9px;display:flex}.preview-caption>span:first-child{align-items:center;gap:5px;display:flex}.result-actions{grid-template-columns:1fr 1fr;gap:12px;padding:19px 23px 0;display:grid}.result-actions .primary,.result-actions .secondary{padding:12px 8px;font-size:12px}.generate-area{padding:20px 23px 0}.generate-area>.primary{font-size:13px}.generate-area>.primary svg:last-child{margin-left:auto}.generate-area>.primary svg:first-child{margin-right:auto}.generate-area>small{text-align:center;color:#9eaa94;padding-top:10px;font-size:10px;display:block}.history-hint{color:#9caa90;padding:12px 24px 0;font-size:10px}.history-hint button{color:#507644;background:0 0;border:0;padding:0 0 0 5px;font-size:10px;text-decoration:underline}.history-panel{padding:20px 22px 21px}.history-heading{justify-content:space-between;align-items:center;gap:7px;margin-bottom:16px;display:flex}.history-heading h3{font-size:13px}.history-heading>span{color:#a9b19f;font-size:9px}.version-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;display:grid}.version-card{text-align:left;background:#fff;border:1px solid #e5eadf;border-radius:8px;min-width:0;padding:8px}.version-card.selected{background:#fcfdf9;border-color:#7a9969;box-shadow:inset 0 0 0 1px #7a9969}.version-card>img{object-fit:cover;background:#f4f6ed;border-radius:3px;width:100%;height:46px}.version-card>div{justify-content:space-between;align-items:center;gap:5px;margin-top:8px;display:flex}.version-card strong{font-size:11px;font-weight:500}.version-card>div>small{color:#a9b19d;font-size:9px}.version-card .tiny-pill{padding:1px 5px;font-size:8px}.version-parent{white-space:nowrap;text-overflow:ellipsis;color:#a8b29c;margin-top:5px;font-size:8px;display:block;overflow:hidden}.empty-history{color:#aab69f;justify-content:center;align-items:center;gap:12px;min-height:63px;font-size:10px;display:flex}.history-line{background:#e2e9d9;width:25px;height:1px}.handoff-note{color:#9baa92;align-items:center;gap:11px;padding:1px 9px;display:flex}.note-icon{color:#94a681;background:#eaf0e2;border-radius:50%;flex-shrink:0;justify-content:center;align-items:center;width:34px;height:34px;display:flex}.handoff-note strong{color:#91a180;font-size:10px;font-weight:500;display:block}.handoff-note span:not(.note-icon){margin-top:2px;font-size:9px;display:block}.refinement-panel .panel-heading{padding:22px 22px 21px}.quota-card{background:#edf3e5;border:1px solid #e6eddc;border-radius:9px;margin:0 21px;padding:15px 17px 12px}.quota-card>div:first-child{justify-content:space-between;align-items:center;display:flex}.quota-card>div:first-child>span{color:#749263;font-size:11px}.quota-card strong{color:#547944;font-size:27px;font-weight:500;line-height:1}.quota-card strong small{color:#a1b48d;font-size:12px;font-weight:400}.quota-dots{gap:5px;margin-top:13px;display:flex}.quota-dots>span{background:#dfe8d5;border-radius:2px;flex:1;height:3px}.quota-dots>span.available{background:#9fbb83}.quota-card.exhausted{background:#f2f1eb;border-color:#eae8de}.refinement-body{padding:24px 21px 18px}.refinement-body>label{font-size:13px;font-weight:600}.refinement-body>p{color:#a0ac95;margin:7px 0 14px;font-size:10px;line-height:1.9}.refinement-body textarea{resize:vertical;background:#fcfdf9;border-color:#e2e9da;border-radius:8px;min-height:150px;padding:13px;font-size:11px;line-height:2.1}.refinement-body textarea::placeholder{color:#b1bba6}.refinement-body textarea:disabled{background:#f8faf4}.text-limit{text-align:right;color:#aeb9a1;margin-top:4px;font-size:8px}.suggestions{flex-direction:column;align-items:start;gap:6px;margin-top:15px;display:flex}.suggestions>span{color:#a6b099;margin-bottom:2px;font-size:9px}.suggestions>button{color:#97a587;text-align:left;background:#fcfdf9;border:1px solid #e8eddf;border-radius:5px;justify-content:space-between;align-items:center;gap:4px;width:100%;padding:6px 8px;font-size:9px;display:flex}.suggestions>button:hover:not(:disabled){color:#52753f;background:#f0f5e7;border-color:#bace9d}.refine-button{margin-top:22px;font-size:12px}.refinement-body p.refine-help{text-align:center;color:#a9b39c;margin:10px 0 0;font-size:9px;line-height:1.8}.refine-footer{background:#fdfefb;border-top:1px solid #edf0e7;padding:20px 22px}.refine-footer>div{color:#93a380;align-items:center;gap:6px;display:flex}.refine-footer strong{font-size:10px;font-weight:500}.refine-footer p{color:#a6b199;margin-top:7px;font-size:9px;line-height:1.9}.refine-footer .test-limit{color:#a8a88b;border-top:1px dashed #e7eddf;padding-top:10px}.page-footer{color:#b2bba7;justify-content:space-between;align-items:center;margin-top:29px;font-size:9px;display:flex}.page-footer>span:first-child{letter-spacing:1px}.page-footer>span:nth-child(2){letter-spacing:2px}.modal-scrim{-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);z-index:20;background:#16392a55;justify-content:center;align-items:center;padding:24px;display:flex;position:fixed;inset:0}.modal{background:#fff;border-radius:18px;width:520px;max-width:100%;max-height:90vh;padding:27px 30px;overflow:auto;box-shadow:0 20px 80px #142f2733}.modal-wide{width:840px}.modal-heading{justify-content:space-between;align-items:center;margin-bottom:25px;display:flex}.modal-heading h2{margin-top:5px;font-size:23px}.modal-heading .eyebrow{font-size:8px}.modal-footer{border-top:1px solid var(--line);justify-content:space-between;align-items:center;gap:15px;margin-top:22px;padding-top:20px;display:flex}.modal-footer>span{color:#8fa180;font-size:11px}.modal-footer>.primary{padding:10px 17px;font-size:12px}.library-toolbar{gap:12px;display:flex}.library-toolbar>input{flex:1;font-size:12px}.upload-label{cursor:pointer;font-size:12px}.upload-label.disabled{opacity:.5;pointer-events:none}.checkbox-line{color:#859775;align-items:center;gap:8px;margin:12px 0;font-size:11px;display:flex!important}.library-note{margin:15px 0;font-size:11px}.library-grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:15px;display:grid}.library-card{text-align:left;background:#fff;border:1px solid #e2e9da;border-radius:9px;width:100%;padding:7px;overflow:hidden}.library-card.selected{background:#fafcf6;border-color:#7b9a67;box-shadow:inset 0 0 0 1px #7b9a67}.library-image{background-color:#f7f9f1;border-radius:5px;justify-content:center;align-items:center;height:100px;display:flex;position:relative}.library-image img{object-fit:contain;width:100%;max-height:100%;padding:8px}.library-image:not(.checker) img{object-fit:cover;height:100%;padding:0}.check-mark{color:#fff;background:#3b6c41;border-radius:50%;justify-content:center;align-items:center;width:20px;height:20px;display:flex;position:absolute;top:6px;right:6px}.library-card strong{text-overflow:ellipsis;white-space:nowrap;margin:9px 4px 4px;font-size:12px;font-weight:500;display:block;overflow:hidden}.library-card>span{color:#a0ad92;margin:0 4px 5px;font-size:9px;display:block}.hide-asset{color:#a5af9c;background:0 0;border:0;padding:5px 3px;font-size:9px}.hide-asset:hover{color:#a2765c}.empty-library{text-align:center;color:#9fae91;padding:45px 10px;font-size:12px}.design-library{flex-direction:column;gap:10px;display:flex}.design-list-item{text-align:left;background:#fff;border:1px solid #e4eadc;border-radius:9px;align-items:center;gap:15px;padding:15px;display:flex}.design-list-item.selected{background:#f6f9ef;border-color:#afc299}.design-list-item>div{flex:1}.design-list-item strong{font-size:13px;font-weight:500;display:block}.design-list-item small{color:#a0ae90;margin-top:4px;font-size:10px;display:block}.design-list-icon{color:#95ae79;background:#edf3e4;border-radius:10px;justify-content:center;align-items:center;width:42px;height:42px;display:flex}.design-list-item>svg{color:#a5b890}.admin-tabs{border-bottom:1px solid #e5eadf;gap:8px;margin-bottom:18px;padding-bottom:15px;display:flex}.admin-tabs button{color:#899a7b;background:0 0;border:0;border-radius:7px;padding:9px 15px;font-size:12px}.admin-tabs button.active{color:#50713a;background:#eaf2df}.admin-intro{color:#91a17f;justify-content:space-between;align-items:center;margin-bottom:16px;font-size:12px;display:flex}.table-scroll{max-height:450px;overflow:auto}.table-scroll table{border-collapse:collapse;width:100%;font-size:11px}.table-scroll th{text-align:left;color:#95a582;white-space:nowrap;background:#f5f8ed;font-size:10px;font-weight:500}.table-scroll th,.table-scroll td{border-bottom:1px solid #e9efdf;padding:12px 10px}.table-scroll td{word-break:break-word;color:#7e936a;max-width:240px}.table-scroll td strong{font-size:10px;font-weight:500;display:block}.table-scroll td small{color:#a2b48c;margin-top:4px;font-size:9px;display:block}.job-status{background:#f3f4ec;border-radius:4px;padding:3px 5px;font-size:9px}.job-status.succeeded{background:#ebf3e0}.job-status.failed{color:#a88463;background:#fff1e6}.admin-columns{grid-template-columns:1fr 1fr;gap:28px;display:grid}.admin-columns h3{margin-bottom:14px}.admin-form label{color:#849970;margin-bottom:15px;font-size:11px;display:block}.admin-form label input,.admin-form label select,.admin-form label textarea{margin-top:6px;font-size:12px}.admin-form>small{color:#a0b18a;margin-top:-8px;margin-bottom:15px;font-size:9px;display:block}.admin-form>.primary{width:100%;margin-top:12px;font-size:12px}.admin-form>.text-button{justify-content:center;width:100%;margin-top:7px;font-size:10px}.admin-form .checkbox-line input{margin:0}.code-input{font-family:Consolas,monospace}.admin-existing{max-height:530px;overflow:auto}.admin-template{text-align:left;background:#fff;border:1px solid #e4ecd9;border-radius:7px;align-items:center;gap:10px;width:100%;margin-bottom:9px;padding:9px;display:flex}.admin-template.selected{background:#f5f9ec;border-color:#acc58d}.admin-template img{object-fit:cover;border-radius:4px;width:87px;height:35px}.admin-template>div{flex:1}.admin-template strong{font-size:11px;font-weight:500;display:block}.admin-template small{color:#a4b58e;margin-top:3px;font-size:9px;display:block}.admin-template>svg{color:#a5b58e}.profile-item{border:1px solid #e6eddb;border-radius:8px;margin-top:10px;padding:13px 10px}.profile-item strong{justify-content:space-between;align-items:center;gap:7px;font-size:12px;font-weight:500;display:flex}.profile-item small,.profile-item>span{color:#a1b28a;margin-top:5px;font-size:10px;display:block}.form-two{grid-template-columns:1fr 1fr;gap:12px;display:grid}.admin-intro+.table-scroll+.microcopy{margin-top:15px}.login-page{grid-template-columns:1.1fr 1fr;min-height:100vh;display:grid}.login-illustration{background:#edf2e5;flex-direction:column;justify-content:space-between;padding:50px 9%;display:flex;position:relative;overflow:hidden}.login-illustration>div:nth-child(2){margin:60px 0 30px}.login-illustration h1{letter-spacing:1px;color:#385b36;margin:17px 0 20px;font-size:49px;font-weight:550;line-height:1.5}.login-illustration p{color:#92a77f;font-size:13px;line-height:2.1}.login-illustration .eyebrow{color:#8da478;letter-spacing:1px;font-size:11px}.decorative-ribbon{background:#dce9ca;border-top:1px solid #cfdfbd;border-bottom:1px solid #cfdfbd;justify-content:space-around;align-items:center;gap:20px;width:140%;margin-left:-20%;padding:28px 23px;display:flex;transform:rotate(-8deg);box-shadow:0 15px 30px #6e855518}.decorative-ribbon span{color:#9caf76;font-size:45px}.decorative-ribbon span:nth-child(3n+1){color:#d3aa7d;font-size:54px}.decorative-ribbon span:nth-child(3n+2){color:#cebf7c}.login-illustration>small{letter-spacing:3px;color:#a3b58f;margin-top:60px;font-size:9px}.login-form-wrap{background:#fff;justify-content:center;align-items:center;padding:40px;display:flex}.login-form{width:350px;max-width:100%}.login-form>h2{margin:9px 0 12px;font-size:27px}.login-form>.muted{margin-bottom:30px;font-size:12px}.login-form>label{color:#6e8563;margin-bottom:19px;font-size:12px;display:block}.login-form>label>input{margin-top:8px;padding:12px 14px}.login-form>.primary{justify-content:space-between;margin-top:10px}.login-demo{color:#a0af91;border-top:1px solid #e9efdf;margin-top:30px;padding-top:20px;font-size:11px}.login-demo strong{margin-bottom:8px;font-size:10px;font-weight:500;display:block}.login-demo span{margin:3px 0;font-size:10px;display:block}.login-demo small{color:#b0bda3;margin-top:12px;font-size:9px;display:block}@media (width>=1500px){.workspace-grid{grid-template-columns:315px minmax(480px,1fr) 310px;gap:24px}.source-section{padding:23px}.preview-stage{min-height:380px}.refinement-body textarea{min-height:185px}.template-card img{height:48px}.empty-canvas{min-height:280px}.panel-heading{padding-top:25px}.preview-stage.is-empty{min-height:380px}}@media (width<=1200px){.workspace-grid{grid-template-columns:260px minmax(300px,1fr) 255px;gap:14px}.app-shell main{padding:25px 2.5% 20px}.topbar{padding:0 2.5%}.source-section{padding:20px 17px}.panel-heading,.refinement-panel .panel-heading{padding-left:18px;padding-right:18px}.quota-card{margin-left:17px;margin-right:17px}.refinement-body{padding-left:17px;padding-right:17px}.preview-panel .panel-heading{padding:22px 17px 19px}.preview-stage{margin:0 17px}.result-actions{padding-left:17px;padding-right:17px}.panel-heading h2{max-width:190px;font-size:15px}.preview-stage{min-height:310px}.state-pill{font-size:8px}.stage-topline,.stage-bottomline{padding:11px}.refine-footer{padding:18px}.preview-caption{padding-left:17px;padding-right:17px}.history-panel{padding:18px 16px}.history-heading>span{font-size:8px}.template-card>span{font-size:10px}.selected-patterns{gap:7px}.pattern-tile .checker{height:59px;padding:7px}.template-card img{height:38px}.source-section .section-label>span{font-size:9px}.brand strong{font-size:18px}}@media (width<=1000px){.workspace-grid{grid-template-columns:250px minmax(360px,1fr);gap:18px}.refinement-panel{grid-area:2/2}.source-panel{grid-row:span 2}.center-column{grid-column:2}.refinement-panel .refinement-body{grid-template-columns:1fr 1fr;column-gap:15px;display:grid}.refinement-body>label,.refinement-body>p,.refinement-body textarea,.refinement-body>.text-limit{grid-column:1/-1}.refinement-body .suggestions{grid-column:1}.refinement-body>.refine-button{grid-area:5/2;align-self:center;height:45px}.refinement-body>.refine-help{grid-area:6/2}.refinement-body textarea{min-height:100px}.refinement-panel .panel-heading{padding-bottom:15px}.quota-card{padding:12px 17px}.quota-card>div:first-child>span{font-size:12px}.quota-dots{margin-top:8px}.refine-footer{padding:15px 20px}.refine-footer .test-limit{margin-top:7px}.environment-strip>div>span:last-child{display:none}.workspace-title h1{font-size:23px}.page-footer>span:nth-child(2){display:none}.login-illustration h1{font-size:38px}}@media (width<=700px){.topbar{height:70px;padding:0 18px}.brand strong{font-size:16px}.brand small{letter-spacing:1.5px;font-size:6px}.brand-icon svg{width:20px}.version-tag{display:none}.header-actions{gap:5px}.header-actions>.text-button{gap:0;padding:8px;font-size:0}.header-actions>.text-button .count,.header-divider,.user-name{display:none}.avatar{width:25px;height:25px;margin-left:5px}.app-shell main{padding:22px 16px 18px}.workspace-title{align-items:start;gap:10px}.workspace-title h1{margin:7px 0;font-size:21px;line-height:1.6}.workspace-title p{max-width:240px;font-size:10px;line-height:1.8}.workspace-title .eyebrow{font-size:8px}.workspace-title>.secondary{gap:0;margin-top:20px;padding:10px;font-size:0}.workspace-grid{grid-template-columns:1fr;gap:17px}.source-panel,.center-column,.refinement-panel{grid-area:auto/1}.source-panel{overflow:visible}.source-section{padding:18px}.source-panel .panel-heading{padding:20px 18px 0}.source-section:first-of-type .two-actions{max-width:300px}.selected-patterns{flex-wrap:wrap;gap:10px;display:flex}.pattern-tile{width:65px}.empty-patterns{padding:12px}.template-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}.template-card img{height:34px}.template-card>span{font-size:10px}.template-card{padding:5px}.environment-strip{gap:7px;padding:9px 10px;font-size:9px}.environment-strip strong{font-size:9px}.outline-pill{padding:3px 5px;font-size:8px}.environment-strip>div{gap:6px}.background-section .two-actions,.background-selected{max-width:300px}.preview-stage{min-height:285px}.preview-stage.is-empty{min-height:300px}.preview-panel .panel-heading h2{max-width:225px}.history-panel{padding:20px 18px}.refinement-panel .refinement-body{display:block}.refinement-body textarea{min-height:130px}.suggestions{display:flex}.suggestions>button,.refine-footer p{font-size:10px}.page-footer{gap:12px;font-size:8px}.modal-scrim{padding:10px}.modal{border-radius:12px;max-height:94vh;padding:22px 18px}.modal-heading{margin-bottom:20px}.modal-heading h2{font-size:21px}.library-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.library-image{height:80px}.library-card strong{font-size:10px}.library-card>span{font-size:8px}.library-toolbar{gap:7px}.upload-label{padding:10px;font-size:10px}.library-toolbar input{min-width:0;font-size:11px}.modal-footer{gap:10px}.modal-footer>span{font-size:10px}.modal-footer>.primary{padding:10px 12px;font-size:11px}.admin-columns{grid-template-columns:1fr}.admin-existing{max-height:240px}.login-page{flex-direction:column;min-height:100vh;display:flex}.login-illustration{min-height:320px;padding:25px 30px 30px}.login-illustration>div:nth-child(2){margin:30px 0 0}.login-illustration h1{margin:10px 0 14px;font-size:30px;line-height:1.4}.login-illustration h1 br{display:none}.login-illustration p{font-size:11px}.decorative-ribbon,.login-illustration>small{display:none}.login-form-wrap{flex:1;padding:35px 30px 40px}.login-form>h2{font-size:24px}.login-form>.eyebrow{font-size:8px}.login-demo{margin-top:23px}.notice{font-size:11px}}@media (prefers-reduced-motion:reduce){*{transition:none!important;animation-duration:.01ms!important}}@container (width<=950px){.workspace-grid{grid-template-columns:250px minmax(0,1fr);gap:16px}.source-panel{grid-row:span 2}.center-column{grid-column:2}.refinement-panel{grid-area:2/2}.refinement-body textarea{min-height:120px}.topbar{flex-wrap:wrap;gap:12px}.workspace-title h1{font-size:22px}}@container (width<=700px){.workspace-grid{grid-template-columns:minmax(0,1fr)}.source-panel,.center-column,.refinement-panel{grid-area:auto/1}.topbar,.app-shell main{padding:14px}.workspace-title,.environment-strip{flex-wrap:wrap}.header-actions>.text-button{gap:5px;font-size:12px}.workspace-title>.secondary{margin-top:0;font-size:12px}}.template-option{flex-direction:column;gap:3px;min-width:0;display:flex}.template-option>.template-card{width:100%}.more-layouts{border-top:1px solid var(--line);margin-top:12px}.more-layouts-toggle{color:#345e45;background:0 0;border:0;justify-content:space-between;align-items:center;width:100%;min-height:40px;padding:9px 2px;font-size:13px;font-weight:600;display:flex}.more-layouts-toggle:hover{background:#edf3e9}.chosen-layout{justify-content:space-between;align-items:center;gap:8px;margin-top:8px;font-size:12px;display:flex}.chosen-layout .template-example-button{font-size:11px}.layout-picker-modal,.asset-library-modal,.design-library-modal{flex-direction:column;max-height:calc(100dvh - 48px);display:flex;overflow:hidden}.layout-picker-modal>.modal-heading,.asset-library-modal>.modal-heading,.design-library-modal>.modal-heading,.asset-library-modal>.library-toolbar,.asset-library-modal>.library-note,.asset-library-modal>.checkbox-line,.layout-picker-modal>.library-note,.layout-picker-modal>.modal-footer,.asset-library-modal>.modal-footer,.design-library-modal>.modal-footer{flex-shrink:0}.layout-picker-grid.template-grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;min-height:0;padding:3px;overflow:auto}.asset-library-modal>.library-grid,.design-library-modal>.design-library{min-height:0;padding:3px;overflow:auto}.library-pagination{color:#526a5d;flex-shrink:0;justify-content:space-between;align-items:center;gap:12px;padding-top:16px;font-size:12px;display:flex}.design-loading{gap:12px}.preview-panel>.result-actions,.preview-panel>.generate-area{padding-top:0;padding-bottom:16px}.ai-draft-options{color:#3d5a43;background:#f7faf3;border:1px solid #e1e9da;border-radius:7px;margin-top:12px;padding:10px 12px;font-size:12px}.ai-draft-options>label{align-items:center;gap:8px;font-weight:600;display:flex}.ai-draft-options input{accent-color:#3b6c41;width:auto;margin:0}.ai-draft-options p{color:#65765f;margin:7px 0 0;font-size:11px;line-height:1.7}.ai-draft-reference{flex-wrap:wrap;align-items:center;gap:8px;margin-top:7px;font-size:11px;display:flex}.ai-draft-reference button,.ai-reference-picker{color:#345e45;text-underline-offset:3px;background:0 0;border:0;padding:4px 0;font-size:11px;text-decoration:underline}.ai-reference-picker{margin-top:5px}.layout-reference-help{color:#526a5d;margin-top:12px;font-size:13px;line-height:1.8}.choose-ai-reference{margin-top:14px;font-size:13px}.design-list-row{align-items:center;gap:10px;display:flex}.design-list-row>.design-list-item{flex:1;min-width:0}.design-list-item>div{min-width:0}.design-list-item strong{overflow-wrap:anywhere}.design-list-tabs{flex-shrink:0;gap:10px;padding-bottom:16px;display:flex}.design-list-tabs>button{border:1px solid var(--line);color:#526a5d;background:#fff;border-radius:6px;padding:8px 16px}.design-list-tabs>button.selected{color:#345e45;background:#edf3e9;border-color:#afc299}.delete-design-button{color:#965246;background:0 0;border:1px solid #eadbd7;border-radius:6px;flex-shrink:0;padding:9px 12px}.delete-design-confirm{color:#724638;background:#fff8f3;border:1px solid #e9d7cb;border-radius:8px;flex-shrink:0;margin-bottom:15px;padding:14px;font-size:13px}.delete-design-confirm>div{justify-content:flex-end;gap:10px;margin-top:12px;display:flex}.danger-button{color:#fff;background:#9e4634;border:1px solid #9e4634;border-radius:6px;padding:8px 14px;font-size:12px}@media (width<=700px){.layout-picker-grid.template-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.library-pagination{gap:6px;font-size:11px}.library-pagination .secondary{padding:8px}}.layout-selection-help,.layout-selection-issue{margin-top:12px;font-size:12px;line-height:1.7}.layout-selection-help{color:#526a5d}.layout-selection-issue{color:#9e4634}.template-rules-help{color:#526a5d;font-size:12px;line-height:1.7;display:block}.template-example-button,.template-examples-all{color:#345e45;text-underline-offset:3px;background:0 0;border:0;font-size:12px;font-weight:500;line-height:1.5;text-decoration:underline}.template-example-button{min-height:30px;padding:4px 6px}.template-examples-all{padding:4px 0 4px 8px}.template-example-button:hover,.template-examples-all:hover{color:#193f29;background:#edf3e9}.template-example-button:focus-visible,.template-examples-all:focus-visible{outline-offset:2px;outline:2px solid #507857}.layout-examples-modal{width:1160px}.layout-examples-modal .modal-heading{z-index:2;background:#fff;margin-top:-12px;margin-bottom:14px;padding-top:12px;padding-bottom:12px;position:sticky;top:-27px}.layout-examples-intro{margin-bottom:22px}.layout-mode-summary{color:#284a36;margin:0 0 8px;font-size:16px;line-height:1.65}.layout-mode-note{color:#455b49;background:#f2f6ee;border-left:3px solid #90a77f;margin:8px 0 12px;padding:10px 13px;font-size:14px;line-height:1.7}.layout-examples-tools{flex-wrap:wrap;align-items:center;gap:14px;display:flex}.layout-examples-tools>button{min-height:34px;font-size:13px}.layout-examples-loading,.layout-examples-error{color:#37513d;flex-wrap:wrap;align-items:center;gap:14px;min-height:140px;display:flex}.layout-examples-error{padding:20px 0;display:block}.layout-examples-error>p{margin:0 0 16px;font-size:15px;line-height:1.7}.layout-examples-list{flex-direction:column;gap:22px;display:flex}.layout-example{border-top:1px solid #dbe5d7;min-width:0;padding-top:18px}.layout-example-heading{flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:12px;display:flex}.layout-example-heading h3{color:#284a36;margin:0;font-size:19px;line-height:1.5}.layout-example-heading>div{flex-wrap:wrap;align-items:center;gap:12px;display:flex}.layout-example-code{color:#50624d;font-variant-numeric:tabular-nums;font-size:13px}.layout-reference-tag{color:#6b5828;background:#f4f1e6;border-radius:4px;padding:3px 7px;font-size:12px}.layout-example-description{color:#304f3a;margin:8px 0 0;font-size:15px;line-height:1.7}.layout-example-image-tools{align-items:center;gap:12px;min-height:38px;display:flex}.layout-example-image-tools>button{color:#335c40;min-height:34px;padding:5px 0;font-size:13px}.layout-example-image-tools>span{color:#53644d;font-size:12px}.layout-example-viewport{background:#f7f9f5;border:1px solid #e3e9df;border-radius:5px;overflow:auto hidden}.layout-example-viewport>img{width:100%;max-width:none;height:auto;display:block}.layout-example-viewport.is-zoomed>img{width:max(100%, var(--example-width))}.layout-example-viewport:focus-visible{outline-offset:3px;outline:2px solid #507857}.layout-example-look{color:#3e5941;margin:10px 0 0;font-size:14px;line-height:1.7}.layout-example-look strong{font-weight:600}.layout-example-reference{color:#6b5828;margin:8px 0 0;font-size:13px;line-height:1.7}.layout-example-unavailable{color:#465d48;background:#f7f9f5;border:1px dashed #b8c7b1;border-radius:5px;margin-top:14px;padding:18px;font-size:14px;line-height:1.7}.layout-example-unavailable p{margin:0}.layout-example-unavailable button{margin-top:12px;font-size:13px}.layout-examples-source{color:#53644d;border-top:1px solid #dbe5d7;margin:20px 0 0;padding-top:14px;font-size:12px;line-height:1.8}.background-prompt-label{color:var(--ink);margin:12px 0 6px;font-size:13px;font-weight:600;display:block}.background-prompt{box-sizing:border-box;border:1px solid var(--line);width:100%;min-height:66px;color:var(--ink);font:inherit;resize:vertical;background:#fff;border-radius:6px;padding:9px 10px;font-size:13px;line-height:1.65;display:block}.background-prompt:focus{outline-offset:2px;outline:2px solid #91a88a}.model-help,.model-edit-boundary{color:#4c634f;font-size:13px;line-height:1.7}.refinement-body .model-edit-boundary{border-left:2px solid #b4c6ab;margin:0 0 12px;padding-left:9px}.model-workflow-help{color:#4c634f;margin-bottom:16px;font-size:13px;line-height:1.7}.model-workflow-help summary{cursor:pointer;font-weight:600}.model-workflow-help p{margin:8px 0 0}@media (width<=600px){.layout-examples-modal .modal-heading{top:-20px}.layout-examples-modal .modal-heading h2{font-size:20px}.layout-mode-summary{font-size:15px}.layout-example-heading h3{font-size:17px}.layout-example-heading{gap:4px}}.background-tone-control{color:#42584b;align-items:center;gap:8px;margin-top:12px;font-size:13px;display:flex}.background-tone-control input[type=checkbox]{accent-color:#386b43;width:16px;height:16px;margin:0}.density-control{align-items:center;gap:12px;margin-top:12px;font-size:13px;display:flex}.density-control select{color:#203c2a;background:#fff;border:1px solid #d7dfd6;border-radius:6px;flex:1;min-width:0;padding:6px 10px}.loop-preview{min-width:0;padding:0 15px 12px}.loop-view-heading{color:#35523d;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:8px;margin:0 0 10px;display:flex}.loop-view-heading strong{font-size:13px;font-weight:600}.loop-view-heading>span{font-variant-numeric:tabular-nums;font-size:10px}.loop-unit-view{justify-content:center;align-items:center;min-height:150px;padding:14px 0;display:flex}.loop-unit-view .target-layer>img{width:auto;max-width:100%;height:auto;max-height:220px;display:block;box-shadow:0 5px 14px #33513514}.loop-continuity{min-width:0;padding:14px 0}.loop-unit-view[hidden],.loop-continuity[hidden]{display:none}.loop-continuity-track{grid-template-columns:repeat(3,minmax(0,1fr));align-items:stretch;display:grid}.loop-repeat{min-width:0;position:relative}.loop-repeat>img{border:0;border-radius:0;width:100%;max-width:none;height:auto;display:block}.loop-continuity-track.show-seams>.loop-repeat+.loop-repeat:before{content:\"\";z-index:1;pointer-events:none;border-left:2px dashed #aa3d4c;width:0;position:absolute;top:-9px;bottom:-9px;left:-1px}.loop-preview-tools{flex-wrap:wrap;align-items:center;gap:14px;padding-top:8px;display:flex}.loop-view-button{color:#305e3d;background:#fff;border:1px solid #bacbb1;border-radius:6px;min-height:32px;padding:6px 10px;font-size:12px}.loop-view-button[aria-pressed=true]{background:#e8f0e2}.loop-seam-toggle{color:#486044;align-items:center;gap:6px;font-size:12px;display:inline-flex}.loop-seam-toggle input{accent-color:#386b43;width:15px;height:15px;margin:0}.loop-preview-note{color:#53664d;margin:9px 0 0;font-size:11px;line-height:1.7}.loop-check{color:#3e5d38;background:#edf4e8;border:1px solid #d5e1ce;border-radius:6px;margin-top:10px;padding:9px 11px;font-size:11px;line-height:1.7}.loop-check>strong{margin-right:9px;font-weight:600;display:inline}.loop-check.needs-review{color:#73552a;background:#fff8e9;border-color:#e7d7b4}.loop-check ul{margin:6px 0 0;padding-left:17px}.loop-check li.error{color:#933f35}.loop-mode-notice{color:#725832;margin-top:8px;font-size:11px;line-height:1.7}.loop-technical-details{color:#53664d;margin-top:9px;font-size:11px;line-height:1.7}.loop-technical-details summary{cursor:pointer;width:fit-content}.loop-technical-details dl{margin:7px 0 0}.loop-technical-details dl>div{gap:12px;display:flex}.loop-technical-details dt{flex:none}.loop-technical-details dd{overflow-wrap:anywhere;margin:0}@media (width<=600px){.loop-preview{padding-left:10px;padding-right:10px}.loop-unit-view{min-height:110px}.loop-unit-view .target-layer>img{max-height:170px}.loop-view-heading{display:block}.loop-view-heading>span{margin-top:3px;display:block}}.target-layer{max-width:100%;position:relative}.target-overlay{pointer-events:none;width:100%;height:100%;position:absolute;inset:0;overflow:hidden}.target-overlay rect{fill:#3c81661f;stroke:#16674d;stroke-width:2px}.optional-layers,.target-picker{padding:12px 0}.optional-layers summary{cursor:pointer;font-weight:600}.optional-layers>div,.target-picker{flex-wrap:wrap;align-items:center;gap:8px;display:flex}.optional-layers>div{margin-top:8px}.target-picker select{flex:1;min-width:0;max-width:100%}.compact-status.environment-strip{color:#485c4d;flex-wrap:wrap;justify-content:flex-start;min-height:0;margin:8px 0;padding:7px 12px}.compact-status.environment-strip span{font-size:12px;display:inline}.workspace-grid{margin-top:12px}.remaining-edits{color:#375646;margin:0 20px 4px;font-size:14px}.refinement-body .target-picker{padding:8px 0}.panel-heading h2{margin:0}.refine-footer p{color:#42584b}@media (width>=850px){.workspace-grid.draft-workspace{grid-template-columns:minmax(232px,300px) minmax(0,1fr)}}.history-panel summary{cursor:pointer;color:#344b3e;font-size:14px;font-weight:600}.suggestions{margin-top:12px}.image-recovery{color:#73552a;background:#fff8e9;flex-direction:column;justify-content:center;align-items:center;gap:8px;min-height:90px;padding:10px;font-size:13px;line-height:1.6;display:flex}.image-recovery [role=button]{cursor:pointer;align-items:center;min-height:32px;display:flex}.image-loading{color:#42584b;padding:3px;font-size:12px;line-height:1.6;display:block}.target-layer .image-loading,.loop-repeat .image-loading{position:absolute;bottom:0;left:0;right:0}.preview-stage{min-height:230px}@media (width>=1100px){.preview-column{align-self:start;position:sticky;top:12px}.refinement-panel{align-self:start}}.workspace-grid{grid-template-columns:220px minmax(0,1fr) 250px;gap:16px}@media (width>=1500px){.workspace-grid{grid-template-columns:230px minmax(0,1fr) 260px;gap:20px}}@container (width>=701px) and (width<=1050px){.workspace-grid{grid-template-rows:max-content max-content minmax(0,1fr);grid-template-columns:220px minmax(0,1fr)}.source-panel{grid-row:1/span 3}.center-column{grid-area:1/2}.refinement-panel{grid-area:2/2}}@container (width>=1051px){.center-column{align-self:start;position:sticky;top:12px}}@container (width<=700px){.workspace-grid,.workspace-grid.draft-workspace{grid-template-columns:minmax(0,1fr)}.source-panel,.center-column,.refinement-panel{grid-area:auto/1}}.library-note,.hide-asset,.library-card>span,.modal-footer>span{color:#42584b}";
 // src/embed.tsx
-function D(e, t) {
+function k(e, t) {
 	let n = e.shadowRoot || e.attachShadow({ mode: "open" }), r = document.createElement("style");
-	r.textContent = Ce;
+	r.textContent = O;
 	let i = document.createElement("div");
 	n.replaceChildren(r, i), m(t);
-	let a = (0, u.createRoot)(i), o = !0, s = "ribbon", c = () => a.render(/* @__PURE__ */ (0, x.jsx)(xe, {
+	let a = (0, u.createRoot)(i), o = !0, s = "ribbon", c = () => a.render(/* @__PURE__ */ (0, x.jsx)(D, {
 		active: o,
 		view: s
 	}));
@@ -11666,4 +11740,4 @@ function D(e, t) {
 		}
 	};
 }
-export { D as mount };
+export { k as mount };

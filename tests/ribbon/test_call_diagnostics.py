@@ -114,3 +114,20 @@ def test_legacy_error_reports_missing_diagnostics(work):
     assert call['diagnostic']['category'] == 'not_recorded'
     assert call['diagnostic']['http_status'] is None
 
+
+def test_persistence_boundary_filters_custom_adapter_error_fields(work):
+    service, _, job, _ = work
+    error = RuntimeError('private-user-data')
+    error.diagnostic = {'category':'parameters','stage':'provider','http_status':422,
+                        'upstream_code':'private-user-data','raw':'private-user-data'}
+    error.request_id = 'sk-' + 'x' * 30
+    error.usage = {'input_tokens':12, 'raw':'private-user-data'}
+    def fail():
+        raise error
+    with pytest.raises(RuntimeError):
+        service.call_provider(job,'plan',fail)
+    with service.db.connect() as db:
+        saved = dict(db.execute('SELECT * FROM provider_calls WHERE job_id=?',(job['id'],)).fetchone())
+    assert 'private-user-data' not in json.dumps(saved) and error.request_id not in json.dumps(saved)
+    assert json.loads(saved['usage_json']) == {'input_tokens':12}
+    assert json.loads(saved['error'])['upstream_code'] is None

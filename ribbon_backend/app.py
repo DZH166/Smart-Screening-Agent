@@ -216,8 +216,8 @@ def create_app(settings: Settings | None = None, *, service: Service | None = No
         return FileResponse(service.verified_template_path(template_id, version), media_type='image/png')
 
     @app.get('/api/designs')
-    def designs(deleted: bool = False, current=Depends(user)):
-        return service.designs(current['id'], deleted=deleted)
+    def designs(deleted: bool = False, summary: bool = False, current=Depends(user)):
+        return service.designs(current['id'], deleted=deleted, summary=summary)
 
     @app.post('/api/designs', status_code=201)
     def create_design(body: DesignCreate, current=Depends(user)):

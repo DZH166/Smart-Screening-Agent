@@ -8,6 +8,35 @@ from ribbon_backend import loop_layout_v2 as engine, loop_pipeline_v2 as pipe
 from ribbon_backend.imaging import render
 
 
+def test_periodic_background_retains_native_horizontal_cycle_without_quilting():
+    from PIL import ImageDraw
+    from ribbon_backend.loop_background import assess_periodicity
+    with Image.new('RGBA', (100, 100), 'white') as source, Image.new('RGBA', (400, 100)) as zone:
+        # No seam at the full source period; 6/7 quilting would truncate stripes.
+        d = ImageDraw.Draw(source)
+        d.rectangle((35, 0, 64, 99), fill='navy')
+        assert assess_periodicity(source)['passed']
+        report = pipe._fill(zone, source, False)
+        assert report['kind'] == 'native_periodic_texture' and report['passed']
+        assert report['tiles'][0]['source_box'] == [0., 0., 100., 100.]
+        for x in range(0, 400, 100):
+            with zone.crop((x, 0, x + 100, 100)) as segment:
+                assert segment.tobytes() == source.tobytes()
+
+
+def test_native_background_does_not_change_foreground_or_hide_bad_source_seams():
+    from PIL import ImageDraw
+    with Image.new('RGBA', (100, 100), 'white') as source, Image.new('RGBA', (403, 100)) as zone:
+        d = ImageDraw.Draw(source)
+        d.rectangle((35, 0, 64, 99), fill='navy')
+        # Nonintegral adjacent tile widths must not be silently stretched.
+        assert pipe._fill(zone, source, False)['kind'] == 'quilted_texture'
+        assert zone.size == (403, 100)
+    with Image.new('RGBA', (100, 100), 'white') as source, Image.new('RGBA', (400, 100)) as zone:
+        ImageDraw.Draw(source).rectangle((0, 0, 15, 99), fill='red')
+        assert pipe._fill(zone, source, False)['kind'] == 'quilted_texture'
+
+
 def snap(mode, density='balanced', **updates):
     n = 1 if mode == 'fullwidth' else 2 if mode == 'ends_open' else 3
     return dict(
@@ -67,6 +96,22 @@ def test_local_translation_changes_only_target_within_original_unit():
             assert new['x'] - old['x'] == pytest.approx(dx if old['asset_index'] == 0 else 0)
     with pytest.raises(ValueError, match='重叠'):
         resolved('single', slot_params={'pattern-1': {'offset_x': -170}})
+
+
+@pytest.mark.parametrize('change', ['zone_colors', 'background_color', 'background_tone'])
+def test_saved_layout_rejects_tampered_visible_background_binding(change):
+    saved = resolved('split')
+    edited = deepcopy(saved)
+    if change == 'zone_colors':
+        edited['zone_colors'] = {'left': '#123456'}
+    elif change == 'background_color':
+        edited.setdefault('params', {})['background_color'] = '#123456'
+    else:
+        edited['background_tone'] = 'soft'
+    with pytest.raises(ValueError, match='保存的排法'):
+        engine.plan(edited)
+    rebound = engine.resolve(edited, specs=saved['loop_layout']['specs'])
+    assert rebound['loop_layout']['input_signature'] != saved['loop_layout']['input_signature']
 
 
 @pytest.mark.parametrize('mode,ratio', [('alternating', 0.58), ('scene', 0.76), ('ends', 0.60)])

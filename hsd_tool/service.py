@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import shutil
+import tempfile
 import threading
 import time
 import uuid
@@ -1356,9 +1357,13 @@ class JobManager:
         payload = json.loads(original)
         payload["timings"] = dict(timings)
         encoded = json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False).encode("utf-8")
-        temporary = path.with_name(".timings-" + uuid.uuid4().hex + ".tmp")
+        # Keep the exclusive sibling short: a valid Windows record path can
+        # exceed MAX_PATH when a 45-character UUID temporary suffix is added.
+        stream = tempfile.NamedTemporaryFile(mode="wb", prefix=".t-", suffix=".tmp",
+                                             dir=path.parent, delete=False)
+        temporary = Path(stream.name)
         try:
-            with temporary.open("xb") as stream:
+            with stream:
                 stream.write(encoded)
                 stream.flush()
                 os.fsync(stream.fileno())

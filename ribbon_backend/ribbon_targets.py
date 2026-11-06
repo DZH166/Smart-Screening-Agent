@@ -70,7 +70,11 @@ def apply_values(snapshot, target, values):
     if target in snapshot.get('pattern_slots', []):
         snapshot.setdefault('slot_params', {}).setdefault(target, {}).update(values)
     elif target.startswith('zone:'):
-        snapshot.setdefault('zone_colors', {})[target[5:]] = values['background_color']
+        colors = snapshot.setdefault('zone_colors', {})
+        if values['background_color'] is None:
+            colors.pop(target[5:], None)
+        else:
+            colors[target[5:]] = values['background_color']
     else:
         snapshot['params'].update(values)
 

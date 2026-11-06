@@ -165,9 +165,17 @@ export async function api<T>(
     headers.set("X-HSD-Token", requestToken());
   if (options.body && !(options.body instanceof FormData))
     headers.set("Content-Type", "application/json");
+  // Reads have a deadline; mutations retain unknown-result/idempotency recovery.
+  const controller = ["GET", "HEAD"].includes(method) ? new AbortController() : null;
+  const abort = () => controller?.abort(options.signal?.reason);
+  if (options.signal?.aborted) abort();
+  else options.signal?.addEventListener("abort", abort, { once: true });
+  const timer = controller ? setTimeout(() => controller.abort(), 15000) : undefined;
+  try {
   const response = await fetch(`/api/ribbon${path}`, {
     ...options,
     headers,
+    signal: controller?.signal || options.signal,
     credentials: "same-origin",
     cache: "no-store",
   });
@@ -185,7 +193,15 @@ export async function api<T>(
     throw new ApiError(message, response.status);
   }
   if (response.status === 204) return undefined as T;
-  return response.json() as Promise<T>;
+  return await response.json() as T;
+  } catch (error) {
+    if (controller?.signal.aborted && !options.signal?.aborted)
+      throw new ApiError("读取超时，请重试。后台任务不会因此重新提交。", 408);
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    options.signal?.removeEventListener("abort", abort);
+  }
 }
 let requestToken: () => string = () => "";
 export function setRequestToken(getToken: () => string) {

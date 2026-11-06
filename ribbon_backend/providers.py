@@ -23,17 +23,17 @@ import urllib.request
 import httpx
 from PIL import Image, ImageDraw
 
-from hsd_tool.provider_diagnostics import MESSAGES, diagnostic, from_http
+from hsd_tool.provider_diagnostics import MESSAGES, diagnostic, from_http, normalize_details, safe_request_id
 from .imaging import MAX_PIXELS, PARAM_DEFAULTS, _save_png, _star_points, read_image, memory_bounded_operation
 
 
 class ProviderError(RuntimeError):
     def __init__(self, message: str, *, request_id: str | None = None, uncertain_result: bool = False, usage=None, details=None):
         super().__init__(message)
-        self.diagnostic = details or diagnostic(
+        self.diagnostic = normalize_details(details) if details else diagnostic(
             "unknown_result" if uncertain_result else "unclassified",
             "transport" if uncertain_result else "prepare")
-        self.request_id = request_id
+        self.request_id = safe_request_id(request_id)
         self.uncertain_result = uncertain_result
         self.usage = _safe_usage(usage)
 
@@ -521,7 +521,7 @@ edit_background (background content only), edit_composite (the entire saved curr
 Parameter bounds: scale .2..2.5, spacing .4..3, rotation -360..360, offset_x +/- output width,
 offset_y +/- output height, background_color #RRGGBB.
 scale is a factor relative to template default; spacing increases gap and reduces density. Use snapshot current values.
-For target_kind=layout, geometry parameters affect ALL motifs; if a request asks for only one motif's position or size, ask the employee to select it. For target_kind=pattern, parameters edit only the selected pattern and all its repeats. Use its geometry metrics and slot limits; refuse a saturated adjustment.
+For target_kind=layout, geometry parameters affect ALL motifs; if a request asks for only one motif's position or size, ask the employee to select it. For target_kind=pattern, parameters edit only the selected pattern and all its repeats. Use actual_geometry.slots[target] measurements and limits; refuse a saturated adjustment. Pattern params are the slot-local transform: rotation and offsets add to the global layout transform, and scale multiplies it. To request an absolute visible orientation, compensate for the measured existing angle rather than echoing an unchanged local zero.
 The selected target is binding. For a pattern use parameters for its placement or edit_asset for content; a border supports edit_asset only. For a selected background use edit_background for texture or background_color for a solid colour. Plan no changes outside the selected target. Only use IDs in asset_refs for edit_asset. Never invent assets or use paths/URLs. Changes of selection are handled separately.
 If composite_ref is set, independent layers no longer exist: only edit_composite is permitted, or request explicit new selection.
 Never mix edit_composite with any other operation. For region editing describe the region and explicit preservation in prompt.
