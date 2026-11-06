@@ -124,6 +124,31 @@ def request_targets(view: dict) -> dict[str, dict]:
     return result
 
 
+def request_effect_targets(view: dict, provider: str) -> dict[str, list[str]]:
+    """Targets available for each effect, not just for any kind of editing."""
+    from .providers import workflow_editing
+    targets, editing = request_targets(view), workflow_editing(provider, view)
+    result = dict(parameters=[], content=[], preserve=list(targets), clarify=list(targets))
+    kind, selected = view.get('target_kind', 'layout'), view.get('target_id', 'layout')
+    if 'parameters' in editing['allowed_operations']:
+        if any(key in _GEOMETRY_KEYS for key in editing['allowed_parameters']):
+            result['parameters'].append(selected)
+        if 'background_color' in editing['allowed_parameters']:
+            target = selected if kind == 'background' else 'background'
+            if target in targets:
+                result['parameters'].append(target)
+    if 'edit_asset' in editing['allowed_operations']:
+        result['content'].extend(target for target, info in targets.items()
+            if info['kind'] in ('pattern', 'border') and not info['preserve_only'] and info.get('asset_id') in view.get('asset_refs', []))
+    if 'edit_background' in editing['allowed_operations']:
+        target = selected if kind == 'background' else 'background'
+        if target in targets:
+            result['content'].append(target)
+    if 'edit_composite' in editing['allowed_operations'] and not targets['layout']['preserve_only']:
+        result['content'].append('layout')
+    return {effect: list(dict.fromkeys(ids)) for effect, ids in result.items()}
+
+
 def _number(value):
     return type(value) in (int, float) and math.isfinite(value)
 
