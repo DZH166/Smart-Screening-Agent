@@ -1357,9 +1357,9 @@ class JobManager:
         payload = json.loads(original)
         payload["timings"] = dict(timings)
         encoded = json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False).encode("utf-8")
-        # Keep the exclusive sibling short: a valid Windows record path can
-        # exceed MAX_PATH when a 45-character UUID temporary suffix is added.
-        stream = tempfile.NamedTemporaryFile(mode="wb", prefix=".t-", suffix=".tmp",
+        # Nine characters, no longer than the record basename: even a valid
+        # record near Windows MAX_PATH must have room for its atomic sibling.
+        stream = tempfile.NamedTemporaryFile(mode="wb", prefix=".", suffix="",
                                              dir=path.parent, delete=False)
         temporary = Path(stream.name)
         try:

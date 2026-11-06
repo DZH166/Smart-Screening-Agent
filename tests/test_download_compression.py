@@ -138,12 +138,13 @@ def test_sampling_only_reads_explicit_white_list_members(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("tamper", [False, True], ids=["long-private-path", "changed-record-rejected"])
-def test_private_timing_rewrite_uses_short_atomic_sibling(tmp_path, monkeypatch, tamper):
+@pytest.mark.parametrize("directory_length", [219, 245])
+def test_private_timing_rewrite_uses_short_atomic_sibling(tmp_path, monkeypatch, tamper, directory_length):
     import hashlib
     import json
     identifier, export_id = "a"*32, "b"*32
     suffix = Path("task_records") / identifier / "export_records" / export_id
-    desired_state_length = 219 - len(str(suffix)) - 1
+    desired_state_length = directory_length - len(str(suffix)) - 1
     padding = desired_state_length - len(str(tmp_path)) - 1
     if padding < 1:
         pytest.skip("test temporary root cannot fit the controlled Windows path budget")
@@ -151,7 +152,7 @@ def test_private_timing_rewrite_uses_short_atomic_sibling(tmp_path, monkeypatch,
     try:
         records = manager.record_directory(identifier, "export_records") / export_id
         records.mkdir()
-        assert len(str(records)) == 219
+        assert len(str(records)) == directory_length
         path = records / "处理记录.json"
         for name, content in (("处理记录.json", b'{"timings": {}}'), ("对应关系.csv", b"map"), ("待处理清单.csv", b"pending")):
             (records/name).write_bytes(content)
