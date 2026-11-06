@@ -1,6 +1,6 @@
 #  HSD 图号助手
 
-独立分支 `codex/ribbon-background-refine` 正把底纹专项扩展为所有丝带精修目标的[原文执行契约](docs/ribbon-refinement-request-v2.md)，尚未合并上线。每条要求必须对应具体目标和操作，图片编辑保留原句，明确参数由程序核对；结果可展开查看本次要求。原[底纹专项记录](docs/ribbon-background-refinement-branch.md)保留为历史验证。
+独立分支 `codex/ribbon-background-refine` 已把底纹专项扩展为所有丝带精修目标的[原文执行契约](docs/ribbon-refinement-request-v2.md)，尚未合并上线。每条要求必须对应具体目标和操作，图片编辑保留原句，明确参数由程序核对；结果可展开查看本次要求。按用户要求保留必要检查，更广的业务矩阵合并前复核；原[底纹专项记录](docs/ribbon-background-refinement-branch.md)保留为历史验证。
 
 当前网站已更新至 `v1.26.0 / 2ac893a1`（2026-11-06）。新版14种排法使用独立旋转、保持主辅比例的整组适配，以及真实可区分的三档密度；左右、上下和三段分区可分别选底纹，上下边饰可选完整边饰条。新作品继续下载一个循环PNG单元，原人物、文字、旧版本及下载均受保护。细节见[排法合同](docs/ribbon-loop-mode-contract.md)。
 
