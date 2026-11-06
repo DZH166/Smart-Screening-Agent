@@ -134,7 +134,10 @@ def test_real_deepseek_payload_disables_thinking_and_identifies_text_only_roles(
         assert context['snapshot']['template_mode'] == 'stacked'
         assert context['snapshot']['editing']['composite_edit'] is False
         assert context['snapshot']['editing']['planner_sees_images'] is False
-        result = model_plan([{'type': 'parameters', 'values': {'scale': .8}}])
+        result = {**model_plan([{'type': 'parameters', 'values': {'scale': .8}, 'source_ids': ['s1'],
+            'intents': [{'key': 'scale', 'mode': 'direction', 'amount': None,
+                         'direction': 'decrease', 'evidence': context['request']}]}]),
+            'requirements': [{'source_id': 's1', 'target_id': 'layout', 'effect': 'parameters'}]}
         raw = json.dumps({'choices': [{'finish_reason': 'stop', 'message': {'content': json.dumps(result)}}],
                           'usage': {'prompt_tokens': 10, 'completion_tokens': 20}}).encode()
         return material_providers.HttpReply(200, raw, {'x-request-id': 'synthetic-live-protocol'}, material_providers.DEEPSEEK_ENDPOINT)

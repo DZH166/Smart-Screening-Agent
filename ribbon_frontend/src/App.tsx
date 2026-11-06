@@ -22,6 +22,7 @@ import {
   type Template,
   type User,
   type Version,
+  type RequestReceipt,
 } from "./api";
 import Admin from "./Admin";
 import LayoutExamples, { type LayoutExamplesCatalog } from "./LayoutExamples";
@@ -368,6 +369,72 @@ function RecoverableImage({src, alt, ...props}: React.ImgHTMLAttributes<HTMLImag
     {failed ? <span className="image-recovery" role="status"><span>{alt || "图片"}加载失败</span><span role="button" tabIndex={0} className="secondary small" onClick={e=>{e.stopPropagation();retry();}} onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();e.stopPropagation();retry();}}}>重新加载图片</span></span> :
     !loaded && props.loading !== "lazy" && <span className="image-loading">图片加载中…</span>}</>;
 }
+function RefinementResult({ version }: { version: Version }) {
+  const raw = version.snapshot.edit_plan?.request_receipt;
+  const fingerprint = JSON.stringify(raw ?? null);
+  const binding = JSON.stringify([version.id,version.prompt,fingerprint]);
+  const [verified,setVerified] = useState<{binding:string;receipt:RequestReceipt}|null>(null);
+  useEffect(() => {
+    let cancelled=false;
+    setVerified(null);
+    if (version.sequence===0 || !version.prompt || !raw ||
+        raw.protocol!=="ribbon-request-v2" || raw.coverage!=="checked" ||
+        raw.verification_scope!=="plan_and_geometry_only" || raw.image_effect_verified!==false ||
+        !/^[0-9a-f]{64}$/.test(raw.source_sha256 || "") || !Array.isArray(raw.requirements) ||
+        !raw.requirements.length || raw.requirements.length>128 || !crypto.subtle) return;
+    const length=Array.from(version.prompt).length, ids=new Set<string>(), sources=new Set<string>();
+    for (const r of raw.requirements) {
+      if (!r || typeof r!=="object" || typeof r.id!=="string" || !r.id || r.id.length>128 || ids.has(r.id) ||
+          typeof r.source_id!=="string" || !r.source_id || r.source_id.length>128 || sources.has(r.source_id) ||
+          typeof r.target!=="string" || !r.target || r.target.length>160 ||
+          !Number.isSafeInteger(r.start) || !Number.isSafeInteger(r.end) ||
+          r.start<0 || r.start>=r.end || r.end>length ||
+          !(r.kind==="preserve" && r.method==="preserve" && r.execution==="constraint_forwarded" ||
+            r.kind==="modify" && (r.method==="parameters" && ["geometry_verified","parameters_applied_unverified"].includes(r.execution) ||
+                                 r.method==="image" && r.execution==="image_generated_unverified"))) return;
+      ids.add(r.id);
+      sources.add(r.source_id);
+    }
+    // The source contract partitions every code point exactly once. Duplicate,
+    // overlapping or missing spans cannot support a checked request label.
+    let cursor=0;
+    for (const r of [...raw.requirements].sort((a,b)=>a.start-b.start)) {
+      if (r.start!==cursor) return;
+      cursor=r.end;
+    }
+    if (cursor!==length) return;
+    void crypto.subtle.digest("SHA-256",new TextEncoder().encode(version.prompt)).then(bytes=>{
+      const digest=Array.from(new Uint8Array(bytes),b=>b.toString(16).padStart(2,"0")).join("");
+      if (!cancelled && digest===raw.source_sha256) setVerified({binding,receipt:raw});
+    }).catch(()=>{/* Unsupported verification stays conservative. */});
+    return ()=>{cancelled=true;};
+  }, [binding]);
+  if (version.sequence === 0) return null;
+  const receipt=verified?.binding===binding ? verified.receipt : null;
+  const modifications=receipt?.requirements.filter(r=>r.kind==="modify") || [];
+  const physicalGeometry=version.snapshot.layout_engine==="seamless-unit-v2";
+  const geometryChecked=physicalGeometry && modifications.length>0 && modifications.every(r=>r.execution==="geometry_verified");
+  const characters=Array.from(version.prompt || "");
+  return <section className="refinement-result" aria-label="本版本精修结果">
+    <p>{geometryChecked ? "参数调整已核对" : "已生成，效果请对照要求"}</p>
+    <details key={version.id}>
+      <summary>查看本次要求</summary>
+      <p className="original-refinement-request">{version.prompt || "此旧版本没有保存修改原文。"}</p>
+      {receipt && <>
+        <ul className="refinement-requirements" aria-label="本次要求处理记录">
+          {receipt.requirements.map(r=><li key={r.id}>
+            <span className="refinement-requirement-status">{r.kind==="preserve" ? "保留要求 · 约束已传递" :
+              r.execution==="geometry_verified" && physicalGeometry ? "参数已核对" :
+              r.method==="parameters" ? "参数已应用，效果需核对" : "已生成 · 效果请对照"}</span>
+            <span>{characters.slice(r.start,r.end).join("")}</span>
+          </li>)}
+        </ul>
+        <p className="refinement-verification-note">{physicalGeometry && modifications.some(r=>r.execution==="geometry_verified") ? "已核对原文引用及参数调整" : "已核对原文引用"}；图片效果仍需对照要求，保留约束已传递给处理流程。</p>
+      </>}
+    </details>
+  </section>;
+}
+
 type Pending = {
   path: string;
   body: Record<string, unknown>;
@@ -1672,6 +1739,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                 </div>
                 {selected ? (
                   <>
+                    <RefinementResult key={selected.id} version={selected} />
                     {(isHistory || selected.provider==="test") && <div className="preview-caption"><span>{isHistory ? "正在查看历史保存版本" : "测试模式结果"}</span></div>}
                     {isHistory && (
                       <div className="history-hint">

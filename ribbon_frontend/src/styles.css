@@ -2447,3 +2447,11 @@ small {
   .source-panel,.center-column,.refinement-panel {grid-column:1;grid-row:auto;}
 }
 .library-note,.hide-asset,.library-card > span,.modal-footer > span {color:#42584b;}
+.refinement-result {margin:12px 18px;color:#344b3e;font-size:13px;line-height:1.7;}
+.refinement-result > p {margin:0 0 4px;}
+.refinement-result summary {cursor:pointer;width:fit-content;color:#305e3d;}
+.original-refinement-request {white-space:pre-wrap;overflow-wrap:anywhere;margin:8px 0;}
+.refinement-requirements {list-style:none;margin:12px 0 0;padding:0;}
+.refinement-requirements li {display:flex;flex-direction:column;gap:3px;border-top:1px solid #e0e7dc;padding:8px 0;white-space:pre-wrap;overflow-wrap:anywhere;}
+.refinement-requirement-status {color:#42584b;font-size:12px;}
+.refinement-verification-note {margin:8px 0 0;color:#42584b;font-size:12px;}
