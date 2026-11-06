@@ -48,7 +48,8 @@ def target_view(snapshot, target):
     if target in slots:
         asset = snapshot['asset_refs'][slots.index(target)]
         view.update(asset_refs=[asset], params={**PARAM_DEFAULTS, **snapshot['slot_params'].get(target, {})},
-                    target_kind='pattern', target_id=target, target_ordinal=slots.index(target)+1)
+                    target_kind='pattern', target_id=target, target_ordinal=slots.index(target)+1,
+                    layout_params=dict(snapshot['params']))
     elif target == 'border' and snapshot.get('border_ref'):
         view.update(asset_refs=[snapshot['border_ref']], target_kind='border', target_id=target)
     elif target == 'background' or target.startswith('zone:') and target[5:] in ZONES.get(snapshot['template_mode'], ()):

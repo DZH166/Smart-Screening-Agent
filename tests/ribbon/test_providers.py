@@ -78,8 +78,12 @@ def test_real_response_validation_and_metadata_no_key(monkeypatch, inputs):
     observed = {}
     def fake_post(endpoint, **kwargs):
         observed.update(endpoint=endpoint, **kwargs)
-        return {"status": "completed", "output": [{"type": "message", "content": [{"type": "output_text", "text":
-                '{"summary":"缩小图案","clarification":null,"operations":[{"type":"parameters","values":{"scale":0.8,"spacing":null,"rotation":null,"offset_x":null,"offset_y":null,"background_color":null}}]}'}]}],
+        wire = dict(summary='缩小图案', clarification=None,
+            requirements=[dict(source_id='s1', target_id='layout', effect='parameters')],
+            operations=[dict(type='parameters', values={'scale': .8}, source_ids=['s1'],
+                intents=[dict(key='scale', mode='direction', amount=None, direction='decrease',
+                              evidence='图案缩小一点')])])
+        return {"status": "completed", "output": [{"type": "message", "content": [{"type": "output_text", "text": json.dumps(wire)}]}],
                 "usage": {"input_tokens": 15, "output_tokens": 40}}, "req-test"
     monkeypatch.setattr(provider, "_post", fake_post)
     plan = provider.plan("图案缩小一点", snapshot, assets)
@@ -184,7 +188,10 @@ def test_combined_plan_shares_pool_and_records_known_usage(tmp_path,inputs,monke
     assets,snapshot=inputs
     snapshot['local_private_path']='DO-NOT-SEND'
     observed=[]
-    plan={'summary':'缩小图案','clarification':None,'operations':[{'type':'parameters','values':{'scale':.8,'spacing':None}}]}
+    plan={'summary':'缩小图案','clarification':None,
+        'requirements':[{'source_id':'s1','target_id':'layout','effect':'parameters'}],
+        'operations':[{'type':'parameters','values':{'scale':.8,'spacing':None},'source_ids':['s1'],
+            'intents':[{'key':'scale','mode':'direction','amount':None,'direction':'decrease','evidence':'图案缩小'}]}]}
     def send(request,**kwargs):
         payload=json.loads(request.data)
         observed.append(payload)

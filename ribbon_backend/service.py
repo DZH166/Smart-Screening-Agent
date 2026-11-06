@@ -1330,15 +1330,27 @@ class Service:
             prompt = payload['prompt']
             target = payload.get('edit_target', 'layout')
             view = target_view(snapshot, target)
+            request_base = copy.deepcopy(snapshot)
             self.phase(job, '正在理解修改要求')
             with self.db.connect() as db:
                 assets = [self.asset_public(self.accessible_asset(db, a, job['owner_id'])) for a in view['asset_refs']]
-            if payload.get('selection') and prompt.strip() in ('应用所选配置', '应用新的素材与排版'):
-                plan = {'operations': [], 'summary': '应用所选配置'}
+            if not needs_provider:
+                plan = {'operations': [], 'summary': '应用所选配置', 'local_selection_only': True}
             else:
                 plan = call_model('plan', lambda: provider.plan(prompt, view, assets))
             selection_changed = self.refinement_selection_changed(job, payload, snapshot)
+            has_contract = isinstance(plan, dict) and ('requirements' in plan or 'request_contract' in plan)
+            if needs_provider and (job['provider'] != 'test' or has_contract):
+                from .request_contract import validate_request_plan
+                plan = validate_request_plan(prompt, view, plan, job['provider'])
+                plan['request_contract']['planned_operations'] = copy.deepcopy(plan['operations'])
             operations = self.effective_edit_operations(job['provider'], view, plan, selection_changed)
+            if needs_provider and not has_contract and job['provider'] == 'test':
+                # Explicit historical test fixtures are not production NLU or
+                # evidence of request coverage. Real providers cannot use it.
+                from .background_edit import background_edit_request
+                operations, request_protection = background_edit_request(prompt, view, operations)
+                plan = {**plan, 'request_protection': request_protection}
             plan = {**plan, 'operations': operations}
             # Validate every independent image source before the first paid
             # image request. A later oversized/unsupported input must not waste
@@ -1346,9 +1358,12 @@ class Service:
             prepared_backgrounds = {}
             trial = copy.deepcopy(snapshot)
             visible_params = dict(view['params'])
+            background_generated = False
             for index, operation in enumerate(operations):
                 kind = operation['type']
                 if kind == 'parameters':
+                    if background_generated and operation['values'].get('background_color') is not None:
+                        raise ClarificationNeeded('后面的纯色设置会盖住本次生成的底纹，请合并底纹要求后再提交；未调用图片模型、未扣精修次数。')
                     if trial.get('layout_engine') == LAYOUT_ENGINE:
                         from .loop_layout_v2 import resolve as geometry_only
                         specs = trial['loop_layout']['specs']
@@ -1361,11 +1376,18 @@ class Service:
                             if remaining:
                                 apply_values(other, target, remaining)
                             check_parameter_effect(geometry_only(other, specs=specs), after, target, {key:value})
+                        if has_contract or job['provider'] != 'test':
+                            from .request_geometry import validate_request_geometry
+                            validate_request_geometry(before, after, operation, target)
                         trial = after
                     visible_params.update(operation['values'])
                 elif kind == 'edit_asset':
-                    provider.validate_edit_input(resolve(operation['asset_id']), 'asset')
+                    prepared = provider.validate_edit_input(resolve(operation['asset_id']), 'asset')
+                    if has_contract or job['provider'] != 'test':
+                        from .request_geometry import validate_request_image_policy
+                        validate_request_image_policy(operation['prompt'], prepared)
                 elif kind == 'edit_background':
+                    background_generated = True
                     if target == 'layout' and snapshot.get('layout_engine') == LAYOUT_ENGINE:
                         target_view(snapshot, 'background')
                     source = resolve(view['background_ref'])
@@ -1380,7 +1402,10 @@ class Service:
                         finally:
                             visible.close()
                         prepared_backgrounds[index] = (source, file_digest(source))
-                    provider.validate_edit_input(source, 'background')
+                    prepared = provider.validate_edit_input(source, 'background')
+                    if has_contract or job['provider'] != 'test':
+                        from .request_geometry import validate_request_image_policy
+                        validate_request_image_policy(operation['prompt'], prepared)
                     visible_params['background_color'] = None
             for index, operation in enumerate(operations):
                 kind = operation.get('type')
@@ -1456,6 +1481,14 @@ class Service:
             # New backgrounds, content proportions and numeric edits can all
             # change the complete period. Never reuse a parent's old width.
             snapshot = prepared_loop(snapshot)
+        if job['kind'] == 'refine' and snapshot.get('edit_plan', {}).get('request_contract'):
+            from .request_contract import public_request_receipt
+            from .request_geometry import validate_request_geometry
+            for operation in snapshot['edit_plan']['operations']:
+                if operation['type'] == 'parameters':
+                    validate_request_geometry(request_base, snapshot, operation, target)
+            snapshot['edit_plan']['request_receipt'] = public_request_receipt(
+                snapshot['edit_plan'], geometry_verified=snapshot.get('layout_engine') == LAYOUT_ENGINE)
         master, preview = directory / 'master.png', directory / 'preview.png'
         try:
             metadata = render(snapshot, resolve, master, preview)
@@ -1489,6 +1522,86 @@ class Service:
         os.replace(temp, manifest)
         with self.db.transaction() as db:
             db.execute("UPDATE jobs SET artifact_json=?,phase='文件已保存，正在提交版本',updated_at=? WHERE id=? AND attempt=? AND status='RUNNING'", (dump(artifact), now(), job['id'], job['attempt']))
+
+    def verify_refinement_request(self, job, artifact):
+        """Recheck immutable request bindings on ordinary commit and recovery."""
+        from .request_contract import validate_request_plan, public_request_receipt
+        from .request_geometry import validate_request_geometry
+        from .ribbon_targets import target_view, apply_values
+        from .providers import ClarificationNeeded
+
+        payload = json.loads(job['payload_json'])
+        local_selection = payload.get('selection') and payload.get('prompt', '').strip() in ('应用所选配置', '应用新的素材与排版')
+        plan = artifact['snapshot'].get('edit_plan', {})
+        contract = plan.get('request_contract')
+        if not contract:
+            if job['provider'] != 'test' and not local_selection:
+                raise ClarificationNeeded('缺少本次原文执行记录，未保存、未扣精修次数。')
+            return
+        if local_selection or plan.get('target') != payload.get('edit_target', 'layout'):
+            raise ServiceError(422, '精修要求与保存目标不一致')
+        base = copy.deepcopy(payload['snapshot'])
+        if base.get('layout_engine') in LOOP_ENGINES:
+            if base['layout_engine'] == LAYOUT_ENGINE:
+                from .loop_pipeline_v2 import resolve
+            else:
+                from .loop_pipeline import resolve
+            base = resolve(base, lambda a: self.verified_asset_path(job['owner_id'], a))
+        target = payload.get('edit_target', 'layout')
+        view = target_view(base, target)
+        wire = {key: plan.get(key) for key in ('summary', 'clarification', 'requirements')}
+        wire['operations'] = contract.get('planned_operations')
+        verified = validate_request_plan(payload['prompt'], view, wire, job['provider'])
+        verified['request_contract']['planned_operations'] = copy.deepcopy(verified['operations'])
+        if dump(contract) != dump(verified['request_contract']):
+            raise ServiceError(422, '精修原文执行记录校验失败')
+        operations = self.effective_edit_operations(job['provider'], view, verified,
+            self.refinement_selection_changed(job, payload, base))
+        if dump(operations) != dump(plan.get('operations')):
+            raise ServiceError(422, '保存的精修操作与原文执行记录不一致')
+        expected_state = copy.deepcopy(base)
+        remaining = list(artifact.get('assets', []))
+        for operation in operations:
+            kind = operation['type']
+            if kind == 'parameters':
+                apply_values(expected_state, target, operation['values'])
+                continue
+            original = (operation.get('asset_id') if kind == 'edit_asset' else
+                        view['background_ref'] if kind == 'edit_background' else base.get('composite_ref'))
+            asset_kind = {'edit_asset': 'pattern', 'edit_background': 'background', 'edit_composite': 'composite'}[kind]
+            candidates = [a for a in remaining if a.get('derived_from') == original and a.get('kind') == asset_kind
+                          and a.get('owner_id') == job['owner_id']]
+            if len(candidates) != 1:
+                raise ServiceError(422, '图片结果与本次精修目标不一致')
+            replacement = candidates[0]['id']
+            remaining.remove(candidates[0])
+            if kind == 'edit_asset':
+                if target == 'border':
+                    expected_state['border_ref'] = replacement
+                else:
+                    expected_state['asset_refs'] = [replacement if a == original else a for a in expected_state['asset_refs']]
+            elif kind == 'edit_background':
+                if target.startswith('zone:'):
+                    expected_state['zone_background_refs'][target[5:]] = replacement
+                    expected_state.setdefault('zone_colors', {}).pop(target[5:], None)
+                else:
+                    expected_state['background_ref'] = replacement
+                    expected_state['params']['background_color'] = None
+            else:
+                expected_state['composite_ref'] = replacement
+                expected_state['params'] = dict(PARAM_DEFAULTS)
+        protected = ('params', 'slot_params', 'zone_colors', 'asset_refs', 'background_ref',
+                     'zone_background_refs', 'border_ref', 'composite_ref', 'pattern_slots',
+                     'layout_engine', 'template_id', 'template_mode', 'template_version', 'template_rules',
+                     'seed', 'design_density', 'background_tone', 'output_profile_source')
+        if remaining or any(expected_state.get(key) != artifact['snapshot'].get(key) for key in protected):
+            raise ServiceError(422, '实际参数或图层结果与本次原文执行计划不一致')
+        for operation in operations:
+            if operation['type'] == 'parameters':
+                validate_request_geometry(base, artifact['snapshot'], operation, target)
+        expected = public_request_receipt(verified, geometry_verified=base.get('layout_engine') == LAYOUT_ENGINE)
+        if plan.get('request_receipt') != expected:
+            raise ServiceError(422, '精修结果说明与原文执行记录不一致')
 
     def complete_job(self, job, artifact):
         from .imaging import validate_image
@@ -1531,6 +1644,7 @@ class Service:
                 if saved['loop'].get('inputs') != bound:
                     raise ServiceError(422, '循环素材来源与保存版本不一致')
         if job['kind'] == 'refine':
+            self.verify_refinement_request(job, artifact)
             # Also applies to a recovered immutable artifact. A numeric edit
             # may quantise to the same raster, or a model may return a copy.
             # Neither may create a version or consume the successful quota.

@@ -209,7 +209,12 @@ def test_formal_composite_is_rejected_before_flatten_or_image_request(service, m
     service.provider_factory = lambda *args: SyntheticProvider()
     identity, original = generate(service)
     content = service.version_file(identity, original['current_version_id']).read_bytes()
-    plan(monkeypatch, [{'type': 'edit_composite', 'prompt': '合成整幅修改'}])
+    # This emulates a real-provider reply, so it must use the current wire
+    # contract before testing the separate composite capability boundary.
+    monkeypatch.setattr(SyntheticProvider, 'plan', lambda *args: dict(
+        summary='合成整幅修改', clarification=None,
+        requirements=[dict(source_id='s1', target_id='layout', effect='content')],
+        operations=[dict(type='edit_composite', source_ids=['s1'], prompt='合成整幅修改')]))
     monkeypatch.setattr('ribbon_backend.imaging.render', lambda *args: pytest.fail('unsupported composite flattened'))
     monkeypatch.setattr(SyntheticProvider, 'edit_image', lambda *args: pytest.fail('unsupported composite called model'))
     job, latest = refine(service, identity, original)

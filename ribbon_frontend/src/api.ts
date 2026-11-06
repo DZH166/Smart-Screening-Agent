@@ -90,6 +90,7 @@ export type Loop = {
   };
 };
 export type Snapshot = {
+  edit_plan?: { request_receipt?: RequestReceipt };
   asset_refs: string[];
   zone_background_refs?: Record<string,string>;
   border_ref?: string;
@@ -109,6 +110,23 @@ export type Snapshot = {
   design_density?: "airy" | "balanced" | "rich";
   design_style?: string;
   composite_ref?: string;
+};
+export type RequestReceipt = {
+  protocol: "ribbon-request-v2";
+  source_sha256: string;
+  coverage: "checked";
+  verification_scope: "plan_and_geometry_only";
+  image_effect_verified: false;
+  requirements: {
+    id: string;
+    source_id: string;
+    start: number;
+    end: number;
+    kind: "modify" | "preserve";
+    target: string;
+    method: "parameters" | "image" | "preserve";
+    execution: "geometry_verified" | "parameters_applied_unverified" | "image_generated_unverified" | "constraint_forwarded";
+  }[];
 };
 export type Version = {
   id: string;
