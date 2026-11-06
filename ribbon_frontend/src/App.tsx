@@ -366,13 +366,13 @@ function LoopPreview({ version, sizeLabel, target }: { version: Version; sizeLab
     </details>
   </div>;
 }
-function RecoverableImage({src, alt, ...props}: React.ImgHTMLAttributes<HTMLImageElement> & {src:string}) {
+function RecoverableImage({src, alt, quiet, ...props}: React.ImgHTMLAttributes<HTMLImageElement> & {src:string; quiet?: boolean}) {
   const [attempt,setAttempt] = useState(0), [failed,setFailed] = useState(false), [loaded,setLoaded] = useState(false);
   useEffect(() => { setAttempt(0); setFailed(false); setLoaded(false); }, [src]);
   const actual = attempt ? src + (src.includes("?")?"&":"?") + "retry=" + attempt : src;
   const retry = () => {setFailed(false);setLoaded(false);setAttempt(a=>a+1);};
   return <>{!failed && <img {...props} src={actual} alt={alt} onLoad={()=>setLoaded(true)} onError={()=>setFailed(true)} />}
-    {failed ? <span className="image-recovery" role="status"><span>{alt || "图片"}加载失败</span><span role="button" tabIndex={0} className="secondary small" onClick={e=>{e.stopPropagation();retry();}} onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();e.stopPropagation();retry();}}}>重新加载图片</span></span> :
+    {failed ? (quiet ? <span className="image-quiet" role="presentation" title={`${alt || "图片"}暂不可用`}><Icon name="grid" size={14} /></span> : <span className="image-recovery" role="status"><span>{alt || "图片"}加载失败</span><span role="button" tabIndex={0} className="secondary small" onClick={e=>{e.stopPropagation();retry();}} onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();e.stopPropagation();retry();}}}>重新加载图片</span></span>) :
     !loaded && props.loading !== "lazy" && <span className="image-loading">图片加载中…</span>}</>;
 }
 type Pending = {
@@ -456,6 +456,11 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
     [templates, setTemplates] = useState<Template[]>([]),
     [styles, setStyles] = useState<DesignStyle[]>([{ id: "classic", label: "经典等距", hint: "保持原有节奏" }]),
     [candidates, setCandidates] = useState<Candidate[] | null>(null),
+    [trialStyles, setTrialStyles] = useState<string[]>(() => {
+      const saved = loadLocal<string[]>(prefix + "trialStyles", []);
+      const valid = saved.filter((id) => typeof id === "string");
+      return valid.length >= 2 ? valid.slice(0, 3) : ["classic", "hierarchy", "airy"];
+    }),
     [candidateBusy, setCandidateBusy] = useState(false),
     [candidateError, setCandidateError] = useState(""),
     [designs, setDesigns] = useState<Design[]>([]);
@@ -620,15 +625,17 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
           aria-pressed={selection.template_id === t.id}
           onClick={() => updateSelection({ ...selection, template_id: t.id })}
         >
-          <RecoverableImage src={templateImage(t)} alt={`${t.name}样式图`} loading="lazy" decoding="async" />
+          <RecoverableImage src={templateImage(t)} alt={`${t.name}样式图`} loading="lazy" decoding="async" quiet />
           <span>{t.name}{selection.template_id === t.id && <Icon name="check" size={14} />}</span>
         </button>
-        <button
-          type="button"
-          className="template-example-button"
-          aria-label={`查看${t.name}案例`}
-          onClick={() => { setModal(null); setExamplesView({ mode: t.mode, name: t.name }); }}
-        >查看案例</button>
+        {selection.template_id === t.id && (
+          <button
+            type="button"
+            className="template-example-button"
+            aria-label={`查看${t.name}案例`}
+            onClick={() => { setModal(null); setExamplesView({ mode: t.mode, name: t.name }); }}
+          >查看案例</button>
+        )}
       </div>
     );
   }
@@ -686,16 +693,29 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
     }
     if (d.active_job) setJob(d.active_job);
   }
+  function toggleTrialStyle(id: string) {
+    const picked = trialStyles.includes(id);
+    if (picked && trialStyles.length <= 2) return; // 至少保留两种风格对比
+    const next = picked ? trialStyles.filter((item) => item !== id) : [...trialStyles, id];
+    if (next.length > 3) return;
+    setTrialStyles(next);
+    saveLocal(prefix + "trialStyles", next);
+  }
+
   async function previewCandidates() {
     if (!selection.asset_ids.length || !selection.background_id || !selection.template_id) {
       setCandidateError("先选择图案、底纹和排版");
+      return;
+    }
+    if (trialStyles.length < 2) {
+      setCandidateError("至少选择两种风格来对比");
       return;
     }
     setCandidateBusy(true); setCandidateError("");
     try {
       const rows = await api<Candidate[]>("/candidates", {
         method: "POST",
-        body: JSON.stringify({ ...selection, styles: ["classic", "hierarchy", "airy"] }),
+        body: JSON.stringify({ ...selection, styles: trialStyles }),
       });
       setCandidates(rows);
     } catch (error) {
@@ -1365,15 +1385,14 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
             <aside className="panel source-panel">
               <div className="panel-heading">
                 <div>
-                  
                   <h2>素材与排版</h2>
+                  <p className="panel-sub">按顺序完成三步，右侧会实时预览</p>
                 </div>
-                <Icon name="grid" />
               </div>
               <section className="source-section">
                 <div className="section-label">
-                  <h3>图案</h3>
-                  <span>已选 {selection.asset_ids.length} 个</span>
+                  <h3><span className="step-index">1</span>图案</h3>
+                  <span className="section-meta">{selection.asset_ids.length ? `已选 ${selection.asset_ids.length}` : "未选"}</span>
                 </div>
                 <div className="two-actions">
                   <button
@@ -1436,16 +1455,21 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                     }}
                   >
                     <Icon name="plus" />
-                    <span>从素材库开始，或上传已有图案</span>
-                    <small>支持多个透明 PNG 图案</small>
+                    <span>从素材库选择，或上传图案</span>
+                    <small>支持透明 PNG</small>
                   </button>
                 )}
               </section>
               <section className="source-section">
                 <div className="section-label">
-                  <h3>排版模式</h3>
-                  <button type="button" className="template-examples-all" onClick={() => setExamplesView({ mode: null, name: "全部排版案例" })}>查看全部案例</button>
+                  <h3><span className="step-index">2</span>排版</h3>
+                  <button type="button" className="quiet-link" onClick={() => setExamplesView({ mode: null, name: "全部排版案例" })}>全部案例</button>
                 </div>
+                {template && !basicLayoutModes.has(template.mode) && <div className="chosen-layout">
+                  <strong>已选：{template.name}</strong>
+                  <button type="button" className="quiet-link" onClick={() => setExamplesView({ mode: template.mode, name: template.name })}>查看案例</button>
+                </div>}
+                {layoutIssue && <p className="layout-selection-issue" id="ribbon-layout-issue" role="alert">{layoutIssue}</p>}
                 <div className="template-grid">
                   {basicTemplates.map(templateOption)}
                 </div>
@@ -1459,16 +1483,14 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                     </button>
                   </div>
                 )}
-                {template && !basicLayoutModes.has(template.mode) && <div className="chosen-layout">
-                  <strong>已选：{template.name}</strong>
-                  <button type="button" className="template-example-button" onClick={() => setExamplesView({ mode: template.mode, name: template.name })}>查看{template.name}案例</button>
-                </div>}
                 {template && ((modern && advancedHints[template.mode]) || layoutHints[template.mode]) && (
-                  <p className="layout-selection-help">{modern && advancedHints[template.mode] || layoutHints[template.mode]}</p>
+                  <details className="layout-help">
+                    <summary>这个排法怎么排</summary>
+                    <p>{modern && advancedHints[template.mode] || layoutHints[template.mode]}</p>
+                  </details>
                 )}
-                {layoutIssue && <p className="layout-selection-issue" id="ribbon-layout-issue" role="alert">{layoutIssue}</p>}
                 {(!current || ["design-rhythm-v1", "design-rhythm-v2", "seamless-unit-v1", "seamless-unit-v2"].includes(current.snapshot.layout_engine || "")) && (
-                  <label className="density-control">画面密度
+                  <label className="inline-field">画面密度
                     <select aria-label="画面密度" value={selection.design_density || "balanced"} disabled={locked}
                       onChange={(event) => updateSelection({ ...selection, design_density: event.target.value as Selection["design_density"] })}>
                       <option value="airy">疏朗</option>
@@ -1478,7 +1500,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                   </label>
                 )}
                 {modern && <div className="style-control" role="group" aria-label="设计风格">
-                  <span>设计风格</span>
+                  <span className="field-label">设计风格</span>
                   <div className="style-chips">
                     {styles.map((style) => (
                       <button key={style.id} type="button" disabled={locked}
@@ -1493,12 +1515,34 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                   {!!styles.find((s) => s.id === (selection.design_style || "classic"))?.hint && (
                     <p className="style-hint">{styles.find((s) => s.id === (selection.design_style || "classic"))?.hint}</p>
                   )}
-                  <button type="button" className="secondary small" disabled={locked || candidateBusy}
-                    onClick={() => void previewCandidates()}>
-                    {candidateBusy ? "正在本地试排…" : "试排三种风格（不调用模型）"}
-                  </button>
-                  {candidateError && <p className="style-hint" role="alert">{candidateError}</p>}
                 </div>}
+                {modern && <details className="trial-box" open={!!candidates || candidateBusy}>
+                  <summary>
+                    <span>试排对比</span>
+                    <small>选 2–3 种风格，本地渲染，不消耗次数</small>
+                  </summary>
+                  <div className="trial-body">
+                    <div className="trial-chips" role="group" aria-label="试排风格">
+                      {styles.map((style) => {
+                        const picked = trialStyles.includes(style.id);
+                        return (
+                          <button key={style.id} type="button" disabled={locked || candidateBusy}
+                            className={`trial-chip ${picked ? "selected" : ""}`}
+                            aria-pressed={picked}
+                            onClick={() => toggleTrialStyle(style.id)}>
+                            <span className="trial-check" aria-hidden="true">{picked ? "✓" : ""}</span>
+                            {style.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <button type="button" className="primary small" disabled={locked || candidateBusy}
+                      onClick={() => void previewCandidates()}>
+                      {candidateBusy ? "正在试排…" : `试排这 ${trialStyles.length} 种风格`}
+                    </button>
+                    {candidateError && <p className="style-hint" role="alert">{candidateError}</p>}
+                  </div>
+                </details>}
                 {!!candidates && <div className="candidate-gallery" aria-label="风格试排">
                   {candidates.map((candidate) => (
                     <figure key={candidate.style} className={`candidate-card ${(selection.design_style || "classic") === candidate.style ? "selected" : ""}`}>
@@ -1513,6 +1557,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                       </figcaption>
                     </figure>
                   ))}
+                  <button type="button" className="quiet-link close-trial" onClick={() => setCandidates(null)}>收起试排</button>
                 </div>}
               </section>
               {modern && (zones.length>0 || template?.mode==="bordered") && <details className="optional-layers" key={template?.mode}>
@@ -1527,12 +1572,10 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                   }}>恢复默认</button>}</div>;
                 })}
               </details>}
-              <section className="source-section background-section">
+              <section className="source-section">
                 <div className="section-label">
-                  <h3>底图</h3>
-                  {background?.is_demo && (
-                    <span className="tiny-pill">演示素材</span>
-                  )}
+                  <h3><span className="step-index">3</span>底图</h3>
+                  {background?.is_demo && <span className="section-meta">演示素材</span>}
                 </div>
                 <div className="two-actions">
                   <button
@@ -1559,43 +1602,39 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                     {testMode ? "生成测试底图" : "AI 生成底图"}
                   </button>
                 </div>
-                <label className="background-prompt-label" htmlFor="background-prompt">底图要求（可不填）</label>
-                <textarea
-                  id="background-prompt"
-                  className="background-prompt"
-                  value={backgroundPrompt}
-                  onChange={(event) => setBackgroundPrompt(event.target.value)}
-                  maxLength={2000}
-                  rows={2}
-                  disabled={locked || backgroundProcessing || !aiAvailable}
-                  placeholder="例如：浅蓝色细条纹，不要文字；不填则随机生成。"
-                  aria-describedby={!aiAvailable ? "background-ai-unavailable" : undefined}
-                />
-                {!aiAvailable && <p className="model-help" id="background-ai-unavailable">AI 尚未配置，仍可从底图库选图或上传后生成首稿。</p>}
+                <details className="background-prompt-box">
+                  <summary>写一句底图要求<small>可不填</small></summary>
+                  <textarea
+                    id="background-prompt"
+                    className="background-prompt"
+                    value={backgroundPrompt}
+                    onChange={(event) => setBackgroundPrompt(event.target.value)}
+                    maxLength={2000}
+                    rows={2}
+                    disabled={locked || backgroundProcessing || !aiAvailable}
+                    placeholder="例如：浅蓝色细条纹，不要文字。"
+                    aria-describedby={!aiAvailable ? "background-ai-unavailable" : undefined}
+                  />
+                  {!aiAvailable && <p className="model-help" id="background-ai-unavailable">AI 尚未配置，仍可从底图库选图。</p>}
+                </details>
                 {background ? (
                   <div className="background-selected">
                     <RecoverableImage src={background.thumbnail_url || background.url} alt="选中的底图" loading="lazy" decoding="async" />
                     <div>
                       <strong>{background.name}</strong>
-                      <small>
-                        {background.source === "upload" ? "已上传" : "已选择"}
-                      </small>
+                      <small>{background.source === "upload" ? "已上传" : "已选择"}</small>
                     </div>
                     <Icon name="check" size={16} />
                   </div>
                 ) : (
-                  <div className="empty-background">
-                    选择底图，为图案定下基调
-                  </div>
+                  <div className="empty-background">选择底图，为图案定下基调</div>
                 )}
                 {backgroundProcessing && (
                   <p className="microcopy">
-                    {testMode ? "正在生成测试底图…" : "AI 正在生成底图…"}{" "}
-                    可离开后恢复。
+                    {testMode ? "正在生成测试底图…" : "AI 正在生成底图…"}可离开后恢复。
                   </p>
                 )}
-                <label className="background-tone-control">
-                  底纹处理
+                <label className="inline-field">底纹处理
                   <select aria-label="底纹处理" value={selection.background_tone || "soft"}
                     disabled={locked || backgroundProcessing}
                     onChange={(event) => updateSelection({ ...selection, background_tone: event.target.value as Selection["background_tone"] })}>
@@ -1607,7 +1646,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
               </section>
               {current && changed && (
                 <div className="selection-warning">
-                  素材或排版已更改。点击右侧“开始精修”应用，会计入本作品精修次数。
+                  素材或排版已更改，点击右侧“开始精修”应用。
                 </div>
               )}
             </aside>
@@ -1618,21 +1657,25 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                     
                     <h2>{designTarget?.name || design?.name || "设计预览"}</h2>
                   </div>
-                  <span className={`state-pill ${processing ? "working" : ""}`}>
-                    <span className="status-dot" />
-                    {status}
-                  </span>
+                  {processing && (
+                    <span className="state-pill working">
+                      <span className="status-dot" />
+                      {status}
+                    </span>
+                  )}
                 </div>
                 {selected ? (
                     <div className="result-actions">
-                      <button
-                        className="secondary"
-                        disabled={locked || !current?.parent_version_id}
-                        onClick={() => void rollback()}
-                      >
-                        <Icon name="back" size={17} />
-                        回退上一版
-                      </button>
+                      {!!current?.parent_version_id && (
+                        <button
+                          className="secondary"
+                          disabled={locked}
+                          onClick={() => void rollback()}
+                        >
+                          <Icon name="back" size={17} />
+                          回退上一版
+                        </button>
+                      )}
                       <a
                         className="primary"
                         href={selected.download_url}
@@ -1749,6 +1792,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                           <RecoverableImage
                             src={templateImage(template)}
                             alt="当前排版参考"
+                            quiet
                           />
                           <span>{template.name} · 排版参考</span>
                         </div>
@@ -1830,6 +1874,18 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                 )}
               </details>}
             </section>
+            {!current && <aside className="panel refinement-panel is-placeholder">
+              <div className="panel-heading">
+                <div>
+                  <h2>文字精修</h2>
+                </div>
+                <Icon name="spark" />
+              </div>
+              <div className="refine-placeholder">
+                <p>生成首稿后，可以在这里用一句话调整图案大小、间距或底纹。</p>
+                <p className="refine-placeholder-note">首稿不占用精修次数，每个作品可成功精修两次。</p>
+              </div>
+            </aside>}
             {current && <aside className="panel refinement-panel">
               <div className="panel-heading">
                 <div>
@@ -1840,7 +1896,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
               </div>
               <p className="remaining-edits">本作品还可精修 <strong>{remaining}</strong> 次</p>
               <div className="refinement-body">
-                <label htmlFor="refinement">告诉我们，你想怎么改</label>
+                <label htmlFor="refinement" className="sr-only">修改要求</label>
 
 
                 {modern && current && !isHistory && <label className="target-picker">精修范围
