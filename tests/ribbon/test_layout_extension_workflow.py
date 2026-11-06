@@ -137,7 +137,7 @@ def test_invalid_pattern_count_rejects_generate_without_job_or_charge(service, m
         assert db.execute('SELECT COUNT(*) FROM quota_events WHERE design_id=?', (design['id'],)).fetchone()[0] == 0
 
 
-def test_v2_bordered_accepts_one_main_with_real_continuous_line_border(service):
+def test_current_bordered_accepts_one_main_with_real_continuous_line_border(service):
     owner = actor(service)['id']
     design = service.create_design(owner, 'Single main with continuous borders')
     selection = choices(service, owner, 'bordered', 1)
@@ -146,7 +146,7 @@ def test_v2_bordered_accepts_one_main_with_real_continuous_line_border(service):
     assert service.job(owner, job['id'])['status'] == 'SUCCEEDED'
     latest = service.design(owner, design['id'])
     snapshot = latest['versions'][0]['snapshot']
-    assert snapshot['layout_engine'] == 'seamless-unit-v2'
+    assert snapshot['layout_engine'] == 'seamless-unit-v3'
     assert snapshot['asset_refs'] == selection['asset_ids']
     assert snapshot['loop']['background']['border']['style'] == 'continuous_lines'
     assert snapshot['loop']['background']['border']['source'] is None

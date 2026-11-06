@@ -237,6 +237,9 @@ def estimate_render_space(snapshot):
     free-space preflight, not a user quota or a change to production dimensions.
     """
     width, height, _ = _profile(snapshot['output_profile'])
+    if snapshot.get('layout_engine') == 'seamless-unit-v3':
+        from .loop_layout_v3 import estimate
+        return estimate(snapshot)
     if snapshot.get('layout_engine') == 'seamless-unit-v2':
         from .loop_layout_v2 import estimate
         return estimate(snapshot)
@@ -548,9 +551,12 @@ def _quality_background(background, width, height):
 @memory_bounded_operation
 def render(snapshot: dict, resolve_asset: Callable[[str], Path], master_path: Path,
            preview_path: Path) -> dict:
-    if snapshot.get('layout_engine') not in (None, 'design-rhythm-v1', 'design-rhythm-v2', 'seamless-unit-v1', 'seamless-unit-v2'):
+    if snapshot.get('layout_engine') not in (None, 'design-rhythm-v1', 'design-rhythm-v2', 'seamless-unit-v1', 'seamless-unit-v2', 'seamless-unit-v3'):
         raise ValueError('该作品的排版引擎不受当前版本支持，请保留原版本并联系管理员')
     require_space(Path(master_path).parent, estimate_render_space(snapshot))
+    if snapshot.get('layout_engine') == 'seamless-unit-v3':
+        from .loop_pipeline_v3 import compose
+        return compose(snapshot, resolve_asset, master_path, preview_path)
     if snapshot.get('layout_engine') == 'seamless-unit-v2':
         from .loop_pipeline_v2 import compose
         return compose(snapshot, resolve_asset, master_path, preview_path)

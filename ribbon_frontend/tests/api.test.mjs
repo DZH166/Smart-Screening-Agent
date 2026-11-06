@@ -1,6 +1,26 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { api, post, setRequestToken, ApiError } from "../src/api.ts";
+import { api, post, setRequestToken, ApiError, normalizedPatternRoles, snapshotPatternRoles, isDirectLayoutReference } from "../src/api.ts";
+
+test("one company case can be direct for one layout and only partial for another", () => {
+  const example={available:true,reference_only:false,mode_tags:["split","panels"],mode_notes:{split:{fit:"direct"},panels:{fit:"partial"}}};
+  assert.equal(isDirectLayoutReference(example,"split"),true);
+  assert.equal(isDirectLayoutReference(example,"panels"),false);
+  assert.equal(isDirectLayoutReference(example,"scatter"),false);
+  assert.equal(isDirectLayoutReference({...example,available:false},"split"),false);
+  assert.equal(isDirectLayoutReference({...example,reference_only:true},"split"),false);
+});
+
+test("pattern roles preserve stable ownership after replacement and discard stale scope", () => {
+  assert.deepEqual(normalizedPatternRoles(["a","b","c"],"scene"),{a:"main",b:"support",c:"support"});
+  assert.deepEqual(normalizedPatternRoles(["a","b"],"bordered"),{a:"main",b:"main"},"a second person never silently becomes trim");
+  assert.deepEqual(normalizedPatternRoles(["a","b"],"scatter",{a:"main",b:"accent",removed:"border"}),{a:"main",b:"accent"});
+  assert.deepEqual(normalizedPatternRoles(["a","b"],"bordered",{a:"main",b:"accent"}),{a:"main",b:"main"});
+  assert.deepEqual(normalizedPatternRoles(["a","b"],"single",{a:"main",b:"accent"}),{});
+  const snapshot={layout_engine:"seamless-unit-v3",template_mode:"scene",asset_refs:["edited-a","b","c"],pattern_slots:["slot-a","slot-b","slot-c"],pattern_roles:{"slot-a":"main","slot-b":"support","slot-c":"accent"}};
+  assert.deepEqual(snapshotPatternRoles(snapshot),{"edited-a":"main",b:"support",c:"accent"},"derived asset keeps its stable slot's role");
+  assert.deepEqual(snapshotPatternRoles({...snapshot,layout_engine:"seamless-unit-v2"}),{},"legacy snapshots cannot activate role controls");
+});
 
 test("same-origin gateway and fresh HSD token protect JSON and multipart writes", async () => {
   const original = globalThis.fetch, calls = [];

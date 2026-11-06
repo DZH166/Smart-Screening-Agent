@@ -22,6 +22,11 @@ import {
   type Template,
   type User,
   type Version,
+  type PatternRole,
+  patternRoleChoices,
+  normalizedPatternRoles,
+  snapshotPatternRoles,
+  isDirectLayoutReference,
 } from "./api";
 import Admin from "./Admin";
 import LayoutExamples, { type LayoutExamplesCatalog } from "./LayoutExamples";
@@ -228,6 +233,7 @@ const layoutHints: Record<string, string> = {
 };
 const zoneNames: Record<string,string> = { left:"左区", center:"中区", right:"右区", top:"上区", bottom:"下区" };
 const zonesByMode: Record<string,string[]> = { panels:["left","center","right"], split:["left","right"], stacked:["top","bottom"] };
+const roleHints: Record<string,string> = { scene:"选择主图、配角和小点缀，按角色组成场景；完整人物和文字不拆开。", scatter:"主图错落倾斜，小点缀填入空隙；不会自动把人物缩成配饰。", bordered:"主图排在中间。需要小图沿上下边排列时，将它设为上下边饰，也可另选完整边饰条。" };
 const advancedHints: Record<string,string> = { scatter:"完整图案以不同角度和大小错落分布，整个单元循环。", bordered:"中央重复主图，上下为连续边线，可选独立边饰。", panels:"左、中、右三区各自排放图案，可分别选择底纹。" };
 function layoutSelectionIssue(mode: string | undefined, count: number, modern = false) {
   if (!count) return "";
@@ -259,15 +265,16 @@ function recommendedSelection(
 
 function restoreSelection(value: Selection, version?: Version): Selection {
   const snapshot = version?.snapshot;
-  const modern = !version || ["design-rhythm-v1", "design-rhythm-v2", "seamless-unit-v1", "seamless-unit-v2"].includes(snapshot?.layout_engine || "");
+  const modern = !version || ["design-rhythm-v1", "design-rhythm-v2", "seamless-unit-v1", "seamless-unit-v2", "seamless-unit-v3"].includes(snapshot?.layout_engine || "");
   const next: Selection = {
     ...value,
     background_tone: value.background_tone ?? snapshot?.background_tone ?? (modern ? "soft" : "original"),
   };
-  if (version && snapshot?.layout_engine !== "seamless-unit-v2") {
+  if (version && !["seamless-unit-v2", "seamless-unit-v3"].includes(snapshot?.layout_engine || "")) {
     delete next.zone_background_refs;
     delete next.border_ref;
   }
+  if (version && snapshot?.layout_engine !== "seamless-unit-v3") delete next.pattern_roles;
   if (modern) {
     next.design_density = value.design_density ?? snapshot?.design_density ?? "balanced";
   } else {
@@ -504,8 +511,9 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
     locked = busy || processing || !!pending || uploading || !!designTarget;
   const isHistory = !!selected && selected.id !== design?.current_version_id;
   const shownProfile = selected?.snapshot?.output_profile;
-  const selectedLoop = ["seamless-unit-v1","seamless-unit-v2"].includes(selected?.snapshot.loop?.engine || "");
-  const modern = !current || current.snapshot.layout_engine === "seamless-unit-v2";
+  const selectedLoop = ["seamless-unit-v1","seamless-unit-v2","seamless-unit-v3"].includes(selected?.snapshot.loop?.engine || "");
+  const modern = !current || ["seamless-unit-v2", "seamless-unit-v3"].includes(current.snapshot.layout_engine || "");
+  const roleLayout = !current || current.snapshot.layout_engine === "seamless-unit-v3";
   const sizeLabel =
     shownProfile?.width && shownProfile?.height && shownProfile?.dpi
       ? `${shownProfile.width}×${shownProfile.height}px · ${shownProfile.dpi} DPI · ` +
@@ -520,7 +528,10 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
   }, [assets]);
   const template = templates.find((t) => t.id === selection.template_id);
   const zones = modern ? zonesByMode[template?.mode || ""] || [] : [];
-  const layoutIssue = layoutSelectionIssue(template?.mode, selection.asset_ids.length, modern);
+  const roleChoices = roleLayout ? patternRoleChoices[template?.mode || ""] : undefined;
+  const roles = roleChoices ? normalizedPatternRoles(selection.asset_ids, template?.mode || "", selection.pattern_roles) : {};
+  const layoutIssue = layoutSelectionIssue(template?.mode, selection.asset_ids.length, modern) ||
+    (roleChoices && selection.asset_ids.length > 0 && !Object.values(roles).includes("main") ? "至少保留一个主图，再安排配角、点缀或边饰。" : "");
   const ready =
     selection.asset_ids.length > 0 &&
     !!selection.background_id &&
@@ -532,6 +543,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
       JSON.stringify(selection.asset_ids) ||
       current.snapshot.background_ref !== selection.background_id ||
       current.snapshot.template_id !== selection.template_id ||
+      (roleLayout && JSON.stringify(snapshotPatternRoles(current.snapshot)) !== JSON.stringify(roles)) ||
       (current.snapshot.border_ref || "") !== (selection.border_ref || "") ||
       zones.some(key=>current.snapshot.zone_background_refs?.[key] !== selection.zone_background_refs?.[key]) ||
       (current.snapshot.background_tone || "original") !== (selection.background_tone || "original") ||
@@ -575,7 +587,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
     ...(canPlanOperation("edit_composite") ? ["给画面添加星光"] : []),
   ];
   function templateImage(t: Template) {
-    return modern && t.id === t.mode && t.version===1 ? `/static/ribbon/layout-v2/${t.mode}.webp` : t.thumbnail_url;
+    return modern && t.id === t.mode && t.version===1 ? `/static/ribbon/${roleLayout ? "layout-v3" : "layout-v2"}/${t.mode}.webp` : t.thumbnail_url;
   }
   function templateOption(t: Template) {
     return (
@@ -604,7 +616,11 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
       setAiDraftReference(null);
       delete value.zone_background_refs;
       delete value.border_ref;
+      delete value.pattern_roles;
     }
+    const nextMode = templates.find(t => t.id === value.template_id)?.mode || "";
+    if (roleLayout && patternRoleChoices[nextMode]) value.pattern_roles = normalizedPatternRoles(value.asset_ids, nextMode, value.pattern_roles);
+    else delete value.pattern_roles;
     if (editTarget !== "layout") setEditTarget("layout");
     setSelection(value);
     saveLocal(prefix + "selection", {
@@ -641,8 +657,9 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                 background_id: v.snapshot.background_ref,
                 template_id: v.snapshot.template_id,
                 zone_background_refs: v.snapshot.zone_background_refs, border_ref:v.snapshot.border_ref,
+                ...(v.snapshot.layout_engine === "seamless-unit-v3" ? {pattern_roles:snapshotPatternRoles(v.snapshot)} : {}),
                 background_tone: v.snapshot.background_tone || "original",
-                ...(["design-rhythm-v1", "design-rhythm-v2", "seamless-unit-v1", "seamless-unit-v2"].includes(v.snapshot.layout_engine || "") ? {design_density: v.snapshot.design_density || "balanced"} : {}),
+                ...(["design-rhythm-v1", "design-rhythm-v2", "seamless-unit-v1", "seamless-unit-v2", "seamless-unit-v3"].includes(v.snapshot.layout_engine || "") ? {design_density: v.snapshot.design_density || "balanced"} : {}),
               }
             : emptySelection;
       setSelection(restoreSelection(next, v));
@@ -926,6 +943,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
       await executePending({
         path: `/designs/${d.id}/generate`,
         body: { idempotency_key: crypto.randomUUID(), ...selection,
+          pattern_roles: roleChoices ? roles : undefined,
           ai_assisted: aiDraftEnabled, reference_code: draftReference?.code || null,
         } satisfies GenerateRequest,
         kind: "design",
@@ -952,7 +970,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
           base_version_id: current.id,
           ...(modern && editTarget !== "layout" ? {edit_target:editTarget} : {}),
           prompt: prompt.trim() || (changed ? "应用所选配置" : ""),
-          ...(changed ? { selection } : {}),
+          ...(changed ? { selection: {...selection, pattern_roles: roleChoices ? roles : undefined} } : {}),
         },
         kind: "design",
         designId: design!.id,
@@ -1351,7 +1369,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                   onChange={(e) => void upload(e.target.files, "pattern")}
                 />
                 {selectedPatterns.length ? (
-                  <div className="selected-patterns">
+                  <div className={`selected-patterns${roleChoices ? " has-pattern-roles" : ""}`}>
                     {selectedPatterns.map((a, index) => (
                       <div className="pattern-tile" key={a.id}>
                         <div className="checker">
@@ -1366,6 +1384,10 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                           </button>
                         </div>
                         <span title={`第 ${index + 1} 个图案：${a.name}`}>{index + 1}. {a.name}</span>
+                        {roleChoices && <select className="pattern-role" aria-label={`图案 ${index + 1} 的排版角色`} value={roles[a.id]} disabled={locked}
+                          onChange={event => updateSelection({...selection, pattern_roles:{...roles,[a.id]:event.target.value as PatternRole}})}>
+                          {roleChoices.map(choice => <option key={choice.value} value={choice.value}>{choice.label}</option>)}
+                        </select>}
                       </div>
                     ))}
                   </div>
@@ -1407,10 +1429,10 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                   <button type="button" className="template-example-button" onClick={() => setExamplesView({ mode: template.mode, name: template.name })}>查看{template.name}案例</button>
                 </div>}
                 {template && ((modern && advancedHints[template.mode]) || layoutHints[template.mode]) && (
-                  <p className="layout-selection-help">{modern && advancedHints[template.mode] || layoutHints[template.mode]}</p>
+                  <p className="layout-selection-help">{roleLayout && roleHints[template.mode] || modern && advancedHints[template.mode] || layoutHints[template.mode]}</p>
                 )}
                 {layoutIssue && <p className="layout-selection-issue" id="ribbon-layout-issue" role="alert">{layoutIssue}</p>}
-                {(!current || ["design-rhythm-v1", "design-rhythm-v2", "seamless-unit-v1", "seamless-unit-v2"].includes(current.snapshot.layout_engine || "")) && (
+                {(!current || ["design-rhythm-v1", "design-rhythm-v2", "seamless-unit-v1", "seamless-unit-v2", "seamless-unit-v3"].includes(current.snapshot.layout_engine || "")) && (
                   <label className="density-control">画面密度
                     <select aria-label="画面密度" value={selection.design_density || "balanced"} disabled={locked}
                       onChange={(event) => updateSelection({ ...selection, design_density: event.target.value as Selection["design_density"] })}>
@@ -1868,8 +1890,9 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
             onUnauthorized={onLogout}
             onViewAll={() => setExamplesView({ mode: null, name: "全部排版案例" })}
             referenceMode={template?.mode}
+            legacyLayout={!roleLayout}
             onChooseReference={aiDraftEnabled && !locked && !backgroundProcessing ? example => {
-              if (!template || !example.available || example.reference_only || !example.mode_tags.includes(template.mode)) return;
+              if (!template || !isDirectLayoutReference(example, template.mode)) return;
               setAiDraftReference({ code: example.code, mode: template.mode });
               setExamplesView(null);
             } : undefined}

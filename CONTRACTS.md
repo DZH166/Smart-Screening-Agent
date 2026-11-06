@@ -1,5 +1,13 @@
 # Internal implementation contract
 
+## Ribbon layout-understanding branch (unmerged, not deployed)
+
+The independent `codex/ribbon-layout-understanding` branch starts at `cd198d4`. New works in this branch bind `seamless-unit-v3`; saved v1/v2 ancestors keep their engines and immutable templates, sources, snapshots and downloads. No production version or release claim is implied.
+
+Selection optionally accepts `pattern_roles`, keyed by selected asset ID. Allowed roles are scene `main/support/accent`, scatter `main/accent`, bordered `main/border`; other modes reject nonempty mappings. These role-aware modes require at least one main. Defaults are first-main/rest-support for scene and all-main for scatter/bordered. Ownership, selected references, mode and enum are validated server-side. Snapshots bind the mapping to stable `pattern_slots`; content replacements retain slot roles. Omitted same-mode roles preserve the parent choice, an explicit empty mapping resets defaults, and a mode change clears inapplicable omitted roles. Role changes participate in signatures and no-op checks. Historical engines do not gain new role behavior; refinement inherits the parent engine. Quota, retention, idempotency and isolation stay unchanged.
+
+Teaching cases add per-mode `mode_notes` with `fit=direct|partial`, `look_for` and `difference`. A partial case is a limited teaching reference, not an equivalent generated composition. `eligible_ai_reference(code, mode)` permits only a registered, matching, non-reference-only case whose current mode has `fit=direct`; the service rechecks this with the private whitelist and fixed bytes before any explicitly requested AI draft reference is sent. Browsing sends nothing. Original company previews stay private; only code-drawn v3 demos enter the hash-pinned public release allowlist. See [branch progress](docs/ribbon-layout-understanding-branch.md) for evidence and deferred merge/Linux/deployment acceptance.
+
 ## Ribbon v1.26.0 candidate contract
 
 New works bind `seamless-unit-v2`; every saved ancestor retains its engine, dimensions, immutable source references and version-bound downloads. Geometry derives the complete foreground repeat before background construction. Per-instance scatter rotations are deterministic; no mirroring is introduced. Relative main/support size factors survive common safety fitting. Density changes real sizes/gaps and only mode-permitted rows. Engineering continuity warnings remain visible and are not print acceptance.

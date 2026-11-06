@@ -2,6 +2,43 @@
 import uuid
 
 ZONES = {'split': ('left', 'right'), 'panels': ('left', 'center', 'right'), 'stacked': ('top', 'bottom')}
+MODERN_ENGINES = ('seamless-unit-v2', 'seamless-unit-v3')
+ROLE_CHOICES = {'scene': frozenset(('main', 'support', 'accent')),
+                'scatter': frozenset(('main', 'accent')),
+                'bordered': frozenset(('main', 'border'))}
+
+
+def configure_roles(selection, mode, snapshot, ids, slots):
+    """Turn an employee's selected asset roles into immutable slot roles.
+
+    Unknown IDs fail even if the employee can access those assets: a role is
+    only meaningful for a pattern in this specific selection. Roles are not
+    inferred from filenames or the image model. Mode changes reset omitted
+    roles; an explicit unsupported mapping is a request error.
+    """
+    from .service import ServiceError
+    supplied = selection.get('pattern_roles')
+    if 'pattern_roles' in selection and (not isinstance(supplied, dict)
+            or any(not isinstance(k, str) or not isinstance(v, str) for k, v in supplied.items())
+            or set(supplied) - set(ids)):
+        raise ServiceError(422, '图案用途与当前所选素材不一致，请重新选择')
+    choices = ROLE_CHOICES.get(mode, frozenset())
+    if supplied and (not choices or any(value not in choices for value in supplied.values())):
+        raise ServiceError(422, '此排法不支持所选图案用途，请重新选择')
+    if not choices:
+        snapshot['pattern_roles'] = {}
+        return
+    previous = snapshot.get('pattern_roles', {}) if snapshot.get('template_mode') == mode else {}
+    result = {}
+    for index, (asset, slot) in enumerate(zip(ids, slots)):
+        default = 'support' if mode == 'scene' and index else 'main'
+        value = supplied.get(asset, default) if supplied is not None else previous.get(slot, default)
+        if value not in choices:
+            raise ServiceError(422, '保存的图案用途已不适用，请重新选择')
+        result[slot] = value
+    if 'main' not in result.values():
+        raise ServiceError(422, '请至少保留一个主图，配饰和边饰不能代替全部主体')
+    snapshot['pattern_roles'] = result
 
 
 def loop_inputs(snapshot):
@@ -18,6 +55,10 @@ def configure_layers(service, db, owner, selection, mode, snapshot, ids):
     slots = [old.get(asset) or 'pattern-' + uuid.uuid4().hex[:16] for asset in ids]
     snapshot['pattern_slots'] = slots
     snapshot['slot_params'] = {s: v for s, v in snapshot.get('slot_params', {}).items() if s in slots}
+    if snapshot.get('layout_engine') == 'seamless-unit-v3':
+        configure_roles(selection, mode, snapshot, ids, slots)
+    elif selection.get('pattern_roles'):
+        raise ServiceError(422, '此作品保留原排法；图案用途分工可用于新作品')
     allowed = ZONES.get(mode, ())
     refs = selection.get('zone_background_refs', {k: v for k, v in snapshot.get('zone_background_refs', {}).items() if k in allowed})
     if not isinstance(refs, dict) or any(k not in allowed or not isinstance(v, str) for k, v in refs.items()):
@@ -42,7 +83,7 @@ def target_view(snapshot, target):
     target = target or 'layout'
     if target == 'layout':
         return view
-    if snapshot.get('layout_engine') != 'seamless-unit-v2':
+    if snapshot.get('layout_engine') not in MODERN_ENGINES:
         raise ClarificationNeeded('此版本不支持选择局部目标，请使用原有精修方式')
     slots = snapshot['pattern_slots']
     if target in slots:
@@ -81,10 +122,13 @@ def apply_values(snapshot, target, values):
 
 def check_parameter_effect(before, after, target, values):
     """Compare actual placement dimensions and spacing, not requested numbers or RGB noise."""
-    from .loop_layout_v2 import plan
     from .providers import ClarificationNeeded
-    if before.get('layout_engine') != 'seamless-unit-v2':
+    if before.get('layout_engine') not in MODERN_ENGINES:
         return
+    if before.get('layout_engine') == 'seamless-unit-v3':
+        from .loop_layout_v3 import plan
+    else:
+        from .loop_layout_v2 import plan
     geom = set(values) - {'background_color'}
     if not geom:
         return

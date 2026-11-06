@@ -41,8 +41,9 @@ ASSET_PREVIEW_VERSION = 'asset-preview-v1'
 ASSET_PREVIEW_SIZE = (640, 640)
 from .ribbon_targets import loop_inputs
 
-LAYOUT_ENGINE = 'seamless-unit-v2'
-LOOP_ENGINES = ('seamless-unit-v1', LAYOUT_ENGINE)
+LAYOUT_ENGINE = 'seamless-unit-v3'
+MODERN_LOOP_ENGINES = ('seamless-unit-v2', LAYOUT_ENGINE)
+LOOP_ENGINES = ('seamless-unit-v1', *MODERN_LOOP_ENGINES)
 QUALITY_LAYOUT_ENGINES = frozenset({'design-rhythm-v1', 'design-rhythm-v2', *LOOP_ENGINES})
 BACKGROUND_TONES = frozenset({'soft', 'original'})
 DESIGN_DENSITIES = frozenset({'airy', 'balanced', 'rich'})
@@ -279,7 +280,7 @@ class Service:
 
     @staticmethod
     def validate_layout_selection(mode, asset_ids, engine=None):
-        if mode == 'bordered' and len(asset_ids) < 2 and engine != LAYOUT_ENGINE:
+        if mode == 'bordered' and len(asset_ids) < 2 and engine not in MODERN_LOOP_ENGINES:
             raise ServiceError(422, '上下边饰至少选择2个图案：第1个作主体，其余作上下边饰')
         if mode == 'fullwidth' and len(asset_ids) != 1:
             raise ServiceError(422, '整幅定位请选择1张完整设计；不会忽略其他所选图案')
@@ -805,9 +806,11 @@ class Service:
             result['design_density'] = density
         elif density != 'balanced':
             raise ServiceError(422, '旧版作品保留原排版方式；如需选择疏密，请新建作品')
-        if result.get('layout_engine') != LAYOUT_ENGINE and (selection.get('zone_background_refs') or selection.get('border_ref')):
+        if result.get('layout_engine') not in MODERN_LOOP_ENGINES and (selection.get('zone_background_refs') or selection.get('border_ref')):
             raise ServiceError(422, '此作品保留旧版排法；独立底纹和边饰可用于新作品')
-        if result.get('layout_engine') == LAYOUT_ENGINE:
+        if selection.get('pattern_roles') and result.get('layout_engine') != LAYOUT_ENGINE:
+            raise ServiceError(422, '此作品保留原排法；图案用途分工可用于新作品')
+        if result.get('layout_engine') in MODERN_LOOP_ENGINES:
             from .ribbon_targets import configure_layers
             configure_layers(self, db, owner, selection, template['mode'], result, ids)
         result.update(asset_refs=ids, background_ref=selection['background_id'], template_id=template['id'], template_version=template['version'], template_mode=template['mode'], template_rules=json.loads(template['rules_json']), output_profile=profile)
@@ -818,8 +821,8 @@ class Service:
 
     def verified_draft_reference(self, code, mode, expected_sha=None):
         """Only an explicitly chosen, matching installed example may leave the host."""
-        from hsd_tool.ribbon_examples import IMAGE_SPECS, MODE_GUIDES
-        if not isinstance(code, str) or code not in IMAGE_SPECS or not any(
+        from hsd_tool.ribbon_examples import IMAGE_SPECS, MODE_GUIDES, eligible_ai_reference
+        if not isinstance(code, str) or code not in IMAGE_SPECS or not eligible_ai_reference(code, mode) or not any(
                 guide['mode'] == mode and code in guide['example_ids'] for guide in MODE_GUIDES):
             raise ServiceError(422, '参考案例与当前排版不匹配，请重新选择')
         fixed_sha = IMAGE_SPECS[code][3]
@@ -1120,7 +1123,7 @@ class Service:
             raise ServiceError(409, '原版本已变化，请刷新后再精修')
         before = json.loads(row['snapshot_json'])
         fields = ('asset_refs', 'background_ref', 'zone_background_refs', 'border_ref', 'template_id', 'template_version',
-                  'template_mode', 'template_rules', 'composite_ref')
+                  'template_mode', 'template_rules', 'composite_ref', 'pattern_roles')
         tone_changed = before.get('background_tone', 'original') != snapshot.get('background_tone', 'original')
         density_changed = before.get('design_density', 'balanced') != snapshot.get('design_density', 'balanced')
         return tone_changed or density_changed or any(before.get(key) != snapshot.get(key) for key in fields)
@@ -1154,6 +1157,8 @@ class Service:
 
         def prepared_loop(value):
             if value.get('layout_engine') == LAYOUT_ENGINE:
+                from .loop_pipeline_v3 import resolve as resolve_loop
+            elif value.get('layout_engine') == 'seamless-unit-v2':
                 from .loop_pipeline_v2 import resolve as resolve_loop
             else:
                 from .loop_pipeline import resolve as resolve_loop
@@ -1241,8 +1246,11 @@ class Service:
             for index, operation in enumerate(operations):
                 kind = operation['type']
                 if kind == 'parameters':
-                    if trial.get('layout_engine') == LAYOUT_ENGINE:
-                        from .loop_layout_v2 import resolve as geometry_only
+                    if trial.get('layout_engine') in MODERN_LOOP_ENGINES:
+                        if trial.get('layout_engine') == LAYOUT_ENGINE:
+                            from .loop_layout_v3 import resolve as geometry_only
+                        else:
+                            from .loop_layout_v2 import resolve as geometry_only
                         specs = trial['loop_layout']['specs']
                         before = copy.deepcopy(trial)
                         apply_values(trial, target, operation['values'])
@@ -1258,7 +1266,7 @@ class Service:
                 elif kind == 'edit_asset':
                     provider.validate_edit_input(resolve(operation['asset_id']), 'asset')
                 elif kind == 'edit_background':
-                    if target == 'layout' and snapshot.get('layout_engine') == LAYOUT_ENGINE:
+                    if target == 'layout' and snapshot.get('layout_engine') in MODERN_LOOP_ENGINES:
                         target_view(snapshot, 'background')
                     source = resolve(view['background_ref'])
                     if visible_params.get('background_color'):
@@ -1311,7 +1319,7 @@ class Service:
                     output = directory / f'edited-{index}.png'
                     def checked_edit():
                         meta = provider.edit_image(edit_prompt, source, output, kind.removeprefix('edit_'))
-                        if snapshot.get('layout_engine') == LAYOUT_ENGINE:
+                        if snapshot.get('layout_engine') in MODERN_LOOP_ENGINES:
                             from .edit_quality import validate_edit_result
                             from .providers import ProviderError
                             try:
@@ -1396,6 +1404,8 @@ class Service:
             validate_image(master, artifact['snapshot']['output_profile'])
             if artifact['snapshot'].get('layout_engine') in LOOP_ENGINES:
                 if artifact['snapshot'].get('layout_engine') == LAYOUT_ENGINE:
+                    from .loop_pipeline_v3 import validate_binding
+                elif artifact['snapshot'].get('layout_engine') == 'seamless-unit-v2':
                     from .loop_pipeline_v2 import validate_binding
                 else:
                     from .loop_pipeline import validate_binding

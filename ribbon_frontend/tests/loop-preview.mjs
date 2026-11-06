@@ -17,7 +17,7 @@ const fixture = "/api/ribbon/synthetic-loop.svg";
 const svg = (width = 1200, height = 520) => `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><rect width="100%" height="100%" fill="#e5eee0"/><circle cx="${width * .2}" cy="${height * .5}" r="${height * .25}" fill="#a9c68e"/><text x="${width * .4}" y="${height * .55}" font-size="${height * .1}">SYNTHETIC ONLY</text></svg>`;
 const assets = ["flower", "star"].map(name => ({ id: `demo-${name}`, name: `合成图案 ${name}`, kind: "pattern", source: "synthetic", is_demo: true, shared: true, url: fixture, thumbnail_url: fixture }));
 assets.push({ id: "demo-bg-sage", name: "合成底图", kind: "background", source: "synthetic", is_demo: true, shared: true, url: fixture, thumbnail_url: fixture });
-const templates = ["stagger", "ends", "split", "bordered"].map(mode => ({ id: mode, name: mode, mode, version: 1, enabled: true, rules: {}, thumbnail_url: fixture }));
+const templates = ["stagger", "ends", "split", "bordered", "scene", "scatter"].map(mode => ({ id: mode, name: mode, mode, version: 1, enabled: true, rules: {}, thumbnail_url: fixture }));
 const makeVersion = (id, sequence, parent, engine = "seamless-unit-v1", mode = "stagger") => ({
   id, design_id: "LOOP", sequence, parent_version_id: parent, prompt: sequence ? "合成精修" : "", render_kind: "parameters", provider: "test", created_at: "2026-11-04", editing,
   preview_url: `${fixture}?version=${id}`, view_url: `/api/ribbon/versions/${id}/view`, download_url: `/api/ribbon/versions/${id}/download`,
@@ -49,6 +49,12 @@ const zoned = structuredClone(targeted);
 zoned.id="zones-0";
 zoned.snapshot.template_id=zoned.snapshot.template_mode="split";
 works.push(makeDesign("ZONES",zoned));
+const roleVersion = structuredClone(targeted);
+roleVersion.id = "roles-0";
+roleVersion.snapshot.layout_engine = roleVersion.snapshot.loop.engine = "seamless-unit-v3";
+roleVersion.snapshot.template_mode = roleVersion.snapshot.template_id = "scene";
+roleVersion.snapshot.pattern_roles = {"stable-flower":"main","stable-star":"accent"};
+works.push(makeDesign("ROLES",roleVersion));
 const jobs = new Map(), writes = [], requests = [], errors = [];
 let releaseSlow;
 const server = createServer(async (req, res) => {
@@ -195,6 +201,7 @@ try {
   await page.locator(".ribbon-display.detail img").waitFor();
   assert.equal(await page.locator(".ribbon-display img").getAttribute("src"), "/api/ribbon/versions/old-v2/view", "legacy detail still uses its own full-resolution file");
   await choose("BORDER");
+  assert.equal(await page.locator(".pattern-role").count(),0,"v2 works retain old role semantics");
   await page.getByText("独立边饰",{exact:true}).click();
   await page.getByRole("button",{name:"选择上下边饰"}).click();
   const borders=page.getByRole("dialog",{name:"选择边饰",exact:true});
@@ -225,6 +232,25 @@ try {
   await page.locator('a[download][href="/api/ribbon/versions/loop-1/download"]').waitFor();
   assert.equal(writes.at(-1).data.edit_target,"stable-star");
   assert.equal(writes.at(-1).data.base_version_id,"target-0");
+  await choose("ROLES");
+  await page.getByLabel("图案 1 的排版角色",{exact:true}).waitFor();
+  assert.equal(await page.locator(".loop-unit-view").isVisible(),true,"v3 has loop preview and stable-target editing");
+  assert.equal(await page.getByLabel("图案 2 的排版角色",{exact:true}).inputValue(),"accent","snapshot stable slots restore the current asset role");
+  const roleViewport = page.viewportSize();
+  for (const width of [1366,1920]) {
+    await page.setViewportSize({width,height:width===1366?768:1080});
+    assert.ok(await page.locator(".pattern-role").first().evaluate(element => element.clientWidth >= 78), "role labels have readable width");
+    await page.screenshot({path:path.join(out,`ribbon-roles-${width}.png`)});
+  }
+  await page.setViewportSize(roleViewport);
+  await page.getByLabel("图案 1 的排版角色",{exact:true}).selectOption("accent");
+  assert.equal(await page.getByRole("button",{name:"开始精修",exact:true}).isEnabled(),false,"accent-only content cannot become a valid composition");
+  await page.getByLabel("图案 1 的排版角色",{exact:true}).selectOption("main");
+  await page.getByLabel("图案 2 的排版角色",{exact:true}).selectOption("support");
+  assert.equal(await page.getByRole("button",{name:"开始精修",exact:true}).isEnabled(),true,"role selection alone is a real local refinement request");
+  await page.getByRole("button",{name:"开始精修",exact:true}).click();
+  await page.locator('a[download][href="/api/ribbon/versions/loop-1/download"]').waitFor();
+  assert.deepEqual(writes.at(-1).data.selection.pattern_roles,{"demo-flower":"main","demo-star":"support"},"wire roles bind asset IDs, not stable snapshot IDs");
   await choose("EMPTY");
   await page.getByRole("button", { name: "生成首稿", exact: true }).waitFor();
   assert.equal(await page.locator(".loop-preview, a[download]").count(), 0);

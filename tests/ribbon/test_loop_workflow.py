@@ -159,6 +159,7 @@ def env(workflow, monkeypatch):
             snapshot['layout_engine'] = ENGINE
             for field in (
                 'pattern_slots',
+                'pattern_roles',
                 'slot_params',
                 'zone_background_refs',
                 'zone_colors',
@@ -173,17 +174,17 @@ def env(workflow, monkeypatch):
 
 @pytest.mark.parametrize('height,dpi', ((240, 96), (520, 300)))
 def test_new_engine_worker_binds_inputs_to_saved_download_and_preserves_parent(workflow, height, dpi):
-    from ribbon_backend import loop_pipeline_v2
+    from ribbon_backend import loop_pipeline_v3
 
     workflow.service.save_profile(
-        dict(name='v2 worker', width=1280, height=height, dpi=dpi, format='PNG', is_demo=True)
+        dict(name='current worker', width=1280, height=height, dpi=dpi, format='PNG', is_demo=True)
     )
     initial = workflow.generate()
     first = current(initial)
     data = workflow.download(first)
     snapshot = first['snapshot']
-    assert snapshot['layout_engine'] == loop_pipeline_v2.ENGINE
-    loop_pipeline_v2.validate_binding(snapshot, hashlib.sha256(data).hexdigest())
+    assert snapshot['layout_engine'] == loop_pipeline_v3.ENGINE
+    loop_pipeline_v3.validate_binding(snapshot, hashlib.sha256(data).hexdigest())
     with Image.open(BytesIO(data)) as png_file:
         assert png_file.size == (snapshot['loop_layout']['period_px'], height)
         assert abs(png_file.info['dpi'][0] - dpi) < 1

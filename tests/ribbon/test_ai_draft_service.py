@@ -72,9 +72,9 @@ def state(api, work, response):
 
 def assert_loop_output(snapshot):
     """The selected config supplies height/DPI; the unit owns its actual width."""
-    assert snapshot['layout_engine'] == 'seamless-unit-v2'
+    assert snapshot['layout_engine'] == 'seamless-unit-v3'
     loop, profile, source = snapshot['loop'], snapshot['output_profile'], snapshot['output_profile_source']
-    assert loop['engine'] == 'seamless-unit-v2'
+    assert loop['engine'] == 'seamless-unit-v3'
     assert loop['production_verified'] is False
     assert profile['width'] == loop['width'] and profile['width'] > 0
     assert profile['height'] == loop['height'] == source['height'] == 240
@@ -281,6 +281,19 @@ def test_hsd_mode_cannot_use_the_explicit_demo_provider_fallback(tmp_path):
         service.submit(owner, 'generate', dict(choices, idempotency_key=str(uuid4()), ai_assisted=True), work['id'])
     assert denied.value.status == 503
     assert service.config()['ai_draft_available'] is False
+
+
+@pytest.mark.parametrize('code,mode', [
+    ('HSD31884', 'opposed'), ('HSD31965', 'stacked'),
+    ('HSD68027', 'panels'), ('HSD51045', 'ends'),
+])
+def test_partial_or_mismatched_teaching_case_is_rejected_before_read_or_model(api, code, mode):
+    service, _, provider, _, _ = api
+    service.example_resolver = lambda _: pytest.fail('Ineligible case was read')
+    with pytest.raises(ServiceError) as denied:
+        service.verified_draft_reference(code, mode)
+    assert denied.value.status == 422
+    assert provider.calls == []
 
 
 def test_historical_v1_defaults_and_density_edit_keep_the_saved_engine_and_download(api, monkeypatch):

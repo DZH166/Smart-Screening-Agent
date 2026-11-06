@@ -14,6 +14,7 @@ let user = { id: "synthetic-a", username: "测试员工", role: "employee" };
 let authorized = true, design = null, job = null, owner = "", jobReads = 0;
 const writes = [], errors = [];
 let exampleCatalogReads = 0, failExampleCatalog = 0, exampleVariant = "normal", exampleImageRevision = 0;
+let multiCase = false;
 let holdNextCatalog = false, releaseCatalog = null;
 let modelProvider = "test", modelReady = true, modelEditing, modelAuthMode = "demo";
 let aiDraftAvailable, aiDraftFixtures = null, aiDraftSequence = 0;
@@ -54,7 +55,10 @@ function exampleCatalog() {
     const code = `SYNTHETIC-REFERENCE_${id}`;
     examples.push({ id: code, code, title, description: "明确的合成延展参考，不是新增生成模式。", look_for: "只作排版参考", mode_tags: [], reference_only: true, width: 1200, height: 150, available: true, image_url: `/api/ribbon/layout-examples/${code}/image` });
   }
-  return { modes: templates.map(template => ({ mode: template.mode, name: template.name, summary: `合成 ${template.mode} 模式说明`, note: modeNotes[template.mode], example_ids: [exampleCode(template.mode)] })), examples, source_name: `合成案例图库：${user.id}`, note: "仅合成接口，不包含真实图库或模型调用。" };
+  if (multiCase) examples.push({ id: "SYNTHETIC-STAGGER_EXTRA", code: "SYNTHETIC-STAGGER_EXTRA", title: "合成错位加边带", description: "合成的第二个不同组合案例。", look_for: "通用看点", mode_tags: ["stagger"], reference_only: false, width: 1200, height: 150, available: true,
+    image_url: "/api/ribbon/layout-examples/SYNTHETIC-STAGGER_EXTRA/image", mode_notes: { stagger: { look_for: "两行错位搭配上下边带", difference: "边带需要另外选择，单选错位不会自动添加。", fit: "partial" } } });
+  return { modes: templates.map(template => ({ mode: template.mode, name: template.name, summary: `合成 ${template.mode} 模式说明`, note: modeNotes[template.mode], example_ids: [exampleCode(template.mode), ...(multiCase && template.mode === "stagger" ? ["SYNTHETIC-STAGGER_EXTRA"] : [])],
+    ...(multiCase ? {demo_variants: [1,3,6].map(count => ({id:`${template.mode}-${count}`, title:`${count} 个自制素材`, image_url:`/static/ribbon/layout-v3/${template.mode}-${count}.webp`, description:"明确标记的合成程序示例。"}))} : {}) })), examples, source_name: `合成案例图库：${user.id}`, note: "仅合成接口，不包含真实图库或模型调用。" };
 }
 function version(sequence, parent) {
   const id = `v${sequence}`;
@@ -69,6 +73,7 @@ const server = createServer(async (req, res) => {
       html = html.replace("__HSD_TOKEN__", JSON.stringify("synthetic-token")).replace("__HSD_ACCESS__", "{}").replace(/\s*<script src="\/static\/(?:app|ai-settings)\.js" defer><\/script>/g, "");
       res.writeHead(200, { "Content-Type": "text/html" }); res.end(html); return;
     }
+    if (/^\/static\/ribbon\/layout-v3\/[a-z_]+-[136]\.webp$/.test(pathname)) { res.writeHead(200, {"Content-Type":"image/svg+xml"}); res.end(svg); return; }
     if (pathname.startsWith("/static/")) {
       const resolved = path.resolve(root, "hsd_tool", `.${pathname}`);
       if (!resolved.startsWith(path.join(root, "hsd_tool/static") + path.sep)) return json({ error: "not found" }, 404);
@@ -579,6 +584,61 @@ try {
   await page.getByRole("dialog").getByText(exampleCode("grid"), { exact: true }).waitFor();
   assert.equal(exampleCatalogReads, cachedReads + 1, "leaving the feature clears its private case cache");
   await closeCase("grid");
+
+  // Several real-reference slots and self-made demonstrations stay distinct.
+  // Browsing them must neither preload the unselected private image nor choose
+  // it as an AI reference or mutate the employee's design.
+  multiCase = true;
+  await refreshWorkspace();
+  caseDialog = await openCase("stagger");
+  await waitCaseImage(exampleCode("stagger"));
+  assert.equal(await caseDialog.locator(".layout-example").count(), 1);
+  assert.equal(await caseDialog.getByRole("button", {name:"上一例", exact:true}).isEnabled(), false);
+  assert.equal(exampleImageReads.includes("SYNTHETIC-STAGGER_EXTRA"), false, "unselected private case is not downloaded");
+  await caseDialog.getByRole("button", {name:"下一例", exact:true}).click();
+  await waitCaseImage("SYNTHETIC-STAGGER_EXTRA");
+  assert.equal(await caseDialog.getByRole("button", {name:"下一例", exact:true}).isEnabled(), false);
+  await caseDialog.getByText("组合参考", {exact:true}).waitFor();
+  assert.match(await caseDialog.locator(".layout-example-difference").innerText(), /边带需要另外选择/);
+  await caseDialog.getByText("两行错位搭配上下边带", {exact:false}).waitFor();
+  const exampleViewport = page.viewportSize();
+  for (const width of [1366,1920]) {
+    await page.setViewportSize({width,height:width===1366?768:1080});
+    const box = await caseDialog.boundingBox();
+    assert.ok(box.x >= 0 && box.y >= 0 && box.x + box.width <= width + 2 && box.y + box.height <= (width===1366?768:1080) + 2, "case navigation stays within the viewport");
+    await page.screenshot({path:path.join(output,`ribbon-cases-${width}.png`)});
+  }
+  await page.setViewportSize(exampleViewport);
+  await caseDialog.getByRole("button", {name:"程序示例（3）", exact:true}).click();
+  assert.equal(await caseDialog.locator(".layout-example").count(), 0, "program examples never masquerade as company originals");
+  assert.equal(await caseDialog.locator(".layout-demos figure").count(), 3);
+  for (const image of await caseDialog.locator(".layout-demos img").all()) {
+    await image.scrollIntoViewIfNeeded();
+    await image.evaluate(element => element.decode());
+  }
+  await caseDialog.locator(".layout-demos figure").first().scrollIntoViewIfNeeded();
+  await page.screenshot({path:path.join(output,"ribbon-program-examples.png")});
+  assert.equal(await caseDialog.getByRole("button", {name:/选为.*参考/}).count(), 0, "generated demos cannot be sent as company references");
+  await caseDialog.getByRole("button", {name:"公司案例（2）", exact:true}).click();
+  assert.equal(await caseDialog.getByRole("combobox", {name:"选择案例", exact:true}).inputValue(), "SYNTHETIC-STAGGER_EXTRA", "changing reference type preserves the selected company case");
+  await caseDialog.getByRole("combobox", {name:"选择案例", exact:true}).selectOption(exampleCode("stagger"));
+  await waitCaseImage(exampleCode("stagger"));
+  await closeCase("stagger");
+  await page.getByRole("button", {name:"查看全部案例", exact:true}).click();
+  caseDialog = page.getByRole("dialog", {name:"全部排版案例", exact:true});
+  await caseDialog.getByRole("combobox", {name:"筛选排版案例", exact:true}).selectOption("stagger");
+  assert.equal(await caseDialog.locator(".layout-example").count(), 1);
+  await caseDialog.getByRole("button", {name:"关闭弹窗", exact:true}).click();
+  await caseDialog.waitFor({state:"hidden"});
+  caseDialog = await openCase("ends_open");
+  await caseDialog.getByRole("button", {name:"程序示例（3）", exact:true}).click();
+  assert.equal(await caseDialog.locator(".layout-demos img").count(), 3, "underscored built-in mode names retain safe local demo URLs");
+  await caseDialog.locator(".layout-demos img").first().evaluate(element => element.decode());
+  assert.equal(await caseDialog.locator(".layout-demos .layout-example-unavailable").count(), 0);
+  await closeCase("ends_open");
+  assert.deepEqual(await workspaceState(), unchangedWorkspace, "case pagination and demo tabs preserve design state");
+  assert.equal(writes.length, writesBeforeCases);
+  multiCase = false;
 
   // A request that finishes after a closed dialog must not reopen it or seed
   // a catalog cache for a later view.

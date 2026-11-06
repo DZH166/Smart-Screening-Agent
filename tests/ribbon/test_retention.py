@@ -386,10 +386,12 @@ def test_graceful_stop_waits_for_already_accepted_operation(service, monkeypatch
     assert stopped.is_set() and not first_thread.is_alive()
 
 
-@pytest.mark.parametrize('engine', ['seamless-unit-v1', 'seamless-unit-v2'])
+@pytest.mark.parametrize('engine', ['seamless-unit-v1', 'seamless-unit-v2', 'seamless-unit-v3'])
 def test_upload_pixel_decode_waits_for_renderer_allocation(service, monkeypatch, tmp_path, engine):
     from ribbon_backend import imaging
-    if engine == 'seamless-unit-v2':
+    if engine == 'seamless-unit-v3':
+        from ribbon_backend.loop_pipeline_v3 import resolve as resolve_loop
+    elif engine == 'seamless-unit-v2':
         from ribbon_backend.loop_pipeline_v2 import resolve as resolve_loop
     else:
         from ribbon_backend.loop_pipeline import resolve as resolve_loop

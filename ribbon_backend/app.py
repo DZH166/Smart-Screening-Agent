@@ -33,6 +33,10 @@ class Selection(StrictModel):
     template_id: str
     zone_background_refs: dict[str, str] = Field(default_factory=dict, max_length=3)
     border_ref: str | None = None
+    # Keys are the selected asset IDs; the service binds them to immutable
+    # pattern slots before saving a version. An omitted mapping preserves the
+    # parent's roles or uses the new layout's explicit defaults.
+    pattern_roles: dict[str, Literal['main', 'support', 'accent', 'border']] = Field(default_factory=dict, max_length=12)
     # Absence uses the saved/new-work defaults. An explicit null is retained
     # in the payload and rejected by the service instead of being discarded.
     background_tone: Literal['soft', 'original'] | None = None

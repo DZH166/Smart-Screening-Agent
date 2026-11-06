@@ -46,11 +46,76 @@ LAYOUT_WEBP_SHA256 = {
     'stacked': 'bf527670d32dc2c8d2cbb5000acb0f198980c7abba8a1d1f2d2c7ee17a8b3252',
     'stagger': '5db5bb26f3fdfa0c42dbb5edcea2ac44eb2117b07dc83caac92304bb6cb0ae6d',
 }
+# Separate reviewed v3 artwork; old v2 hashes and historical template files stay immutable.
+# Generated only from original Pillow drawings by tools/ribbon_layout_thumbnails_v3.py.
+LAYOUT_V3_WEBP_SHA256 = {
+    'alternating-1': 'c0e0e2999c4e6b0ce9c409c67d7a62d5f26a7a73f244451aa5e188085cdf9d8c',
+    'alternating-3': '0ccb3bc2d092e859bf6ac89493546a132baa875d2a5efcf1fe24dd103cd9755d',
+    'alternating-6': 'd2bd5dfc6173b867a882a7c1922feeaee5cf81a5eddcf36724801e1de3a99baa',
+    'alternating': '0af34f103aefbb767da003eae281a29c8e8c3f09f7975754d9713a6d4dc8d247',
+    'bordered-1': '1da068c5514161511f5ae33d217dd38b2c34f47055d927811f5c8317e77efaf4',
+    'bordered-3': '585face0d1fc722461d524a3d2f777a9907fa29f2e9ebfa34b1b1f6e26665725',
+    'bordered-6': '2cbe442b727c43055b3682685c4c1a7619b242487f55e7785782c75b256f8d21',
+    'bordered': '6ded187ce458fe84df09e84ea1e612ca64795ef7814f1afa3a5b895d6a245a24',
+    'ends-1': '940e112cba0a678736c76a20e756fd9a07d0c5252da03f65fd8055990a4fe1cf',
+    'ends-3': '3d6fc07b705c9874f79332cace112f5fdcdd8a71ca934b01d9a9e7877c1a484c',
+    'ends-6': 'f8d7a51d4aee7886df1de1e9c3ab2597a59d3bf87b92e9ce95824c4f036a7755',
+    'ends': '2348ac80a8b9441818ad3f65d7b17b9c2a45f9385daced61dc30192aba7343c4',
+    'ends_open-1': '6214ced8897438955b5f654e7aef61f9848bcc2272f1209ca75f83e5edb7fe4a',
+    'ends_open-3': '7f9eb6dc5ef52d39f0aaa459f589ec7c0e278a5687b5b451d909ec8c4cb3d220',
+    'ends_open-6': 'ad56326833fdad73a6b2a39edee6614758f06139d6703b2500a99b35799aba1a',
+    'ends_open': '15e274bb15134178006598b4d8dcc94f97d62ffa02ffaed1882ceee90d646c13',
+    'fullwidth-1': 'ac243323d0fb3ffa6c1686f2d30e3a65b9217001dc354c5c97fefdc12013cb88',
+    'fullwidth-3': 'f919c127ca9bb7dc00c9123b0b0e7b7f5855276605547d2174bb2b5e356dab3e',
+    'fullwidth-6': 'c26d95a3514447c5641339f9e606128fc1cdc7a5471e2ccec6d593e1f2670658',
+    'fullwidth': '84ed51a98f4b3f3d86bb3542651045e68a3dd9b85b7d1756e254b621e7925ec8',
+    'grid-1': 'ea11ec0802d5a0d41147952c9e8ee77896ce0a7920fd43ec47760b36598a86f3',
+    'grid-3': '1fadd14642f2a65fef3951d0feb4cbf2ba8d407b2eaccbf95a97c1613f2e6d1a',
+    'grid-6': '0b1ea1474326a83b0966aeae25677a6a92d711c82d3b89da0dd019118ea39cf9',
+    'grid': '45cdf01f119b0161ca8a137b27568ce76b86ff321cf6992f16e028e9d9e7ff7f',
+    'opposed-1': 'c7a1ac7c34d3b83fce792094b8d4cb626c3a82ca5e496f0634f518b818234fff',
+    'opposed-3': '61b19049886e2f432b46fd8f972b5e9040cee6cf598cfcb15ddaa378be77e1c2',
+    'opposed-6': '50e4576e3443d472f6e8a03762098c076ad81255b58c221e470a65d8f827e087',
+    'opposed': '3cf80981858a7c69e80ba4e30511da4f02caa238bbb131f8b37292f199ae0421',
+    'panels-1': '730389515f628f2753d7174817b281c012db360557e7dabf83056a8250a0ef34',
+    'panels-3': '8a4e03c5074e86b6e0f9cafa8d8b89d58bf21cf691b9866c3ae1f47e41fc09c6',
+    'panels-6': '71a2f47a876f020b74f87e608709fbe7c048564964ce063e2f8925211973a77d',
+    'panels': '23a491eee21d88ded829807827eaf48b958f8f3617ce875251c9a4ff7b49885f',
+    'scatter-1': '6d4c964b6300bc29beee6fe78b297a88bc6926a07b0f307bcd880b3c38513d84',
+    'scatter-3': '5c8e16f35e4c1cece7c9d3574d35b4097181a1c1849a8a9a31b2cb3af10aca56',
+    'scatter-6': 'd2ad708e234982eec275850d9941297917cf206462fee25089ae7dccf6ac05ef',
+    'scatter': '03c5364edf5ec52486cb46e7feb67296fc64f22c7862303cc954649d6e21eb34',
+    'scene-1': '061d36c12e1f4d4736314b4780256cbb89e1dca4c37e853b265d938feb8fbfac',
+    'scene-3': '40e995e93c7a008e8b018b4c5fb751f1b5f1cad039cc89e9034cd2445bbdaf64',
+    'scene-6': '62f072f1a8a848668001aabc2c493c26c2bf3fc04384966c796e006f398efc13',
+    'scene': 'fe49919702fd5a38ffa67f86352e905f4cdf726d3ff171fb4f8199677bff6ea1',
+    'single-1': 'cf917c476ca44225a7e960ea7078968a92974d53497492985910f5c8911b9c10',
+    'single-3': '1eeead4d12899ba113233192d3250db244f47cc07653891cca6751b6e2f965fd',
+    'single-6': '217c249416d2fc67f4e87b556c6a878839aa4fbcd8bea332eb4537837df7ef35',
+    'single': '60bd4bb94da13495518ff00372054b05385d2deac0a5a92741b04631b2111241',
+    'split-1': '7ed632109e63f91b78441590df363d02f33f0ccb4d1de310e6ba3c934afcf7ce',
+    'split-3': 'e1f28ed4096bdbcf499de78b3d66d1c7a6015b17b9a27b9947d35ff719ecff48',
+    'split-6': '915d8816bac63fb753615639b47708be5ed361d86434346d11d082e2bca10d5e',
+    'split': '43aaa7004fbefb1339a50758f2f8d02f4ac213f3cf77a02434c1ff1ff32fc663',
+    'stacked-1': '981f33ddb132c2b2b54dac086433ba6e896a74b94ca11e21228e52c5e6042d5f',
+    'stacked-3': '5e9ece2b7321e01c9fe2dc4f8ba6e9e37b9ad4385561145acbecc448e33b13c3',
+    'stacked-6': '1b79aca00a6f52770c9e408de69522872529ab3b3f52a5090fedaccbacb15545',
+    'stacked': '7391253d89bf7bbb209e00da60ad11cb30603fb78f54c6150e673dc6e03071aa',
+    'stagger-1': '3c6f32e22aeaaac32e82cc25ab742785528cd8bd865582f23a4a4ad4538e4ff4',
+    'stagger-3': 'd9baa3f58b6afe4835a8b0cd6c3c8f2b30e64c4e018cefcab68e9c8d54c4133b',
+    'stagger-6': 'a852c8b5062b22474888b4ebd0b0644bea035c41ccb3694f5cf2fbff86472d98',
+    'stagger': '32890f98536edf1141873d238e26d35ce1934fd862e1bdc262c5b9ec122708d4',
+}
 PUBLIC_THUMBNAILS = {
     prefix + mode + '.webp': sha
     for prefix in ('hsd_tool/static/ribbon/layout-v2/', 'ribbon_frontend/public/layout-v2/')
     for mode, sha in LAYOUT_WEBP_SHA256.items()
 }
+PUBLIC_THUMBNAILS.update({
+    prefix + name + '.webp': sha
+    for prefix in ('hsd_tool/static/ribbon/layout-v3/', 'ribbon_frontend/public/layout-v3/')
+    for name, sha in LAYOUT_V3_WEBP_SHA256.items()
+})
 ROOT_FILES = frozenset({'.gitignore', '.gitattributes', 'AGENTS.md', 'README.md', 'CONTRACTS.md',
     'CHANGELOG.md', '使用说明.txt', 'requirements.txt', 'requirements-dev.txt',
     'requirements-cloud.txt', 'build.ps1', 'launch.py', 'pytest.ini', 'HSD图号助手.spec'})
@@ -126,6 +191,7 @@ REQUIRED_FILES = frozenset({'hsd_tool/__init__.py', 'hsd_tool/cloud_server.py',
     'hsd_tool/static/ribbon-settings.js', 'hsd_tool/static/ribbon/ribbon.js',
     'ribbon_backend/app.py', 'ribbon_backend/service.py', 'ribbon_backend/retention.py',
     'ribbon_backend/providers.py', 'ribbon_backend/config.py', 'ribbon_backend/imaging.py',
+    'ribbon_backend/loop_layout_v3.py', 'ribbon_backend/loop_pipeline_v3.py',
     'ribbon_frontend/package.json', 'ribbon_frontend/tsconfig.json', 'ribbon_frontend/pnpm-lock.yaml',
     'ribbon_frontend/vite.config.ts', 'ribbon_frontend/src/embed.tsx',
     'requirements-cloud.txt', 'deploy/cloud.env.example', 'deploy/hsd-agent.service.example',

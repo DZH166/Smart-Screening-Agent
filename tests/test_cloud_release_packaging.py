@@ -13,6 +13,7 @@ from tools import prepare_cloud_release as release
 @pytest.mark.parametrize('name', [
     '.gitattributes', 'README.md', 'hsd_tool/server.py', 'hsd_tool/static/material.js',
     'hsd_tool/static/ribbon/ribbon.js', 'ribbon_backend/providers.py',
+    'ribbon_backend/loop_layout_v3.py', 'ribbon_backend/loop_pipeline_v3.py',
     'ribbon_frontend/src/App.tsx', 'ribbon_frontend/src/api.ts', 'ribbon_frontend/src/styles.css',
     'hsd_tool/ribbon_examples.py', 'ribbon_frontend/src/LayoutExamples.tsx',
     'ribbon_frontend/package.json', 'ribbon_frontend/tsconfig.json', 'ribbon_frontend/vite.config.ts',
@@ -91,7 +92,7 @@ def test_reviewed_layout_previews_are_bound_to_public_paths_and_exact_bytes():
     name = 'hsd_tool/static/ribbon/layout-v2/scatter.webp'
     source = 'ribbon_frontend/public/layout-v2/scatter.webp'
     reviewed = (release.ROOT / name).read_bytes()
-    assert len(release.PUBLIC_THUMBNAILS) == 28
+    assert len([p for p in release.PUBLIC_THUMBNAILS if '/layout-v2/' in p]) == 28
     for path in release.PUBLIC_THUMBNAILS:
         release.scan(path, (release.ROOT / path).read_bytes())
     assert (release.ROOT / source).read_bytes() == reviewed
@@ -101,6 +102,32 @@ def test_reviewed_layout_previews_are_bound_to_public_paths_and_exact_bytes():
     ]:
         with pytest.raises(RuntimeError):
             release.scan(invalid_name, invalid_value)
+
+
+def test_v3_demo_variants_have_exact_names_bytes_and_mirrors():
+    expected = {mode + suffix for mode in release.LAYOUT_WEBP_SHA256
+                for suffix in ('', '-1', '-3', '-6')}
+    assert set(release.LAYOUT_V3_WEBP_SHA256) == expected and len(expected) == 56
+    assert len(release.PUBLIC_THUMBNAILS) == 28 + 56 * 2
+    for name in expected:
+        public = 'hsd_tool/static/ribbon/layout-v3/' + name + '.webp'
+        source = 'ribbon_frontend/public/layout-v3/' + name + '.webp'
+        value = (release.ROOT / public).read_bytes()
+        assert value == (release.ROOT / source).read_bytes()
+        assert release.digest(value) == release.LAYOUT_V3_WEBP_SHA256[name]
+        assert public in release.REQUIRED_FILES and source in release.REQUIRED_FILES
+        release.scan(public, value)
+        release.scan(source, value)
+    value = (release.ROOT / 'hsd_tool/static/ribbon/layout-v3/scatter-6.webp').read_bytes()
+    for name, changed in [
+        ('hsd_tool/static/ribbon/layout-v3/scatter-6.webp', value + b'altered'),
+        ('hsd_tool/static/ribbon/layout-v3/scatter-2.webp', value),
+        ('hsd_tool/static/ribbon/layout-v3/private.webp', value),
+        ('ribbon_frontend/public/layout-v3/private.webp', value),
+        ('hsd_tool/static/ribbon/layout-v2/scatter.webp', value),
+    ]:
+        with pytest.raises(RuntimeError):
+            release.scan(name, changed)
 
 
 def files():
