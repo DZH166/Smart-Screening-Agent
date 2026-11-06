@@ -1,6 +1,6 @@
 #  HSD 图号助手
 
-底纹精修专项在独立分支 `codex/ribbon-background-refine` 开发，尚未合并上线。选择“共用底纹”或某区底纹后，直接写清需要添加、移除、替换的内容和覆盖范围；原有柔和显示会继续生效。原因、验证与限制见[专项记录](docs/ribbon-background-refinement-branch.md)。
+底纹精修专项已在独立分支 `codex/ribbon-background-refine` 完成修复与验证，尚未合并上线。选择“共用底纹”或某区底纹后，直接写清需要添加、移除、替换的内容和覆盖范围；原有柔和显示会继续生效。原因、验证与限制见[专项记录](docs/ribbon-background-refinement-branch.md)。
 
 当前网站已更新至 `v1.26.0 / 2ac893a1`（2026-11-06）。新版14种排法使用独立旋转、保持主辅比例的整组适配，以及真实可区分的三档密度；左右、上下和三段分区可分别选底纹，上下边饰可选完整边饰条。新作品继续下载一个循环PNG单元，原人物、文字、旧版本及下载均受保护。细节见[排法合同](docs/ribbon-loop-mode-contract.md)。
 
