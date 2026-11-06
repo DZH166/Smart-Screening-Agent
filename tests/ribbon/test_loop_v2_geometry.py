@@ -246,3 +246,13 @@ def test_upscale_ratio_reports_the_largest_pattern_enlargement():
     )
     assert pipe._upscale_ratio(geometry) == pytest.approx(314 / 64)
     assert pipe._upscale_ratio({'metrics': {'slots': {}}, 'specs': []}) == 1.0
+
+
+def test_rhythm_metrics_describe_unit_repeats_and_variety():
+    snap = resolved('panels')
+    snap['output_profile_source'] = dict(snap['output_profile'], width=11811)
+    rhythm = pipe._rhythm(snap)
+    assert rhythm['repeats_to_length'] == max(1, round(11811 / snap['loop_layout']['period_px']))
+    assert rhythm['groups'] >= 1
+    assert rhythm['unit_width'] == snap['loop_layout']['period_px']
+    assert 1.0 <= rhythm['size_variety']

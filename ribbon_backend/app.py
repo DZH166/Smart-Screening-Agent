@@ -35,8 +35,9 @@ class Selection(StrictModel):
     border_ref: str | None = None
     # Absence uses the saved/new-work defaults. An explicit null is retained
     # in the payload and rejected by the service instead of being discarded.
-    background_tone: Literal['soft', 'original'] | None = None
+    background_tone: Literal['soft', 'quiet', 'original'] | None = None
     design_density: Literal['airy', 'balanced', 'rich'] | None = None
+    design_style: str | None = Field(default=None, max_length=32)
 
 
 class Generate(Selection):
@@ -206,6 +207,11 @@ def create_app(settings: Settings | None = None, *, service: Service | None = No
         if any(value in ('*', etag, 'W/' + etag) for value in candidates):
             return Response(status_code=304, headers=headers)
         return FileResponse(path, media_type='image/png', headers=headers)
+
+    @app.get('/api/design-styles')
+    def design_styles(current=Depends(user)):
+        from .design_style import public
+        return public()
 
     @app.get('/api/templates')
     def templates(current=Depends(user)):

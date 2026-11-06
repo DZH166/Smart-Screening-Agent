@@ -16,6 +16,7 @@ import {
   type Asset,
   type Config,
   type Design,
+  type DesignStyle,
   type GenerateRequest,
   type Job,
   type Selection,
@@ -210,6 +211,7 @@ const emptySelection: Selection = {
   template_id: "",
   background_tone: "soft",
   design_density: "balanced",
+  design_style: "classic",
 };
 const basicLayoutModes = new Set(["grid", "stagger", "scatter", "single", "ends", "panels"]);
 const layoutHints: Record<string, string> = {
@@ -270,6 +272,7 @@ function restoreSelection(value: Selection, version?: Version): Selection {
   }
   if (modern) {
     next.design_density = value.design_density ?? snapshot?.design_density ?? "balanced";
+    if (snapshot?.design_style) next.design_style = snapshot.design_style;
   } else {
     // A cached draft cannot grant a legacy version the new layout controls.
     delete next.design_density;
@@ -355,6 +358,8 @@ function LoopPreview({ version, sizeLabel, target }: { version: Version; sizeLab
         <div><dt>下载尺寸</dt><dd>{sizeLabel || `${loop.width}×${loop.height}px`}</dd></div>
         <div><dt>循环方式</dt><dd>{loop.kind === "panel" ? "定位区段循环" : "图案序列循环"}</dd></div>
         <div><dt>检查引擎</dt><dd>{loop.engine}</dd></div>
+        {loop.rhythm && <div><dt>重复节奏</dt><dd>{loop.rhythm.repeats_to_length ? `100cm 约 ${loop.rhythm.repeats_to_length} 个单元` : `${loop.rhythm.unit_width}px 单元`}
+          {loop.rhythm.size_variety > 1.05 ? ` · 尺寸差 ${loop.rhythm.size_variety}×` : " · 尺寸一致"}</dd></div>}
         {source && <div><dt>来源配置</dt><dd>{source.name}{source.width && source.height ? ` · ${source.width}×${source.height}px` : ""}</dd></div>}
       </dl>
     </details>
@@ -424,6 +429,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
   const [config, setConfig] = useState<Config | null>(null),
     [assets, setAssets] = useState<Asset[]>([]),
     [templates, setTemplates] = useState<Template[]>([]),
+    [styles, setStyles] = useState<DesignStyle[]>([{ id: "classic", label: "经典等距", hint: "保持原有节奏" }]),
     [designs, setDesigns] = useState<Design[]>([]);
   const [design, setDesign] = useState<Design | null>(null),
     [selection, setSelection] = useState<Selection>(emptySelection),
@@ -653,14 +659,16 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
     if (d.active_job) setJob(d.active_job);
   }
   async function loadCatalog() {
-    const [a, t, c] = await Promise.all([
+    const [a, t, c, s] = await Promise.all([
       api<Asset[]>("/assets"),
       api<Template[]>("/templates"),
       api<Config>("/config"),
+      api<DesignStyle[]>("/design-styles"),
     ]);
     setAssets(a);
     setTemplates(t);
     setConfig(c);
+    if (s.length) setStyles(s);
   }
   useEffect(() => {
     let cancelled = false;
@@ -673,13 +681,15 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
           api<Template[]>("/templates", {signal:controller.signal}),
           api<Config>("/config", {signal:controller.signal}),
           api<Design[]>("/designs?summary=true", {signal:controller.signal}),
+          api<DesignStyle[]>("/design-styles", {signal:controller.signal}),
         ] as const);
         if (cancelled) return;
-        const [ar,tr,cr,dr] = results;
+        const [ar,tr,cr,dr,sr] = results;
         if (ar.status==="fulfilled") setAssets(ar.value);
         if (tr.status==="fulfilled") setTemplates(tr.value);
         if (cr.status==="fulfilled") setConfig(cr.value);
         if (dr.status==="fulfilled") setDesigns(dr.value);
+        if (sr.status==="fulfilled" && sr.value.length) setStyles(sr.value);
         const failure=results.find(r=>r.status==="rejected");
         if (failure?.status==="rejected") throw failure.reason;
         const a=ar.status==="fulfilled"?ar.value:[], t=tr.status==="fulfilled"?tr.value:[], list=dr.status==="fulfilled"?dr.value:[];
@@ -1420,6 +1430,23 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                     </select>
                   </label>
                 )}
+                {modern && <div className="style-control" role="group" aria-label="设计风格">
+                  <span>设计风格</span>
+                  <div className="style-chips">
+                    {styles.map((style) => (
+                      <button key={style.id} type="button" disabled={locked}
+                        className={`style-chip ${(selection.design_style || "classic") === style.id ? "selected" : ""}`}
+                        aria-pressed={(selection.design_style || "classic") === style.id}
+                        title={style.hint}
+                        onClick={() => updateSelection({ ...selection, design_style: style.id })}>
+                        {style.label}
+                      </button>
+                    ))}
+                  </div>
+                  {!!styles.find((s) => s.id === (selection.design_style || "classic"))?.hint && (
+                    <p className="style-hint">{styles.find((s) => s.id === (selection.design_style || "classic"))?.hint}</p>
+                  )}
+                </div>}
               </section>
               {modern && (zones.length>0 || template?.mode==="bordered") && <details className="optional-layers" key={template?.mode}>
                 <summary>{zones.length ? "分区底纹" : "独立边饰"}</summary>
@@ -1501,12 +1528,14 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                   </p>
                 )}
                 <label className="background-tone-control">
-                  <input type="checkbox"
-                    checked={selection.background_tone === "soft"}
+                  底纹处理
+                  <select aria-label="底纹处理" value={selection.background_tone || "soft"}
                     disabled={locked || backgroundProcessing}
-                    onChange={(event) => updateSelection({ ...selection, background_tone: event.target.checked ? "soft" : "original" })}
-                  />
-                  柔和底纹，突出主图
+                    onChange={(event) => updateSelection({ ...selection, background_tone: event.target.value as Selection["background_tone"] })}>
+                    <option value="original">保持原色</option>
+                    <option value="soft">柔和，突出主图</option>
+                    <option value="quiet">更淡，图案为主</option>
+                  </select>
                 </label>
               </section>
               {current && changed && (

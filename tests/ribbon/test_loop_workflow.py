@@ -581,3 +581,25 @@ def test_recovered_tampered_report_or_inputs_cannot_commit_or_charge(env, monkey
     assert env.download(current(latest)) == original
     with env.service.db.connect() as db:
         assert db.execute('SELECT COUNT(*) FROM quota_events').fetchone()[0] == 0
+
+
+def test_design_style_preset_fills_defaults_in_the_snapshot(workflow):
+    # The fixture sets background_tone explicitly; drop it so the preset's own
+    # tone (soft) is what the test observes.
+    selection = {key: value for key, value in workflow.selection.items() if key != 'background_tone'}
+    design = workflow.generate({**selection, 'design_style': 'hierarchy'})
+    snapshot = design['versions'][0]['snapshot']
+    assert snapshot['design_style'] == 'hierarchy'
+    assert snapshot['params']['spacing'] == pytest.approx(1.08)
+    slots = snapshot['pattern_slots']
+    assert snapshot['slot_params'][slots[0]]['scale'] == pytest.approx(1.24)
+    assert snapshot['slot_params'][slots[1]]['scale'] == pytest.approx(0.78)
+    assert snapshot['background_tone'] == 'quiet'
+
+
+def test_classic_style_keeps_the_existing_snapshot_values(workflow):
+    design = workflow.generate({**workflow.selection, 'design_style': 'classic'})
+    snapshot = design['versions'][0]['snapshot']
+    assert snapshot['design_style'] == 'classic'
+    assert snapshot['params']['spacing'] == pytest.approx(1.0)
+    assert snapshot.get('slot_params', {}) == {}
