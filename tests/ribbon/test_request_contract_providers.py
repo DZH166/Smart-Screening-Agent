@@ -11,7 +11,7 @@ import pytest
 from hsd_tool.ai_key_pool import ApiKeyPool
 from hsd_tool import material_providers as transport
 from ribbon_backend.config import Settings
-from ribbon_backend.providers import ClarificationNeeded, PLAN_SCHEMA, PLANNER_INSTRUCTIONS, get_provider
+from ribbon_backend.providers import ClarificationNeeded, PLAN_SCHEMA, PLANNER_INSTRUCTIONS, _plan_schema, _safe_plan_input, get_provider
 from ribbon_backend.request_contract import PROTOCOL
 from test_request_contract import content, parameter, view, wire
 
@@ -96,6 +96,40 @@ def test_serialized_schema_and_examples_exclude_preserve_from_operation_bindings
     assert '中文内容示例' in PLANNER_INSTRUCTIONS and 'English content example' in PLANNER_INSTRUCTIONS
     assert 'parameters.source_ids=["s1"] only' in PLANNER_INSTRUCTIONS
     assert 'NEVER attach a preserve ID to any operation' in PLANNER_INSTRUCTIONS
+
+
+def test_layout_schema_distinguishes_geometry_targets_from_content_slots():
+    snapshot, prompt = view(), '图案缩小20%，底纹添加装饰'
+    schema = _plan_schema(snapshot, 'deepseek_seedream', prompt=prompt)
+    variants = schema['properties']['requirements']['items']['anyOf']
+    roles = {item['properties']['effect']['enum'][0]: item['properties']['target_id']['enum'] for item in variants}
+    assert roles['parameters'] == ['layout', 'background']
+    assert 'p1' not in roles['parameters'] and 'p1' in roles['content']
+    assert all(item['properties']['source_id']['enum'] == ['s1', 's2'] for item in variants)
+    safe = _safe_plan_input(prompt, snapshot, [], provider='deepseek_seedream')
+    assert safe['effect_targets']['parameters'] == ['layout', 'background']
+
+
+def test_selected_pattern_schema_uses_slot_for_target_and_actual_id_for_asset():
+    snapshot = view()
+    snapshot.update(target_kind='pattern', target_id='p1', asset_refs=['a'])
+    schema = _plan_schema(snapshot, 'deepseek_seedream', prompt='给这个图案添加装饰')
+    variants = schema['properties']['requirements']['items']['anyOf']
+    roles = {item['properties']['effect']['enum'][0]: item['properties']['target_id']['enum'] for item in variants}
+    assert roles['parameters'] == ['p1'] and roles['content'] == ['p1']
+    edits = [item for item in schema['properties']['operations']['items']['anyOf'] if 'edit_asset' in item['properties']['type']['enum']]
+    assert edits[0]['properties']['asset_id']['enum'] == ['a']
+    assert 'p1' not in edits[0]['properties']['asset_id']['enum']
+
+
+def test_border_schema_does_not_advertise_parameter_effect_or_operation():
+    snapshot = view()
+    snapshot.update(target_kind='border', target_id='border', asset_refs=['strip'])
+    schema = _plan_schema(snapshot, 'deepseek_seedream', prompt='给边饰添加装饰')
+    effects = [item['properties']['effect']['enum'][0] for item in schema['properties']['requirements']['items']['anyOf']]
+    assert 'parameters' not in effects and 'content' in effects
+    operations = schema['properties']['operations']['items']['anyOf']
+    assert all('parameters' not in item['properties']['type']['enum'] for item in operations)
 
 
 @pytest.mark.parametrize('name', ['openai', 'deepseek_seedream'])
