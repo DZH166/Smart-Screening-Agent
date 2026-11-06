@@ -87,3 +87,10 @@ def test_preexisting_border_and_opaque_background_are_not_called_truncated(tmp_p
     with Image.new('RGB', (2048, 2048), 'blue') as image:
         image.save(output)
     validate_edit_result(original, output, target='background')
+
+
+def test_output_policy_message_guides_infringement_retries():
+    from hsd_tool.provider_diagnostics import MESSAGES
+    message = MESSAGES['output_policy']
+    assert '版权' in message and '本地合成' in message
+    assert '两次' in message and '侵权' in message
