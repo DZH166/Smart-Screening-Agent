@@ -40,6 +40,9 @@ const oldParameters=structuredClone(checked);oldParameters.id='old-parameters';o
 oldParameters.snapshot.layout_engine='design-rhythm-v2';delete oldParameters.snapshot.loop;
 oldParameters.snapshot.edit_plan.request_receipt.requirements[0].execution='parameters_applied_unverified';
 design.versions.push(oldParameters);
+const v3Parameters=structuredClone(oldParameters);v3Parameters.id='v3-parameters';v3Parameters.sequence=14;
+v3Parameters.snapshot.layout_engine='seamless-unit-v3';v3Parameters.snapshot.loop={...snapshot.loop,engine:'seamless-unit-v3'};
+design.versions.push(v3Parameters);
 for(const [i,mutate] of [
   r=>{r[1].source_id=r[0].source_id;},
   r=>{r[1].start=r[0].end-1;},
@@ -64,6 +67,7 @@ const server=createServer(async(req,res)=>{
     if(p==='/api/ribbon/config')return json({provider:'test',auth_mode:'demo',ai_ready:true,output_profile:profile,max_refinements:2});
     if(p==='/api/ribbon/assets')return json([{id:'pattern',name:'合成图案',kind:'pattern',is_demo:true,shared:true,url:image},{id:'background',name:'合成底纹',kind:'background',is_demo:true,shared:true,url:image}]);
     if(p==='/api/ribbon/templates')return json([{id:'single',name:'单排重复',mode:'single',version:1,enabled:true,thumbnail_url:image,rules:{}}]);
+    if(p==='/api/ribbon/design-styles')return json([{id:'classic',label:'经典等距',hint:'合成风格'}]);
     if(p==='/api/ribbon/designs')return json([design]);
     if(p==='/api/ribbon/designs/design')return json(design);
     return json({detail:'合成测试未配置此操作'},404);
@@ -113,6 +117,11 @@ try{
   await result.getByText('查看本次要求',{exact:true}).click();
   await result.getByText('参数已应用，效果需核对',{exact:true}).waitFor();
   assert.equal(await result.getByText('参数调整已核对',{exact:true}).count(),0);
+  await choose(14);
+  await result.getByText('已生成，效果请对照要求',{exact:true}).waitFor();
+  await result.getByText('查看本次要求',{exact:true}).click();
+  await result.getByText('参数已应用，效果需核对',{exact:true}).waitFor();
+  assert.equal(await result.getByText('参数调整已核对',{exact:true}).count(),0,'v3 numeric-only receipt must not claim physical geometry verification');
   for(const sequence of [10,11,12,13]) {
     await choose(sequence);await result.getByText('查看本次要求',{exact:true}).click();
     await page.waitForTimeout(50);

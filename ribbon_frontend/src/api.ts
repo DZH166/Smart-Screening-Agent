@@ -19,7 +19,7 @@ export type Candidate = {
   image: string;
   width: number;
   height: number;
-  rhythm: { unit_width: number; repeats_to_length: number | null; size_variety: number };
+  rhythm?: { unit_width: number; repeats_to_length: number | null; size_variety: number };
 };
 export type Template = {
   id: string;
@@ -58,6 +58,7 @@ export type Editing = {
 };
 export type Selection = {
   asset_ids: string[];
+  pattern_roles?: Record<string, PatternRole>;
   zone_background_refs?: Record<string,string>;
   border_ref?: string;
   background_id: string;
@@ -72,7 +73,7 @@ export type GenerateRequest = Selection & {
   reference_code: string | null;
 };
 export type Loop = {
-  engine: "seamless-unit-v1" | "seamless-unit-v2";
+  engine: "seamless-unit-v1" | "seamless-unit-v2" | "seamless-unit-v3";
   width: number;
   height: number;
   status: "checked" | "needs_review";
@@ -96,6 +97,7 @@ export type Snapshot = {
   border_ref?: string;
   zone_colors?: Record<string,string>;
   pattern_slots?: string[];
+  pattern_roles?: Record<string, PatternRole>;
   object_transforms?: {slot_id?: string; x:number; y:number; width:number; height:number}[];
   background_ref: string;
   template_id: string;
@@ -128,6 +130,35 @@ export type RequestReceipt = {
     execution: "geometry_verified" | "parameters_applied_unverified" | "image_generated_unverified" | "constraint_forwarded";
   }[];
 };
+export type PatternRole = "main" | "support" | "accent" | "border";
+export function isDirectLayoutReference(example: {available:boolean; reference_only:boolean; mode_tags:string[]; mode_notes?:Record<string,{fit:string}>}, mode:string): boolean {
+  return example.available && !example.reference_only && example.mode_tags.includes(mode) && example.mode_notes?.[mode]?.fit === "direct";
+}
+export const patternRoleChoices: Record<string, { value: PatternRole; label: string }[]> = {
+  scene: [{value:"main",label:"主图"},{value:"support",label:"配角"},{value:"accent",label:"小点缀"}],
+  scatter: [{value:"main",label:"主图"},{value:"accent",label:"小点缀"}],
+  bordered: [{value:"main",label:"中间主图"},{value:"border",label:"上下边饰"}],
+};
+
+// Wire selections use current asset IDs; saved snapshots use stable slot IDs.
+// Never carry a role onto a removed/replaced asset by its array position.
+export function normalizedPatternRoles(ids: string[], mode: string, roles?: Record<string, PatternRole>): Record<string, PatternRole> {
+  const choices = patternRoleChoices[mode];
+  if (!choices) return {};
+  return Object.fromEntries(ids.map((id, index) => [id,
+    choices.some(choice => choice.value === roles?.[id]) ? roles![id] :
+      mode === "scene" && index > 0 ? "support" : "main",
+  ]));
+}
+export function snapshotPatternRoles(snapshot: Snapshot): Record<string, PatternRole> {
+  if (snapshot.layout_engine !== "seamless-unit-v3") return {};
+  const byAsset: Record<string, PatternRole> = {};
+  snapshot.asset_refs.forEach((id, index) => {
+    const role = snapshot.pattern_roles?.[snapshot.pattern_slots?.[index] || ""];
+    if (role) byAsset[id] = role;
+  });
+  return normalizedPatternRoles(snapshot.asset_refs, snapshot.template_mode, byAsset);
+}
 export type Version = {
   id: string;
   design_id: string;

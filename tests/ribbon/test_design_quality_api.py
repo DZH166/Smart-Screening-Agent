@@ -7,7 +7,7 @@ import pytest
 
 from ribbon_backend.app import create_app
 from ribbon_backend.config import Settings
-from ribbon_backend.service import Service
+from ribbon_backend.service import Service, LAYOUT_ENGINE
 
 
 @pytest.fixture
@@ -57,7 +57,7 @@ def test_new_controls_pass_actual_http_schema_and_persist_through_refinement(api
     service, client, choice = api
     work, _ = generate(api, dict(choice, background_tone='original', design_density='rich'))
     original = current(work)
-    assert original['snapshot']['layout_engine'] == 'seamless-unit-v2'
+    assert original['snapshot']['layout_engine'] == LAYOUT_ENGINE
     assert original['snapshot']['output_profile_source']['width'] == 1080
     assert original['snapshot']['loop']['width'] == original['snapshot']['output_profile']['width']
     assert original['snapshot']['background_tone'] == 'original'

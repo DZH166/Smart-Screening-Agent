@@ -108,3 +108,29 @@ def _clamp(value):
         return 1.0
     low, high = SCALE_RANGE
     return max(low, min(high, number))
+
+
+def restyle(old_style, new_style, slots, params, slot_params, density, tone, *, density_given=False, tone_given=False):
+    """Apply a deliberate preset change while retaining relative manual edits.
+
+    A saved style is part of an immutable parent. Remove its known multiplier,
+    apply the newly chosen multiplier and retain other local transforms. This
+    never changes the parent or asserts that the resulting pixels differ.
+    """
+    old, new = STYLES.get(old_style, STYLES['classic']), STYLES[new_style]
+    merged = dict(params)
+    for key in ('scale', 'spacing'):
+        value = float(params.get(key, 1.0)) * new['params'].get(key, 1.0) / old['params'].get(key, 1.0)
+        merged[key] = max(.2 if key == 'scale' else .4, min(2.5 if key == 'scale' else 3., value))
+    def factor(style, index):
+        value = style['scale']
+        if isinstance(value, tuple):
+            return value[0] if index == 0 else value[1]
+        return value if value is not None else 1.0
+    local = {slot: dict(values) for slot, values in slot_params.items() if slot in slots}
+    for index, slot in enumerate(slots):
+        value = _clamp(local.get(slot, {}).get('scale', 1.0) * factor(new, index) / factor(old, index))
+        if abs(value - 1.) > 1e-9 or 'scale' in local.get(slot, {}):
+            local.setdefault(slot, {})['scale'] = value
+    return (merged, local, density if density_given else (new['density'] or density),
+            tone if tone_given else (new['tone'] or tone))

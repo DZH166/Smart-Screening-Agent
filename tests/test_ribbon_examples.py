@@ -32,16 +32,32 @@ def installed_example(employee_app, example_bytes):
     return repository, path
 
 
-def test_catalog_covers_every_implemented_mode_without_reference_only_shortcuts(tmp_path):
+def test_catalog_covers_modes_with_multiple_honest_cases_and_actual_program_demos(tmp_path):
     from ribbon_backend.imaging import MODES
     catalog = ribbon_examples.RibbonExamples(tmp_path / 'not-installed').catalog()
     assert {m['mode'] for m in catalog['modes']} == set(MODES)
     cases = {item['id']: item for item in catalog['examples']}
-    assert len(cases) == 13
+    assert len(cases) == 34
     for guide in catalog['modes']:
-        assert guide['example_ids']
+        assert len(set(guide['example_ids'])) >= 2
         assert all(guide['mode'] in cases[code]['mode_tags'] for code in guide['example_ids'])
-    assert not any(item['reference_only'] for item in cases.values())
+        assert len(guide['demo_variants']) == 3
+        for demo in guide['demo_variants']:
+            filename = demo['image_url'].split('?')[0]
+            assert filename.startswith('/static/ribbon/layout-v3/')
+            raw = (Path(__file__).resolve().parents[1] / 'hsd_tool' / filename.lstrip('/')).read_bytes()
+            assert filename.endswith('.webp')
+            assert demo['image_url'].split('?v=')[1] == hashlib.sha256(raw).hexdigest()[:16]
+        for code in guide['example_ids']:
+            note = cases[code]['mode_notes'][guide['mode']]
+            assert note['fit'] in {'direct', 'partial'}
+            assert note['look_for'] and note['difference']
+            if note['fit'] == 'partial':
+                assert not ribbon_examples.eligible_ai_reference(code, guide['mode'])
+    assert 'HSD51045' not in next(g for g in catalog['modes'] if g['mode'] == 'ends')['example_ids']
+    assert ribbon_examples.eligible_ai_reference('HSD68568', 'ends')
+    assert not ribbon_examples.eligible_ai_reference('HSD68568', 'single')
+    assert not ribbon_examples.eligible_ai_reference('../HSD68568', 'ends')
     assert all(not item['available'] and item['image_url'] is None for item in cases.values())
     assert not (tmp_path / 'not-installed').exists()
 

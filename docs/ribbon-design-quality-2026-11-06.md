@@ -71,7 +71,7 @@ coverage         图案覆盖率
 - `quiet` 对“花纹吵闹”的背景改善最大；
 - `festive` 在已有复杂背景时容易糊成一片，适合纯色底。
 
-对比图：`docs/preview/ribbon-design-quality-grid.png`、`...-panels.png`。
+对比图仅留本机私有证据目录 `tmp/integration-1270-private/`。这两张真实素材派生结果此前误入主线，本轮从当前源码移除并保留本机副本；既有 Git 历史不重写，不能据此声称历史中不存在图片。Linux 发布包已排除 `docs/preview`，不分发这些业务结果。
 
 ## 4. 三选一候选对比（已实现）
 

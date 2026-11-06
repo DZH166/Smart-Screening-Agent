@@ -37,16 +37,16 @@ def test_request_recorded_before_transport_and_settled_without_private_response(
     seen = []
     def transport(request, **kwargs):
         with service.db.connect() as db:
-            seen.extend(dict(r) for r in db.execute('SELECT id,status FROM provider_calls WHERE job_id=?', (job['id'],)))
+            seen.extend(dict(r) for r in db.execute("SELECT id,status FROM provider_calls WHERE job_id=? AND status='STARTED'", (job['id'],)))
         return HttpReply(status, json.dumps({'error': {'code': error_code, 'message': 'sensitive-user-value'}}).encode(),
                          {'x-request-id': 'safe-request-123'}, ENDPOINT)
     provider.ark._transport = transport
     with pytest.raises(ProviderError) as exc:
         service.call_provider(job, 'generate_background', lambda: provider.generate_background(
-            'sensitive-user-value', tmp_path/'never-created.png'))
+            'sensitive-user-value', tmp_path/'never-created.png'), retry_provider=provider)
     assert 'sensitive-user-value' not in str(exc.value)
     rows = service.admin_overview()['provider_calls']
-    assert len(rows) == 1
+    assert len(rows) == (2 if category == 'output_policy' else 1)
     call = rows[0]
     # Output-review blocks get one automatic retry, so that category records
     # two dispatched calls; every other failure is dispatched once.

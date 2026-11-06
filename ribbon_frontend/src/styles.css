@@ -2290,6 +2290,9 @@ small {
 .template-example-button:focus-visible,
 .template-examples-all:focus-visible { outline: 2px solid #507857; outline-offset: 2px; }
 .layout-examples-modal { width: 1160px; }
+.pattern-role { width: 100%; min-width: 0; min-height: 30px; margin-top: 5px; padding: 3px 5px; font-size: 12px; color: #284a36; border: 1px solid #b8c7b1; border-radius: 5px; background: #fff; }
+.selected-patterns.has-pattern-roles { grid-template-columns: repeat(2, minmax(80px, 1fr)); }
+.has-pattern-roles .pattern-tile { min-width: 80px; }
 .layout-examples-modal .modal-heading {
   position: sticky;
   top: -27px;
@@ -2318,6 +2321,25 @@ small {
 }
 .layout-examples-tools { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
 .layout-examples-tools > button { min-height: 34px; font-size: 13px; }
+.case-mode-filter { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.case-mode-filter select { min-height: 36px; }
+.layout-case-navigation { display: flex; align-items: center; gap: 12px; margin: 14px 0; }
+.layout-case-navigation > label { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; }
+.layout-case-navigation > label > span { white-space: nowrap; font-size: 13px; color: #42583d; }
+.layout-case-navigation select { flex: 1; min-width: 0; min-height: 36px; }
+.layout-example-kind { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 18px; }
+.layout-example-kind button { border: 1px solid #bdcdb6; border-radius: 6px; background: #fff; color: #37513d; padding: 8px 14px; font-size: 14px; }
+.layout-example-kind button.selected { background: #e9f0e4; border-color: #67855b; font-weight: 600; }
+.layout-example-difference { margin: 8px 0 0; font-size: 14px; line-height: 1.7; color: #695626; }
+.layout-demo-note { color: #42583d; font-size: 14px; line-height: 1.7; }
+.layout-demos figure { margin: 16px 0; border-top: 1px solid #dbe5d7; padding-top: 14px; }
+.layout-demos figcaption { display: flex; gap: 6px; flex-direction: column; margin-bottom: 8px; font-size: 14px; line-height: 1.6; }
+.layout-demos figcaption span { color: #42583d; }
+.layout-demos figure > img { display: block; width: 100%; height: auto; max-height: 250px; object-fit: contain; background: #f6f8f2; border: 1px solid #dbe5d7; border-radius: 5px; }
+@media (max-width: 600px) {
+  .layout-case-navigation { gap: 6px; }
+  .layout-case-navigation > label { flex-direction: column; align-items: stretch; gap: 4px; }
+}
 .layout-examples-loading,
 .layout-examples-error { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; min-height: 140px; color: #37513d; }
 .layout-examples-error { display: block; padding: 20px 0; }
@@ -3131,10 +3153,21 @@ button.primary.small {
   gap: 18px;
   align-items: start;
 }
-.preview-panel,
 .refinement-panel {
   position: sticky;
   top: 76px;
+}
+.preview-panel { position: static; }
+/* One sticky container keeps the canvas and history in the same flow. A
+   second sticky canvas would cover the history buttons while scrolling. */
+@container (min-width:1051px) { .center-column { top:76px; } }
+@container (min-width:701px) and (max-width:1050px) {
+  .workspace-grid { grid-template-columns:220px minmax(0,1fr); gap:16px; }
+  .center-column, .refinement-panel { position:static; }
+}
+@container (max-width:700px) {
+  .workspace-grid, .workspace-grid.draft-workspace { grid-template-columns:minmax(0,1fr); }
+  .center-column, .refinement-panel { position:static; }
 }
 .history-panel {
   margin-top: 14px;

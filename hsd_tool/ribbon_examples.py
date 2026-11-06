@@ -152,6 +152,42 @@ MODE_GUIDES = (
 )
 
 
+# Versioned teaching expansion. The artwork is installed only in the instance's
+# private directory; code contains reviewed hashes and plain-language metadata.
+from .ribbon_example_expansion import (
+    NEW_IMAGE_SPECS, NEW_EXAMPLES, GUIDE_UPDATES, LEGACY_NOTES, DEMO_VARIANTS,
+)
+IMAGE_SPECS = {**IMAGE_SPECS, **NEW_IMAGE_SPECS}
+_expanded = {item['code']: dict(item) for item in EXAMPLES}
+for code, title, mode, description, look, difference, fit in NEW_EXAMPLES:
+    _expanded[code] = dict(code=code, title=title, description=description,
+                           look_for=look, mode_tags=[mode], reference_only=fit == 'partial',
+                           mode_notes={mode: dict(look_for=look, difference=difference, fit=fit)})
+MODE_GUIDES = tuple(dict(mode=mode, name=values[0], summary=values[1], note=values[2],
+                         example_ids=list(values[3]), demo_variants=DEMO_VARIANTS[mode])
+                    for mode, values in GUIDE_UPDATES.items())
+for code, item in _expanded.items():
+    item['mode_tags'] = [g['mode'] for g in MODE_GUIDES if code in g['example_ids']]
+    notes = item.setdefault('mode_notes', {})
+    for mode in item['mode_tags']:
+        if (code, mode) in LEGACY_NOTES:
+            fit, look, difference = LEGACY_NOTES[(code, mode)]
+            notes[mode] = dict(fit=fit, look_for=look, difference=difference)
+        elif mode not in notes:
+            notes[mode] = dict(fit='direct', look_for=item['look_for'],
+                               difference='案例用于理解这种排列关系；颜色、人物和装饰来自你自己选择的素材，不会一键复制整张案例。')
+    item['reference_only'] = all(n['fit'] == 'partial' for n in notes.values())
+EXAMPLES = tuple(_expanded.values())
+del _expanded
+
+
+def eligible_ai_reference(code, mode):
+    """Partial/mismatched teaching cases must not become a matching AI input."""
+    example = next((item for item in EXAMPLES if item['code'] == code), None)
+    return bool(example and not example['reference_only'] and mode in example['mode_tags']
+                and example['mode_notes'].get(mode, {}).get('fit') == 'direct')
+
+
 class RibbonExamples:
     def __init__(self, directory):
         self.directory = Path(directory)

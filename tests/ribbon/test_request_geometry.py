@@ -10,6 +10,14 @@ from ribbon_backend.ribbon_targets import apply_values
 from test_loop_workflow import current, workflow
 
 
+def historical_v2(snapshot):
+    # These physical guarantees belong to the retained v2 renderer. New-work
+    # fixtures now create v3, whose receipts are explicitly unverified.
+    result = deepcopy(snapshot)
+    result['layout_engine'] = 'seamless-unit-v2'
+    return resolve(result, specs=snapshot['loop_layout']['specs'])
+
+
 def moved(before, target, values):
     after = deepcopy(before)
     apply_values(after, target, values)
@@ -23,7 +31,7 @@ def operation(key, value, *, mode='direction', amount=None, direction='increase'
 
 
 def test_measured_scale_ratio_and_translation(workflow):
-    before = current(workflow.generate())['snapshot']
+    before = historical_v2(current(workflow.generate())['snapshot'])
     after = moved(before, 'layout', {'scale': .8})
     validate_request_geometry(before, after, operation('scale', .8, mode='percent', amount=20,
                                                       direction='decrease'), 'layout')
@@ -32,7 +40,7 @@ def test_measured_scale_ratio_and_translation(workflow):
 
 
 def test_numeric_scale_cannot_hide_clamping(workflow):
-    before = current(workflow.generate())['snapshot']
+    before = historical_v2(current(workflow.generate())['snapshot'])
     before = moved(before, 'layout', {'scale': 2.4})
     after = moved(before, 'layout', {'scale': 2.5})
     with pytest.raises(ClarificationNeeded):
@@ -41,7 +49,7 @@ def test_numeric_scale_cannot_hide_clamping(workflow):
 
 @pytest.mark.parametrize('mode', ['grid', 'scatter'])
 def test_absolute_pattern_orientation_accounts_for_global_and_intrinsic_angles(workflow, mode):
-    before = current(workflow.generate({**workflow.selection, 'template_id': mode}))['snapshot']
+    before = historical_v2(current(workflow.generate({**workflow.selection, 'template_id': mode}))['snapshot'])
     before = moved(before, 'layout', {'rotation': 20})
     slot = before['pattern_slots'][0]
     after = moved(before, slot, {'rotation': 70})
@@ -56,7 +64,7 @@ def test_absolute_pattern_orientation_accounts_for_global_and_intrinsic_angles(w
 
 @pytest.mark.parametrize('mode', ['split', 'panels', 'stacked'])
 def test_partition_global_shift_cannot_reassign_background_or_pattern(workflow, mode):
-    before = current(workflow.generate({**workflow.selection, 'template_id': mode}))['snapshot']
+    before = historical_v2(current(workflow.generate({**workflow.selection, 'template_id': mode}))['snapshot'])
     after = moved(before, 'layout', {'offset_x': 10})
     with pytest.raises(ClarificationNeeded, match='分区排法'):
         validate_request_geometry(before, after, operation('offset_x', 10, mode='delta', amount=10), 'layout')

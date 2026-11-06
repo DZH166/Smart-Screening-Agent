@@ -42,8 +42,9 @@ ASSET_PREVIEW_VERSION = 'asset-preview-v1'
 ASSET_PREVIEW_SIZE = (640, 640)
 from .ribbon_targets import loop_inputs
 
-LAYOUT_ENGINE = 'seamless-unit-v2'
-LOOP_ENGINES = ('seamless-unit-v1', LAYOUT_ENGINE)
+LAYOUT_ENGINE = 'seamless-unit-v3'
+MODERN_LOOP_ENGINES = ('seamless-unit-v2', LAYOUT_ENGINE)
+LOOP_ENGINES = ('seamless-unit-v1', *MODERN_LOOP_ENGINES)
 QUALITY_LAYOUT_ENGINES = frozenset({'design-rhythm-v1', 'design-rhythm-v2', *LOOP_ENGINES})
 BACKGROUND_TONES = frozenset({'soft', 'quiet', 'original'})
 DESIGN_DENSITIES = frozenset({'airy', 'balanced', 'rich'})
@@ -284,7 +285,7 @@ class Service:
 
     @staticmethod
     def validate_layout_selection(mode, asset_ids, engine=None):
-        if mode == 'bordered' and len(asset_ids) < 2 and engine != LAYOUT_ENGINE:
+        if mode == 'bordered' and len(asset_ids) < 2 and engine not in MODERN_LOOP_ENGINES:
             raise ServiceError(422, '上下边饰至少选择2个图案：第1个作主体，其余作上下边饰')
         if mode == 'fullwidth' and len(asset_ids) != 1:
             raise ServiceError(422, '整幅定位请选择1张完整设计；不会忽略其他所选图案')
@@ -810,9 +811,11 @@ class Service:
             result['design_density'] = density
         elif density != 'balanced':
             raise ServiceError(422, '旧版作品保留原排版方式；如需选择疏密，请新建作品')
-        if result.get('layout_engine') != LAYOUT_ENGINE and (selection.get('zone_background_refs') or selection.get('border_ref')):
+        if result.get('layout_engine') not in MODERN_LOOP_ENGINES and (selection.get('zone_background_refs') or selection.get('border_ref')):
             raise ServiceError(422, '此作品保留旧版排法；独立底纹和边饰可用于新作品')
-        if result.get('layout_engine') == LAYOUT_ENGINE:
+        if selection.get('pattern_roles') and result.get('layout_engine') != LAYOUT_ENGINE:
+            raise ServiceError(422, '此作品保留原排法；图案用途分工可用于新作品')
+        if result.get('layout_engine') in MODERN_LOOP_ENGINES:
             from .ribbon_targets import configure_layers
             configure_layers(self, db, owner, selection, template['mode'], result, ids)
         result.update(asset_refs=ids, background_ref=selection['background_id'], template_id=template['id'], template_version=template['version'], template_mode=template['mode'], template_rules=json.loads(template['rules_json']), output_profile=profile)
@@ -844,6 +847,21 @@ class Service:
                     for key, value in values.items():
                         merged[slot].setdefault(key, value)
                 result['slot_params'] = merged
+        elif 'design_style' in selection:
+            from .design_style import STYLES, restyle
+            wanted = selection['design_style']
+            if not isinstance(wanted, str) or wanted not in STYLES:
+                raise ServiceError(422, '请选择有效的设计风格')
+            previous = base.get('design_style', 'classic')
+            if wanted != previous:
+                if result.get('layout_engine') not in MODERN_LOOP_ENGINES:
+                    raise ServiceError(422, '此旧版作品不支持更换风格，请新建作品试排')
+                params, local, density, tone = restyle(previous, wanted, result.get('pattern_slots', []),
+                    result['params'], result.get('slot_params', {}), result['design_density'], result['background_tone'],
+                    density_given='design_density' in selection and selection['design_density'] != base.get('design_density', 'balanced'),
+                    tone_given='background_tone' in selection and selection['background_tone'] != base.get('background_tone', 'original'))
+                result.update(design_style=wanted, params=params, slot_params=local,
+                              design_density=density, background_tone=tone)
         return result
 
     @leased_operation
@@ -871,25 +889,44 @@ class Service:
 
         from .design_style import STYLES
         from .imaging import render
-        from .loop_pipeline_v2 import resolve as resolve_loop
 
         if not isinstance(style, str) or style not in STYLES:
             raise ServiceError(422, '请选择有效的设计风格')
         with self.db.connect() as db:
+            base = None
             if design_id:
                 design = self.owned_design(db, owner, design_id)
                 if design['active_job_id']:
                     raise ServiceError(409, '作品正在处理，请等待当前任务结束')
-            profile = json.loads(db.execute('SELECT profile_json FROM output_profiles WHERE active=1').fetchone()[0])
-            snapshot = self.selection_snapshot(db, owner, {**selection, 'design_style': style}, profile)
-            if snapshot.get('layout_engine') != LAYOUT_ENGINE:
+                if design['current_version_id']:
+                    row = db.execute('SELECT snapshot_json FROM versions WHERE id=? AND design_id=?',
+                                     (design['current_version_id'], design_id)).fetchone()
+                    if not row:
+                        raise ServiceError(409, '当前版本不可用，请刷新作品')
+                    base = json.loads(row['snapshot_json'])
+            profile = copy.deepcopy(base.get('output_profile_source', base['output_profile'])) if base else json.loads(
+                db.execute('SELECT profile_json FROM output_profiles WHERE active=1').fetchone()[0])
+            snapshot = self.selection_snapshot(db, owner, {**selection, 'design_style': style}, profile, base)
+            if snapshot.get('layout_engine') not in MODERN_LOOP_ENGINES:
                 raise ServiceError(422, '试排只支持新版循环排版')
-            key = hashlib.sha256(dump({k: v for k, v in snapshot.items()
-                                       if k not in ('seed', 'loop_layout')}).encode()).hexdigest()
+            cache_snapshot = {k: v for k, v in snapshot.items() if k not in ('seed', 'loop_layout')}
+            aliases = {slot: 'asset:' + asset for slot, asset in zip(snapshot.get('pattern_slots', []), snapshot['asset_refs'])}
+            cache_snapshot['pattern_slots'] = [aliases[slot] for slot in snapshot.get('pattern_slots', [])]
+            for field in ('slot_params', 'pattern_roles'):
+                cache_snapshot[field] = {aliases.get(slot, slot): value for slot, value in snapshot.get(field, {}).items()}
+            key = hashlib.sha256(dump({'owner': owner, 'design': design_id,
+                                      'version': design['current_version_id'] if design_id else None,
+                                      'snapshot': cache_snapshot}).encode()).hexdigest()
             cached = self._candidate_cache.get(key)
             if cached is not None:
+                for asset_id in self.snapshot_asset_ids(snapshot):
+                    self.verified_asset_path(owner, asset_id)
                 return {**cached, 'cached': True}
 
+        if snapshot['layout_engine'] == 'seamless-unit-v3':
+            from .loop_pipeline_v3 import resolve as resolve_loop
+        else:
+            from .loop_pipeline_v2 import resolve as resolve_loop
         resolve = lambda asset_id: self.verified_asset_path(owner, asset_id)
         snapshot = resolve_loop(snapshot, resolve)
         workspace = self.root / 'tmp'
@@ -906,6 +943,7 @@ class Service:
             loop = metadata['loop']
             row = dict(
                 style=style,
+                engine=snapshot['layout_engine'],
                 label=STYLES[style]['label'],
                 hint=STYLES[style]['hint'],
                 image='data:image/png;base64,' + base64.b64encode(buffer.getvalue()).decode('ascii'),
@@ -926,8 +964,8 @@ class Service:
 
     def verified_draft_reference(self, code, mode, expected_sha=None):
         """Only an explicitly chosen, matching installed example may leave the host."""
-        from hsd_tool.ribbon_examples import IMAGE_SPECS, MODE_GUIDES
-        if not isinstance(code, str) or code not in IMAGE_SPECS or not any(
+        from hsd_tool.ribbon_examples import IMAGE_SPECS, MODE_GUIDES, eligible_ai_reference
+        if not isinstance(code, str) or code not in IMAGE_SPECS or not eligible_ai_reference(code, mode) or not any(
                 guide['mode'] == mode and code in guide['example_ids'] for guide in MODE_GUIDES):
             raise ServiceError(422, '参考案例与当前排版不匹配，请重新选择')
         fixed_sha = IMAGE_SPECS[code][3]
@@ -1089,7 +1127,7 @@ class Service:
         with self.db.transaction() as db:
             db.execute("UPDATE jobs SET phase=?,updated_at=? WHERE id=? AND attempt=? AND status='RUNNING'", (message, now(), job['id'], job['attempt']))
 
-    def call_provider(self, job, operation, fn, *, render_snapshot=None):
+    def call_provider(self, job, operation, fn, *, render_snapshot=None, retry_provider=None):
         payload = json.loads(job['payload_json'])
         bound_render = render_snapshot if render_snapshot is not None else payload.get('snapshot')
         expected = estimate_render_space(bound_render) if bound_render else 0
@@ -1110,7 +1148,26 @@ class Service:
                 raise ServiceError(409, '任务已变化，请刷新工作台。')
             db.execute('INSERT INTO provider_calls(id,job_id,attempt,operation,provider,model,elapsed_ms,status,created_at) '
                        'VALUES(?,?,?,?,?,?,0,?,?)', (call_id, job['id'], job['attempt'], operation, job['provider'], model, 'STARTED', now()))
+        def record_retry(error):
+            nonlocal call_id, start
+            details = normalize_details(getattr(error, 'diagnostic', None))
+            if getattr(error, 'uncertain_result', False) or details.get('category') != 'output_policy':
+                raise error
+            next_call = uid()
+            with self.db.transaction() as db:
+                row = db.execute('SELECT attempt,status FROM jobs WHERE id=?', (job['id'],)).fetchone()
+                if not row or row['attempt'] != job['attempt'] or row['status'] != 'RUNNING':
+                    raise ServiceError(409, '任务已变化，未再次调用图片服务。')
+                db.execute("UPDATE provider_calls SET status='FAILED',error=?,request_id=?,usage_json=?,elapsed_ms=? WHERE id=?",
+                    (dump(details), safe_request_id(getattr(error, 'request_id', None)), dump(_safe_usage(getattr(error, 'usage', {}))),
+                     int((time.monotonic() - start) * 1000), call_id))
+                db.execute('INSERT INTO provider_calls(id,job_id,attempt,operation,provider,model,elapsed_ms,status,created_at) '
+                           'VALUES(?,?,?,?,?,?,0,?,?)', (next_call, job['id'], job['attempt'], operation, job['provider'], model, 'STARTED', now()))
+            call_id, start = next_call, time.monotonic()
+        previous_hook = getattr(retry_provider, '_image_retry_hook', None) if retry_provider is not None else None
         try:
+            if retry_provider is not None:
+                retry_provider._image_retry_hook = record_retry
             result = fn()
         except Exception as error:
             uncertain = getattr(error, 'uncertain_result', False)
@@ -1121,6 +1178,9 @@ class Service:
                            ('UNKNOWN' if uncertain else 'FAILED',dump(details), safe_request_id(getattr(error, 'request_id', None)),
                             dump(_safe_usage(getattr(error, 'usage', {}))), int((time.monotonic() - start) * 1000), call_id))
             raise
+        finally:
+            if retry_provider is not None:
+                retry_provider._image_retry_hook = previous_hook
         meta = result if isinstance(result, dict) else {}
         with self.db.transaction() as db:
             db.execute("UPDATE provider_calls SET status='SUCCEEDED',model=?,request_id=?,usage_json=?,elapsed_ms=? WHERE id=?",
@@ -1227,8 +1287,8 @@ class Service:
         if row is None:
             raise ServiceError(409, '原版本已变化，请刷新后再精修')
         before = json.loads(row['snapshot_json'])
-        fields = ('asset_refs', 'background_ref', 'zone_background_refs', 'border_ref', 'template_id', 'template_version',
-                  'template_mode', 'template_rules', 'composite_ref')
+        fields = ('asset_refs', 'background_ref', 'zone_background_refs', 'border_ref', 'pattern_roles', 'design_style', 'template_id', 'template_version',
+                  'template_mode', 'template_rules', 'composite_ref', 'pattern_roles')
         tone_changed = before.get('background_tone', 'original') != snapshot.get('background_tone', 'original')
         density_changed = before.get('design_density', 'balanced') != snapshot.get('design_density', 'balanced')
         return tone_changed or density_changed or any(before.get(key) != snapshot.get(key) for key in fields)
@@ -1262,6 +1322,8 @@ class Service:
 
         def prepared_loop(value):
             if value.get('layout_engine') == LAYOUT_ENGINE:
+                from .loop_pipeline_v3 import resolve as resolve_loop
+            elif value.get('layout_engine') == 'seamless-unit-v2':
                 from .loop_pipeline_v2 import resolve as resolve_loop
             else:
                 from .loop_pipeline import resolve as resolve_loop
@@ -1273,12 +1335,14 @@ class Service:
 
         def call_model(operation, fn):
             bound = prepared_loop(snapshot) if snapshot.get('layout_engine') in LOOP_ENGINES else snapshot
-            return self.call_provider(job, operation, fn, render_snapshot=bound)
+            kwargs = {'retry_provider': provider} if operation != 'plan' and getattr(provider, 'output_retry_observable', False) else {}
+            return self.call_provider(job, operation, fn, render_snapshot=bound, **kwargs)
 
         if job['kind'] == 'background':
             self.phase(job, '正在生成底图')
             path = directory / 'background.png'
-            metadata = self.call_provider(job, 'generate_background', lambda: provider.generate_background(payload.get('prompt', ''), path))
+            kwargs = {'retry_provider': provider} if getattr(provider, 'output_retry_observable', False) else {}
+            metadata = self.call_provider(job, 'generate_background', lambda: provider.generate_background(payload.get('prompt', ''), path), **kwargs)
             asset_id = derived(path, 'background', 'AI 随机底图' if provider.name != 'test' else '演示随机底图')
             return dict(assets=new_assets, result_asset_id=asset_id, provider_metadata=metadata)
 
@@ -1364,8 +1428,11 @@ class Service:
                 if kind == 'parameters':
                     if background_generated and operation['values'].get('background_color') is not None:
                         raise ClarificationNeeded('后面的纯色设置会盖住本次生成的底纹，请合并底纹要求后再提交；未调用图片模型、未扣精修次数。')
-                    if trial.get('layout_engine') == LAYOUT_ENGINE:
-                        from .loop_layout_v2 import resolve as geometry_only
+                    if trial.get('layout_engine') in MODERN_LOOP_ENGINES:
+                        if trial.get('layout_engine') == LAYOUT_ENGINE:
+                            from .loop_layout_v3 import resolve as geometry_only
+                        else:
+                            from .loop_layout_v2 import resolve as geometry_only
                         specs = trial['loop_layout']['specs']
                         before = copy.deepcopy(trial)
                         apply_values(trial, target, operation['values'])
@@ -1388,7 +1455,7 @@ class Service:
                         validate_request_image_policy(operation['prompt'], prepared)
                 elif kind == 'edit_background':
                     background_generated = True
-                    if target == 'layout' and snapshot.get('layout_engine') == LAYOUT_ENGINE:
+                    if target == 'layout' and snapshot.get('layout_engine') in MODERN_LOOP_ENGINES:
                         target_view(snapshot, 'background')
                     source = resolve(view['background_ref'])
                     if visible_params.get('background_color'):
@@ -1444,7 +1511,7 @@ class Service:
                     output = directory / f'edited-{index}.png'
                     def checked_edit():
                         meta = provider.edit_image(edit_prompt, source, output, kind.removeprefix('edit_'))
-                        if snapshot.get('layout_engine') == LAYOUT_ENGINE:
+                        if snapshot.get('layout_engine') in MODERN_LOOP_ENGINES:
                             from .edit_quality import validate_edit_result
                             from .providers import ProviderError
                             try:
@@ -1488,7 +1555,7 @@ class Service:
                 if operation['type'] == 'parameters':
                     validate_request_geometry(request_base, snapshot, operation, target)
             snapshot['edit_plan']['request_receipt'] = public_request_receipt(
-                snapshot['edit_plan'], geometry_verified=snapshot.get('layout_engine') == LAYOUT_ENGINE)
+                snapshot['edit_plan'], geometry_verified=snapshot.get('layout_engine') == 'seamless-unit-v2')
         master, preview = directory / 'master.png', directory / 'preview.png'
         try:
             metadata = render(snapshot, resolve, master, preview)
@@ -1542,7 +1609,9 @@ class Service:
             raise ServiceError(422, '精修要求与保存目标不一致')
         base = copy.deepcopy(payload['snapshot'])
         if base.get('layout_engine') in LOOP_ENGINES:
-            if base['layout_engine'] == LAYOUT_ENGINE:
+            if base['layout_engine'] == 'seamless-unit-v3':
+                from .loop_pipeline_v3 import resolve
+            elif base['layout_engine'] == 'seamless-unit-v2':
                 from .loop_pipeline_v2 import resolve
             else:
                 from .loop_pipeline import resolve
@@ -1593,13 +1662,13 @@ class Service:
         protected = ('params', 'slot_params', 'zone_colors', 'asset_refs', 'background_ref',
                      'zone_background_refs', 'border_ref', 'composite_ref', 'pattern_slots',
                      'layout_engine', 'template_id', 'template_mode', 'template_version', 'template_rules',
-                     'seed', 'design_density', 'background_tone', 'output_profile_source')
+                     'seed', 'design_density', 'background_tone', 'pattern_roles', 'design_style', 'output_profile_source')
         if remaining or any(expected_state.get(key) != artifact['snapshot'].get(key) for key in protected):
             raise ServiceError(422, '实际参数或图层结果与本次原文执行计划不一致')
         for operation in operations:
             if operation['type'] == 'parameters':
                 validate_request_geometry(base, artifact['snapshot'], operation, target)
-        expected = public_request_receipt(verified, geometry_verified=base.get('layout_engine') == LAYOUT_ENGINE)
+        expected = public_request_receipt(verified, geometry_verified=base.get('layout_engine') == 'seamless-unit-v2')
         if plan.get('request_receipt') != expected:
             raise ServiceError(422, '精修结果说明与原文执行记录不一致')
 
@@ -1617,6 +1686,8 @@ class Service:
             validate_image(master, artifact['snapshot']['output_profile'])
             if artifact['snapshot'].get('layout_engine') in LOOP_ENGINES:
                 if artifact['snapshot'].get('layout_engine') == LAYOUT_ENGINE:
+                    from .loop_pipeline_v3 import validate_binding
+                elif artifact['snapshot'].get('layout_engine') == 'seamless-unit-v2':
                     from .loop_pipeline_v2 import validate_binding
                 else:
                     from .loop_pipeline import validate_binding

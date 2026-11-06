@@ -1,8 +1,10 @@
 #  HSD 图号助手
 
-当前网站：**v1.26.3 / 35474e71**（2026-11-06 16:18上线）。[打开丝带设计](https://39.106.45.116:8443/#ribbon)。
+本次整合版本：**v1.27.0**（发布验收中）。[打开丝带设计](https://39.106.45.116:8443/#ribbon)。本轮分支与交付记录见[整合说明](docs/integration-v1.27.0.md)。
 
-独立分支 `codex/ribbon-background-refine` 已把底纹专项扩展为所有丝带精修目标的[原文执行契约](docs/ribbon-refinement-request-v2.md)，尚未合并上线。每条要求必须对应具体目标和操作，图片编辑保留原句，明确参数由程序核对；结果可展开查看本次要求。按用户要求保留必要检查，更广的业务矩阵合并前复核；原[底纹专项记录](docs/ribbon-background-refinement-branch.md)保留为历史验证。
+已整合 `codex/ribbon-layout-understanding`：新作品使用 v3 排版，补充散点、场景、边饰和分区行为，图案用途可明确选择；34张私有公司案例与公开程序演示分开呈现。历史作品继续使用原引擎和原下载。[分支原始验证记录](docs/ribbon-layout-understanding-branch.md)保留，不替代本轮整合验收。
+
+已整合 `codex/ribbon-background-refine` 的[原文执行契约](docs/ribbon-refinement-request-v2.md)：每条要求对应具体目标和操作，图片编辑保留原句，明确参数由程序核对。结果可展开查看本次要求；v3参数已应用不代表物理效果或图片语义已通过独立验证。原[底纹专项记录](docs/ribbon-background-refinement-branch.md)保留为历史。
 
 v1.26.3修复精修期间因云服务正常重启而反复要求登录的问题：同一服务器的有效登录可跨正常重启保持，八小时后仍须重新登录。首次升级仍需登录一次。短暂断线保留作品与输入；旧页面凭证安全更新，不重复提交已接受的精修。交付进度及验证边界见[修复记录](docs/ribbon-login-fix-v1.26.3.md)。
 

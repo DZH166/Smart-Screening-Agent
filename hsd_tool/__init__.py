@@ -1,3 +1,3 @@
 """HSD image numbering tool."""
 
-__version__ = "1.26.6"
+__version__ = "1.27.0"

@@ -36,6 +36,9 @@ def validate_request_geometry(before, after, operation, target):
     Numeric parameter equality alone cannot prove a requested change survived
     fitting/clamping. Compare complete v2 placements too. Old engines retain
     their own behavior and receive an explicitly unverified receipt instead.
+    V3 may repack whole groups after a numeric edit; it retains numeric/source
+    validation and an unverified physical-effect receipt until its own exact
+    displacement/ratio contract is independently established.
     """
     if before.get('layout_engine') != 'seamless-unit-v2':
         return

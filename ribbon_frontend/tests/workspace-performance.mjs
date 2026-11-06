@@ -46,6 +46,7 @@ const server = createServer(async (req, res) => {
     if (p === "/api/ribbon/config") return json({ provider: "test", auth_mode: "demo", ai_ready: true, output_profile: profile, max_refinements: 2, retention_hours: 50 });
     if (p === "/api/ribbon/assets") { assetReads++; return json(assets); }
     if (p === "/api/ribbon/templates") return json(templates);
+    if (p === "/api/ribbon/design-styles") return json([{ id:"classic",label:"经典等距",hint:"合成风格" }]);
     if (p === "/api/ribbon/designs") return json(works.filter(w => deleted.has(w.id) === (url.searchParams.get("deleted") === "true")));
     const match = /^\/api\/ribbon\/designs\/([^/]+)(\/restore)?$/.exec(p);
     if (match) {

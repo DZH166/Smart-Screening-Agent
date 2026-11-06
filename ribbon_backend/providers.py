@@ -94,12 +94,12 @@ def workflow_editing(provider, snapshot):
                          and width * height <= 3840 * 2160 and max(width, height) <= 3840)
         reason = '当前长条母版不在本项目OpenAI适配器可直接编辑的尺寸范围内；请修改独立图案或底图。'
     parameters = list(PARAM_DEFAULTS)
-    if snapshot.get('layout_engine') in ('seamless-unit-v1', 'seamless-unit-v2'):
+    if snapshot.get('layout_engine') in ('seamless-unit-v1', 'seamless-unit-v2', 'seamless-unit-v3'):
         # A whole-image redraw loses source layers and invalidates the saved
         # geometric period; independent content edits are recomposed instead.
         composite = False
         reason = '循环短图由原图案和底纹组合；请修改独立图案、底纹或间距，程序会重新计算完整循环。'
-    if snapshot.get('template_mode') in ('fullwidth', 'ends_open') and snapshot.get('layout_engine') not in ('seamless-unit-v1', 'seamless-unit-v2'):
+    if snapshot.get('template_mode') in ('fullwidth', 'ends_open') and snapshot.get('layout_engine') not in ('seamless-unit-v1', 'seamless-unit-v2', 'seamless-unit-v3'):
         parameters.remove('spacing')
     operations = ['parameters', 'edit_asset', 'edit_background']
     if snapshot.get('composite_ref'):
@@ -131,6 +131,13 @@ def _safe_plan_input(prompt, snapshot, assets, *, provider='openai'):
     safe_rules = {key: value for key, value in rules.items()
                   if key in ('rows', 'step_ratio', 'motif_ratio', 'is_demo')
                   and (type(value) is bool or type(value) in (int, float) and math.isfinite(value))}
+    slots = snapshot.get('pattern_slots', [])
+    saved_roles = snapshot.get('pattern_roles', {})
+    def role_at(position):
+        slot = snapshot.get('target_id') if snapshot.get('target_kind') == 'pattern' else (
+            slots[position] if position < len(slots) else None)
+        value = saved_roles.get(slot)
+        return value if value in ('main', 'support', 'accent', 'border') else None
     return {'request': prompt, 'source_units': source_units(prompt), 'request_targets': request_targets(snapshot),
         'effect_targets': request_effect_targets(snapshot, provider), 'snapshot': {
         'params': snapshot.get('params', {}), 'asset_refs': snapshot.get('asset_refs', []),
@@ -145,7 +152,8 @@ def _safe_plan_input(prompt, snapshot, assets, *, provider='openai'):
         'editing': workflow_editing(provider, snapshot),
         'output_profile': {k: profile[k] for k in ('width', 'height') if k in profile}},
         'assets': [{'position': snapshot.get('target_ordinal', position + 1), 'id': asset_id,
-                    'name': str(by_id[asset_id].get('name', ''))[:200], 'kind': by_id[asset_id].get('kind')}
+                    'name': str(by_id[asset_id].get('name', ''))[:200], 'kind': by_id[asset_id].get('kind'),
+                    **({'layout_role': role_at(position)} if role_at(position) else {})}
                    for position, asset_id in enumerate(selected) if asset_id in by_id]}
 
 
@@ -585,8 +593,11 @@ Do not use edit_composite when composite_edit is false. Explain composite_edit_r
 composite_edit=false restricts only flattened whole-artwork redrawing. It does NOT prohibit edit_background when that operation is listed; "整个背景" or "铺满底纹" edits the independent background, not the entire artwork.
 Never silently substitute a background edit for an unsupported whole-picture request if that would change the user's intended scope.
 Use template_mode, template_rules and ordered assets for context. Legacy fullwidth and ends_open do not use spacing;
-seamless-unit-v1 and seamless-unit-v2 support spacing in every mode and recalculates its complete horizontal period after edits.
-bordered uses the first asset as its central motif, the rest as border motifs; split/stacked use the first half then the second half;
+seamless-unit-v1, seamless-unit-v2 and seamless-unit-v3 support spacing in every mode and recalculates its complete horizontal period after edits.
+Before seamless-unit-v3, bordered uses the first asset as its central motif and the rest as border motifs.
+For seamless-unit-v3, assets.layout_role is the employee's binding choice: main/support/accent/border. Never infer or change those roles from names.
+Only explicitly assigned border motifs belong in the narrow bands; without such assignments uploaded patterns remain central motifs.
+split/stacked use the first half then the second half;
 scene repeats the selected group; opposed rotates alternate motifs 180 degrees, never mirrors text.
 design-rhythm-v1 fits complete visible motifs proportionally and balances repeat groups using their actual widths.
 The program, not this text-only planner, measures content bounds, spacing, safety margins and repeat closure.
@@ -802,6 +813,7 @@ class DeepSeekSeedreamProvider:
     do not use material extraction/cleanup prompts, which would delete content.
     """
     name = 'deepseek_seedream'
+    output_retry_observable = True
 
     def __init__(self, settings):
         from hsd_tool.material_ark import ArkMaterialProvider, ArkProviderError
@@ -918,10 +930,15 @@ class DeepSeekSeedreamProvider:
                                     preserve_alpha=preserve_alpha)
         except ProviderError as error:
             category = (getattr(error, 'diagnostic', {}) or {}).get('category')
-            if category != 'output_policy':
+            if category != 'output_policy' or error.uncertain_result:
                 raise
-            # An output-review block returns no image, so one bounded repeat is
-            # cheap. After that the employee sees the guidance message instead.
+            recorder = getattr(self, '_image_retry_hook', None)
+            if recorder is not None:
+                # The service settles request one and durably starts request
+                # two before another HTTP dispatch. No raw payload is recorded.
+                recorder(error)
+            # Only a settled output-review rejection permits one repeat.
+            # Both attempts can incur usage; unknown outcomes never retry.
             log.info("output review blocked an image; retrying once")
             return self._image_once(payload, output_path, expected_size=expected_size,
                                     preserve_alpha=preserve_alpha)
