@@ -66,7 +66,8 @@ class CloudArbiter(Arbiter):
     def _no_parallel_reload(self):
         self.log.warning("Single-worker service: use a drained service restart for updates.")
 
-    # Sessions/jobs are intentionally process-local. Neither a reload signal
+    # Job maps are process-local; cloud session signatures are instance-bound.
+    # Neither a reload signal
     # nor worker-count signal may silently create a second live owner map.
     handle_hup = handle_usr2 = handle_ttin = handle_ttou = handle_winch = _no_parallel_reload
 

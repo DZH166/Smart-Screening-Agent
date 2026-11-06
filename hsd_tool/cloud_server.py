@@ -168,6 +168,11 @@ def create_cloud_app(environ=None):
     # provider keys. No plaintext/Windows-DPAPI fallback is enabled here.
     if not Path(env["HSD_CREDENTIAL_KEY_FILE"]).is_absolute():
         raise ValueError("服务器加密主密钥文件必须使用绝对路径。")
+    from .cloud_sessions import cloud_session_config
+    access.session_config = cloud_session_config(
+        key_file=env["HSD_CREDENTIAL_KEY_FILE"], origin=access.origin,
+        data_dir=data, settings_dir=settings, employee_code=code,
+        admin_credentials=access.admin_credentials)
     from .server import create_app
     app = create_app(data, cloud=access, settings_dir=settings)
     from .cloud_retention import CloudRetention

@@ -130,6 +130,7 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
                           PERMANENT_SESSION_LIFETIME=timedelta(hours=8), SESSION_REFRESH_EACH_REQUEST=False)
     if cloud:
         app.config.update(SESSION_COOKIE_SECURE=True)
+        app.config.update(getattr(cloud, "session_config", {}))
         app.wsgi_app = cloud.middleware(app.wsgi_app)
     admin_limiter = admin_auth.LoginLimiter()
     manager = JobManager(data_dir, settings_dir=settings_dir, **({"preserve_cache": True} if cloud else {}))
@@ -272,7 +273,11 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
                         and admin_auth.authenticated(session))
         admin_entry = (admin_area or protected_static or material_admin_static or static_asset
                        or request.endpoint in {"admin_login_page", "admin_login", "admin_logout"})
-        if remote and not session.get("lan_authenticated") and not admin_entry:
+        employee_session_valid = session.get("lan_authenticated") is True
+        if cloud and employee_session_valid:
+            until = session.get("employee_authenticated_until")
+            employee_session_valid = (type(until) in {int, float} and until > time.time())
+        if remote and not employee_session_valid and not admin_entry:
             if request.endpoint in {"index", "material_demo_redirect", "material_demo_page"} and request.method == "GET":
                 html = (static / "lan-login.html").read_text("utf-8")
                 if cloud:
@@ -328,7 +333,7 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
         if mutating and request.endpoint != "admin_login":
             provided = request.headers.get("X-HSD-Token", "")
             if not secrets.compare_digest(provided.encode(), token.encode()):
-                return jsonify(error="会话已失效，请重新打开工具页面。"), 403
+                return jsonify(error="页面凭证已更新，请刷新页面后继续。", code="page_token_expired"), 403
             with manager.lock:
                 if app.config["HSD_STOPPING"] and request.endpoint != "shutdown":
                     raise Conflict("主机正在退出，请稍后重新打开员工入口。")
@@ -727,6 +732,7 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
         session.permanent = True
         session["lan_authenticated"] = True
         if cloud:
+            session["employee_authenticated_until"] = time.time() + 8 * 60 * 60
             recovery = request.cookies.get(claims.cookie_name)
             try:
                 owner = claims.owner(recovery)
@@ -755,6 +761,15 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
         response = Response("ok", mimetype="text/plain")
         response.headers["Cache-Control"] = "no-store"
         return response
+
+    @app.get("/api/ribbon/session")
+    def ribbon_session():
+        # Host authentication runs before this route. Only a definitive token
+        # rejection may request a replacement; no mutation is executed here.
+        if (request.headers.get("Origin") not in {None, request.host_url.rstrip("/")}
+                or request.headers.get("Sec-Fetch-Site") == "cross-site"):
+            return jsonify(error="请求来源不匹配。"), 403
+        return jsonify(token=token)
 
     @app.get("/api/health")
     def health():

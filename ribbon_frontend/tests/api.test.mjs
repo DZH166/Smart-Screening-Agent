@@ -60,3 +60,48 @@ test("read deadlines and explicit cancellation preserve mutation recovery", asyn
     globalThis.fetch=originalFetch;globalThis.setTimeout=originalSet;globalThis.clearTimeout=originalClear;
   }
 });
+
+test("only definite pre-acceptance page-token rejection refreshes and resends once", async () => {
+  const original = globalThis.fetch, calls = [];
+  setRequestToken(() => "synthetic-old-page");
+  globalThis.fetch = async (url, options) => {
+    calls.push({url, options});
+    if (url.endsWith("/session")) return Response.json({token:"synthetic-new-page"});
+    if (options.headers.get("X-HSD-Token") === "synthetic-old-page")
+      return Response.json({code:"page_token_expired", error:"页面凭证已更新"}, {status:403});
+    return Response.json({id:"synthetic-job"}, {status:202});
+  };
+  try {
+    const body = {idempotency_key:"synthetic-once",prompt:"调整间距"};
+    assert.equal((await post("/designs/a/refinements", body)).id,"synthetic-job");
+    assert.equal(calls.length,3);
+    assert.equal(calls[0].options.body,calls[2].options.body);
+    assert.equal(calls[1].options.credentials,"same-origin");
+    await post("/designs/a/refinements", body);
+    assert.equal(calls.length,4,"recovered token is reused on next write");
+    for (const status of [401,403,429,500,502]) {
+      let attempts=0;
+      globalThis.fetch=async()=>{attempts++;return Response.json({error:"ordinary failure"},{status});};
+      await assert.rejects(post("/designs/a/refinements",body),e=>e.status===status);
+      assert.equal(attempts,1);
+    }
+    let attempts=0;
+    globalThis.fetch=async()=>{attempts++;throw new TypeError("connection lost");};
+    await assert.rejects(post("/designs/a/refinements",body));
+    assert.equal(attempts,1,"unknown result is never replayed");
+  } finally {globalThis.fetch=original;setRequestToken(()=>"");}
+});
+
+test("page-token refresh does not bypass genuine expiry or retry forever", async () => {
+  const original=globalThis.fetch;
+  try {
+    for (const sessionStatus of [200,401]) {
+      let attempts=0;
+      globalThis.fetch=async(url)=>{attempts++;return url.endsWith("/session")
+        ? Response.json(sessionStatus===200?{token:"synthetic-fresh"}:{error:"登录过期"},{status:sessionStatus})
+        : Response.json({code:"page_token_expired"},{status:403});};
+      await assert.rejects(post("/designs/a/refinements",{idempotency_key:"synthetic-key"}),e=>e.status===(sessionStatus===401?401:403));
+      assert.equal(attempts,sessionStatus===401?2:3);
+    }
+  } finally {globalThis.fetch=original;setRequestToken(()=>"");}
+});

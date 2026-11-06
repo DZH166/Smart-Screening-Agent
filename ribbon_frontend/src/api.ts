@@ -162,7 +162,7 @@ export async function api<T>(
   const headers = new Headers(options.headers);
   const method = (options.method || "GET").toUpperCase();
   if (!["GET", "HEAD", "OPTIONS"].includes(method))
-    headers.set("X-HSD-Token", requestToken());
+    headers.set("X-HSD-Token", recoveredToken?.source === requestToken() ? recoveredToken.value : requestToken());
   if (options.body && !(options.body instanceof FormData))
     headers.set("Content-Type", "application/json");
   // Reads have a deadline; mutations retain unknown-result/idempotency recovery.
@@ -172,13 +172,28 @@ export async function api<T>(
   else options.signal?.addEventListener("abort", abort, { once: true });
   const timer = controller ? setTimeout(() => controller.abort(), 15000) : undefined;
   try {
-  const response = await fetch(`/api/ribbon${path}`, {
+  const send = () => fetch(`/api/ribbon${path}`, {
     ...options,
     headers,
     signal: controller?.signal || options.signal,
     credentials: "same-origin",
     cache: "no-store",
   });
+  let response = await send();
+  // A stale page token is rejected by the host BEFORE accepting the write.
+  // Refresh only that explicit rejection, once, with the original idempotency
+  // key/body. Network failures, upstream errors and accepted jobs never replay.
+  if (response.status === 403 && !["GET", "HEAD", "OPTIONS"].includes(method)) {
+    const rejection = await response.clone().json().catch(() => null);
+    if (rejection?.code === "page_token_expired") {
+      const refreshed = await api<{token: string}>("/session", { signal: options.signal });
+      if (typeof refreshed.token !== "string" || !refreshed.token || refreshed.token.length > 256)
+        throw new ApiError("页面凭证无法更新，请重新载入页面。", 403);
+      headers.set("X-HSD-Token", refreshed.token);
+      recoveredToken = { source: requestToken(), value: refreshed.token };
+      response = await send();
+    }
+  }
   if (!response.ok) {
     let message = `请求失败（${response.status}）`;
     try {
@@ -204,8 +219,10 @@ export async function api<T>(
   }
 }
 let requestToken: () => string = () => "";
+let recoveredToken: {source: string; value: string} | null = null;
 export function setRequestToken(getToken: () => string) {
   requestToken = getToken;
+  recoveredToken = null;
 }
 export const post = <T>(path: string, body: unknown) =>
   api<T>(path, { method: "POST", body: JSON.stringify(body) });

@@ -372,7 +372,7 @@ def test_cloud_factory_requires_all_private_configuration():
 
 @pytest.fixture
 def cloud_factory_stubs(tmp_path, monkeypatch):
-    from hsd_tool import cloud_admin, cloud_retention, cloud_server, server
+    from hsd_tool import cloud_admin, cloud_retention, cloud_server, cloud_sessions, server
     created = []
     closed = []
     manager = SimpleNamespace(ai_settings=SimpleNamespace(snapshot=lambda: {"key_persistence": "linux_aesgcm"}),
@@ -384,6 +384,9 @@ def cloud_factory_stubs(tmp_path, monkeypatch):
     retention = SimpleNamespace(start=lambda: retention)
     monkeypatch.setattr(server, "create_app", create)
     monkeypatch.setattr(cloud_admin, "CloudAdminCredentials", lambda path: object())
+    monkeypatch.setattr(cloud_sessions, "cloud_session_config", lambda **kwargs: {
+        "SECRET_KEY": b"synthetic-factory-session-key-123",
+        "SESSION_COOKIE_NAME": "hsd_cloud_synthetic_factory"})
     def make_retention(*args, **kwargs):
         assert kwargs == {"companion": app.config.get("HSD_MATERIAL_MANAGER")}
         return retention
@@ -407,6 +410,38 @@ def test_factory_default_code_minimum_remains_sixteen(cloud_factory_stubs, monke
     assert created[0].code == "x" * 16
 
 
+def test_factory_binds_stable_session_to_validated_deployment_before_managers(cloud_factory_stubs, monkeypatch):
+    from hsd_tool import cloud_sessions
+    module, environment, app, created, closed = cloud_factory_stubs
+    monkeypatch.setattr(module, "_private_file", lambda _: CODE.encode("ascii"))
+    supplied = []
+    configuration = {"SECRET_KEY": b"s" * 32, "SESSION_COOKIE_NAME": "hsd_cloud_synthetic"}
+    def configure(**kwargs):
+        assert created == []
+        supplied.append(kwargs)
+        return configuration
+    monkeypatch.setattr(cloud_sessions, "cloud_session_config", configure)
+    assert create_cloud_app(environment) is app
+    assert created[0].session_config is configuration
+    assert supplied == [dict(key_file=environment["HSD_CREDENTIAL_KEY_FILE"], origin=ORIGIN,
+                             data_dir=Path(environment["HSD_DATA_DIR"]),
+                             settings_dir=Path(environment["HSD_SETTINGS_DIR"]),
+                             employee_code=CODE, admin_credentials=created[0].admin_credentials)]
+    assert closed == []
+
+
+def test_factory_never_starts_managers_when_session_credentials_are_unavailable(cloud_factory_stubs, monkeypatch):
+    from hsd_tool import cloud_sessions
+    module, environment, app, created, closed = cloud_factory_stubs
+    monkeypatch.setattr(module, "_private_file", lambda _: CODE.encode("ascii"))
+    def unavailable(**kwargs):
+        raise ValueError("synthetic private signing credentials unavailable")
+    monkeypatch.setattr(cloud_sessions, "cloud_session_config", unavailable)
+    with pytest.raises(ValueError, match="signing credentials unavailable"):
+        create_cloud_app(environment)
+    assert created == [] and closed == []
+
+
 @pytest.mark.parametrize("minimum,code", [("1", "x"), ("4", "demo"), ("16", CODE), ("64", "x" * 64)])
 def test_factory_explicit_code_minimum_is_instance_configuration(cloud_factory_stubs, monkeypatch, minimum, code):
     module, environment, app, created, closed = cloud_factory_stubs
@@ -428,7 +463,7 @@ def test_factory_invalid_code_minimum_fails_before_reading_credentials(cloud_fac
 
 
 def test_cloud_factory_closes_manager_instead_of_accepting_plaintext_fallback(tmp_path, monkeypatch):
-    from hsd_tool import cloud_admin, server
+    from hsd_tool import cloud_admin, cloud_sessions, server
     tmp_path.chmod(0o700)
     code_file = tmp_path / "employee-code"
     code_file.write_text(CODE, "ascii")
@@ -439,6 +474,9 @@ def test_cloud_factory_closes_manager_instead_of_accepting_plaintext_fallback(tm
     app = SimpleNamespace(config={"HSD_MANAGER": manager, "HSD_JOB_LEASES": {}})
     monkeypatch.setattr(server, "create_app", lambda *args, **kwargs: app)
     monkeypatch.setattr(cloud_admin, "CloudAdminCredentials", lambda path: object())
+    monkeypatch.setattr(cloud_sessions, "cloud_session_config", lambda **kwargs: {
+        "SECRET_KEY": b"synthetic-factory-session-key-123",
+        "SESSION_COOKIE_NAME": "hsd_cloud_synthetic_factory"})
     environment = {"HSD_PUBLIC_ORIGIN": ORIGIN, "HSD_DATA_DIR": str(tmp_path / "data"),
                    "HSD_SETTINGS_DIR": str(tmp_path / "settings"),
                    "HSD_EMPLOYEE_CODE_FILE": str(code_file),

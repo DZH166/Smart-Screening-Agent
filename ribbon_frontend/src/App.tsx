@@ -396,20 +396,44 @@ export default function App({ active, view }: WorkspaceProps) {
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState("");
+  const [authExpired, setAuthExpired] = useState(false);
+  const [authRetry, setAuthRetry] = useState(0);
+  const authSequence = useRef(0);
+  function loseAuthentication() {
+    ++authSequence.current;
+    setUser(null);
+    setAuthLoading(false);
+    setAuthExpired(true);
+    setAuthError("登录已失效，请重新打开网站后继续。");
+  }
   useEffect(() => {
     if (!active) return;
     let cancelled = false;
+    const sequence = ++authSequence.current;
+    const controller = new AbortController();
+    const stale = () => cancelled || controller.signal.aborted || sequence !== authSequence.current;
     setAuthLoading(true);
-    api<User>("/auth/me")
-      .then((value) => { if (!cancelled) setUser(value); })
-      .catch((error) => { if (!cancelled) { setUser(null); setAuthError(message(error)); } })
-      .finally(() => { if (!cancelled) setAuthLoading(false); });
-    return () => { cancelled = true; };
-  }, [active, view]);
+    setAuthError("");
+    api<User>("/auth/me", { signal: controller.signal })
+      .then((value) => { if (!stale()) { setUser(value); setAuthExpired(false); } })
+      .catch((error) => {
+        if (stale()) return;
+        // A failed read does not invalidate an established employee session or
+        // discard their in-flight work. Only an authentication rejection does.
+        if (error instanceof ApiError && error.status === 401) {
+          setUser(null);
+          setAuthExpired(true);
+        }
+        setAuthError(message(error));
+      })
+      .finally(() => { if (!stale()) setAuthLoading(false); });
+    return () => { cancelled = true; controller.abort(); };
+  }, [active, view, authRetry]);
   return <>
-    {authLoading && <div className="page-loader"><span className="spinner" /><span>正在连接丝带设计…</span></div>}
-    {!authLoading && !user && <div className="notice error" role="alert"><strong>丝带设计暂时无法打开</strong><p>{authError || "登录已失效，请重新打开网站后继续。"}</p><button type="button" onClick={() => location.reload()}>重新载入</button></div>}
-    {user && <div hidden={authLoading}><Workspace key={user.id} user={user} active={active && !authLoading} view={view} onLogout={() => { setUser(null); setAuthError("登录已失效，请重新打开网站后继续。"); }} /></div>}
+    {authLoading && !user && <div className="page-loader"><span className="spinner" /><span>正在连接丝带设计…</span></div>}
+    {!authLoading && !user && <div className="notice error" role="alert"><strong>丝带设计暂时无法打开</strong><p>{authError || "连接暂时中断，请重试。"}</p><button type="button" onClick={() => authExpired ? location.reload() : setAuthRetry(value => value + 1)}>{authExpired ? "重新登录" : "重新连接"}</button></div>}
+    {user && authError && <div className="notice error" role="alert"><strong>连接暂时中断，已保留当前作品。</strong><p>{authError}</p><button type="button" onClick={() => setAuthRetry(value => value + 1)} disabled={authLoading}>重新连接</button></div>}
+    {user && <Workspace key={user.id} user={user} active={active && !authLoading} view={view} onLogout={loseAuthentication} />}
   </>;
 }
 

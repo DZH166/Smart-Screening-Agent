@@ -59,6 +59,18 @@ class CloudAdminCredentials:
         except (OSError, UnicodeError, ValueError, TypeError, KeyError):
             raise ValueError(_ERROR) from None
 
+    def session_fingerprint(self) -> bytes:
+        """Bind browser sessions to this validated credential generation.
+
+        This digest is an internal KDF input, never an API response or log field.
+        Equivalent records produce the same value regardless of file formatting.
+        """
+        record = json.dumps({
+            "username": self._username_hash.hex(), "salt": self._salt.hex(),
+            "digest": self._digest.hex(), "iterations": self._iterations,
+        }, sort_keys=True, separators=(",", ":")).encode("ascii")
+        return hashlib.sha256(b"HSD cloud admin credential generation; version=1\x00" + record).digest()
+
     def verify(self, username, password) -> bool:
         """Hash both values on valid-shaped attempts; never log or retain input."""
         if not isinstance(username, str) or not isinstance(password, str):
