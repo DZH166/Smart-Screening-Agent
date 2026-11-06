@@ -199,3 +199,50 @@ def test_realistic_portrait_background_crop_avoids_subpixel_negative_origin():
         image, report = periodize_background(background, 202, 256)
         with image:
             assert image.size == (202, 256) and report['passed']
+
+
+@pytest.mark.parametrize('mode', ['split', 'panels'])
+def test_zone_offset_moves_motifs_inside_their_panel(mode):
+    """A global circular shift used to push motifs across panel borders."""
+    base = resolved(mode)
+    shifted = resolved(mode, params={'offset_x': 30})
+    width = base['loop_layout']['period_px']
+    zones = len(engine.ZONE_IDS[mode])
+    section = width / zones
+    before, after = engine.plan(base), engine.plan(shifted)
+    assert len(before) == len(after)
+    for p in after:
+        zone = min(int(p['x'] // section), zones - 1)
+        left, right = zone * section, (zone + 1) * section
+        assert p['x'] - p['planned_width'] / 2 >= left - 1e-6
+        assert p['x'] + p['planned_width'] / 2 <= right + 1e-6
+    assert any(abs(a['x'] - b['x']) > 1e-6 for a, b in zip(before, after))
+
+
+def test_zone_backgrounds_keep_their_own_colour_when_offset_is_used():
+    snapshot = dict(
+        output_profile=dict(width=300, height=100, dpi=300, format='PNG'),
+        template_mode='panels',
+        background_ref='bg',
+        zone_colors={'left': '#ff0000', 'center': '#00ff00', 'right': '#0000ff'},
+        zone_background_refs={},
+        params={'offset_x': 100},
+        background_tone='original',
+    )
+    canvas, zones = pipe._make_background(snapshot, lambda ref: None)
+    try:
+        assert [z['box'] for z in zones] == [[0, 0, 100, 100], [100, 0, 200, 100], [200, 0, 300, 100]]
+        assert canvas.getpixel((1, 50))[:3] == (255, 0, 0)
+        assert canvas.getpixel((101, 50))[:3] == (0, 255, 0)
+        assert canvas.getpixel((201, 50))[:3] == (0, 0, 255)
+    finally:
+        canvas.close()
+
+
+def test_upscale_ratio_reports_the_largest_pattern_enlargement():
+    geometry = dict(
+        metrics={'slots': {'a': {'target_width_px': [100, 314]}, 'b': {'target_width_px': [50, 512]}}},
+        specs=[{'width': 64}, {'width': 512}],
+    )
+    assert pipe._upscale_ratio(geometry) == pytest.approx(314 / 64)
+    assert pipe._upscale_ratio({'metrics': {'slots': {}}, 'specs': []}) == 1.0

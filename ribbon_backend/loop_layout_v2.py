@@ -266,12 +266,25 @@ def _build(snapshot, specs):
                     if mode == 'scatter':
                         x += rng.uniform(-0.28, 0.28) * min(gap, boundary)
                         y += rng.uniform(-0.46, 0.46) * max(0.0, bottom - top - bh)
-                    if len(sections) > 1 and not (
-                        z * section_width <= x - bw / 2 + 1e-7
-                        and x + bw / 2 <= (z + 1) * section_width + 1e-7
-                    ):
-                        raise ValueError('该位置会跨越分区，请减少图案的横向移动距离')
-                    x = (x + c['ox'] % width) % width
+                    if len(sections) > 1:
+                        # Zone layouts shift inside their own section: a global
+                        # circular shift would move a motif into another panel,
+                        # which contradicts the per-zone composition (and used
+                        # to pass because the crossing check ran before wrap).
+                        left, right = z * section_width, (z + 1) * section_width
+                        span = right - left
+                        if bw > span + 1e-7:
+                            raise ValueError('图案比分区还宽，无法在分区内完整排出')
+                        candidate = x + c['ox']
+                        shifted = left + ((candidate - left) % span)
+                        options = (shifted, shifted - span, shifted + span)
+                        fit = next((value for value in options
+                                    if value - bw / 2 >= left - 1e-7 and value + bw / 2 <= right + 1e-7), None)
+                        # A motif that would leave its panel stops at the panel
+                        # edge instead of crossing into the neighbour.
+                        x = fit if fit is not None else min(max(candidate, left + bw / 2), right - bw / 2)
+                    else:
+                        x = (x + c['ox'] % width) % width
                     y = max(top + bh / 2, min(bottom - bh / 2, y + c['oy'] + dy))
                     placements.append(
                         dict(

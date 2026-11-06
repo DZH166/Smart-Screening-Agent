@@ -68,6 +68,7 @@ export type Loop = {
   issues: { code: string; message: string; severity: "warning" | "error" }[];
   kind: "sequence" | "panel";
   mode_notice?: string;
+  motif_resolution?: { max_upscale: number; note: string };
 };
 export type Snapshot = {
   asset_refs: string[];

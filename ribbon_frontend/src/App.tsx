@@ -286,9 +286,9 @@ function TargetOverlay({version, target}: {version:Version; target:string}) {
   let boxes: number[][] = [];
   const zoneBoxes = (index:number): number[][] => {
     if (version.snapshot.template_mode === "stacked") return [[0,index*h/zones.length,w,h/zones.length]];
-    const offset = Math.round(Number(version.snapshot.params.offset_x || 0));
-    const x = ((index*w/zones.length + offset)%w+w)%w;
-    return [[x,0,w/zones.length,h],[x-w,0,w/zones.length,h]];
+    // Panels are fixed partitions; a background/pattern offset stays inside
+    // each zone, so the highlight must not follow it.
+    return [[index*w/zones.length,0,w/zones.length,h]];
   };
   if (target === "background") {
     boxes = zones.length ? zones.flatMap((zone,i)=>(version.snapshot.zone_background_refs?.[zone] || version.snapshot.zone_colors?.[zone]) ? [] : zoneBoxes(i)) : [[0,0,w,h]];
@@ -346,6 +346,7 @@ function LoopPreview({ version, sizeLabel, target }: { version: Version; sizeLab
       </ul>}
     </div>}
     {loop.mode_notice && <p className="loop-mode-notice">{loop.mode_notice}</p>}
+    {!!loop.motif_resolution?.note && <p className="loop-resolution-note">{loop.motif_resolution.note}</p>}
     <details className="loop-technical-details">
       <summary>输出详情</summary>
       {loop.status==="checked" && <strong>工程循环检查通过</strong>}

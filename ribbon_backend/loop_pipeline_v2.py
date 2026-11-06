@@ -144,6 +144,7 @@ def _make_background(snapshot, resolve_asset):
     colour = snapshot.get('params', {}).get('background_color')
     canvas = Image.new('RGBA', (w, h), ImageColor.getrgb(colour or '#ffffff'))
     zones = []
+    zone_count = len(layout.ZONE_IDS.get(snapshot['template_mode'], ('whole',)))
     try:
         for role, ref, box in _zones(snapshot):
             left, top, right, bottom = box
@@ -160,14 +161,15 @@ def _make_background(snapshot, resolve_asset):
                     if snapshot.get('background_tone') == 'soft':
                         with Image.new('RGBA', zone.size, (255, 255, 255, 140)) as veil:
                             zone.alpha_composite(veil)
-                    canvas.paste(zone, (left, top))
+                    offset = int(round(snapshot.get('params', {}).get('offset_x', 0))) % zone.width
+                    if offset and zone_count > 1:
+                        # Zone backgrounds stay inside their panel: shifting the
+                        # whole canvas swapped colours/textures between panels.
+                        with ImageChops.offset(zone, offset, 0) as shifted:
+                            canvas.paste(shifted, (left, top))
+                    else:
+                        canvas.paste(zone, (left, top))
             zones.append(dict(role=role, ref=ref, box=list(box), construction=report))
-        if snapshot['template_mode'] in ('split', 'panels'):
-            offset = int(round(snapshot.get('params', {}).get('offset_x', 0))) % w
-            if offset:
-                shifted = ImageChops.offset(canvas, offset, 0)
-                canvas.close()
-                canvas = shifted
         return canvas, zones
     except BaseException:
         canvas.close()
@@ -241,6 +243,14 @@ def compose(snapshot, resolve_asset, master_path, preview_path):
             ),
             background_wrap=bg_wrap,
             final_wrap=final_wrap,
+            motif_resolution=dict(
+                max_upscale=round(_upscale_ratio(snapshot['loop_layout']), 3),
+                note=(
+                    '有图案被放大约 %.1f 倍，细节可能变糊；建议换更大的图案或减少行数。'
+                    % _upscale_ratio(snapshot['loop_layout'])
+                    if _upscale_ratio(snapshot['loop_layout']) > 1.5 else ''
+                ),
+            ),
             production_verified=False,
             verification_scope='period_construction_and_multiscale_pixel_checks',
             profile_source=deepcopy(snapshot['output_profile_source']),
@@ -251,6 +261,22 @@ def compose(snapshot, resolve_asset, master_path, preview_path):
         return result
     finally:
         canvas.close()
+
+
+def _upscale_ratio(geometry):
+    """Largest target/source width ratio of any pattern copy in this unit."""
+    slots = list(((geometry.get('metrics') or {}).get('slots') or {}).values())
+    specs = geometry.get('specs') or []
+    ratio = 1.0
+    for index, spec in enumerate(specs):
+        try:
+            source = float(spec['width'])
+            target = float(slots[index]['target_width_px'][-1])
+        except (KeyError, IndexError, TypeError, ValueError):
+            continue
+        if source > 0:
+            ratio = max(ratio, target / source)
+    return ratio
 
 
 def _digest(loop):
