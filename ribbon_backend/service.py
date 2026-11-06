@@ -841,6 +841,65 @@ class Service:
                 result['slot_params'] = merged
         return result
 
+    @leased_operation
+    def candidates(self, owner, design_id, selection, styles=None):
+        """Render up to four style proposals without creating a version or job.
+
+        These are local composition previews: no provider call, no quota event,
+        no stored snapshot. The employee still has to submit a real generate.
+        """
+        import base64
+        import tempfile
+
+        from .design_style import STYLES
+        from .imaging import render
+        from .loop_pipeline_v2 import resolve as resolve_loop
+
+        wanted = styles or ['classic', 'hierarchy', 'airy']
+        if not isinstance(wanted, list) or not 1 <= len(wanted) <= 4:
+            raise ServiceError(422, '试排一次最多四种风格')
+        for style in wanted:
+            if not isinstance(style, str) or style not in STYLES:
+                raise ServiceError(422, '请选择有效的设计风格')
+
+        thumbnails = []
+        with self.db.connect() as db:
+            if design_id:
+                design = self.owned_design(db, owner, design_id)
+                if design['active_job_id']:
+                    raise ServiceError(409, '作品正在处理，请等待当前任务结束')
+            profile = json.loads(db.execute('SELECT profile_json FROM output_profiles WHERE active=1').fetchone()[0])
+            workspace = self.root / 'tmp'
+            workspace.mkdir(parents=True, exist_ok=True)
+            directory = Path(tempfile.mkdtemp(prefix='candidates-', dir=workspace))
+            try:
+                for index, style in enumerate(wanted):
+                    snapshot = self.selection_snapshot(db, owner, {**selection, 'design_style': style}, profile)
+                    if snapshot.get('layout_engine') != LAYOUT_ENGINE:
+                        raise ServiceError(422, '试排只支持新版循环排版')
+                    snapshot = resolve_loop(snapshot, lambda asset_id: self.verified_asset_path(owner, asset_id))
+                    master = directory / f'{index}.png'
+                    preview = directory / f'{index}-preview.png'
+                    metadata = render(snapshot, lambda asset_id: self.verified_asset_path(owner, asset_id),
+                                      master, preview)
+                    with Image.open(preview) as image:
+                        image.thumbnail((640, 640), Image.Resampling.LANCZOS)
+                        buffer = io.BytesIO()
+                        image.convert('RGB').save(buffer, format='PNG', compress_level=6)
+                    loop = metadata['loop']
+                    thumbnails.append(dict(
+                        style=style,
+                        label=STYLES[style]['label'],
+                        hint=STYLES[style]['hint'],
+                        image='data:image/png;base64,' + base64.b64encode(buffer.getvalue()).decode('ascii'),
+                        width=loop['width'],
+                        height=loop['height'],
+                        rhythm=loop['rhythm'],
+                    ))
+            finally:
+                shutil.rmtree(directory, ignore_errors=True)
+        return thumbnails
+
     def verified_draft_reference(self, code, mode, expected_sha=None):
         """Only an explicitly chosen, matching installed example may leave the host."""
         from hsd_tool.ribbon_examples import IMAGE_SPECS, MODE_GUIDES

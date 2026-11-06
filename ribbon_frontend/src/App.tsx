@@ -16,6 +16,7 @@ import {
   type Asset,
   type Config,
   type Design,
+  type Candidate,
   type DesignStyle,
   type GenerateRequest,
   type Job,
@@ -454,6 +455,9 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
     [assets, setAssets] = useState<Asset[]>([]),
     [templates, setTemplates] = useState<Template[]>([]),
     [styles, setStyles] = useState<DesignStyle[]>([{ id: "classic", label: "经典等距", hint: "保持原有节奏" }]),
+    [candidates, setCandidates] = useState<Candidate[] | null>(null),
+    [candidateBusy, setCandidateBusy] = useState(false),
+    [candidateError, setCandidateError] = useState(""),
     [designs, setDesigns] = useState<Design[]>([]);
   const [design, setDesign] = useState<Design | null>(null),
     [selection, setSelection] = useState<Selection>(emptySelection),
@@ -682,6 +686,25 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
     }
     if (d.active_job) setJob(d.active_job);
   }
+  async function previewCandidates() {
+    if (!selection.asset_ids.length || !selection.background_id || !selection.template_id) {
+      setCandidateError("先选择图案、底纹和排版");
+      return;
+    }
+    setCandidateBusy(true); setCandidateError("");
+    try {
+      const rows = await api<Candidate[]>("/candidates", {
+        method: "POST",
+        body: JSON.stringify({ ...selection, styles: ["classic", "hierarchy", "airy"] }),
+      });
+      setCandidates(rows);
+    } catch (error) {
+      setCandidateError(message(error));
+    } finally {
+      setCandidateBusy(false);
+    }
+  }
+
   async function loadCatalog() {
     const [a, t, c, s] = await Promise.all([
       api<Asset[]>("/assets"),
@@ -1470,6 +1493,26 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                   {!!styles.find((s) => s.id === (selection.design_style || "classic"))?.hint && (
                     <p className="style-hint">{styles.find((s) => s.id === (selection.design_style || "classic"))?.hint}</p>
                   )}
+                  <button type="button" className="secondary small" disabled={locked || candidateBusy}
+                    onClick={() => void previewCandidates()}>
+                    {candidateBusy ? "正在本地试排…" : "试排三种风格（不调用模型）"}
+                  </button>
+                  {candidateError && <p className="style-hint" role="alert">{candidateError}</p>}
+                </div>}
+                {!!candidates && <div className="candidate-gallery" aria-label="风格试排">
+                  {candidates.map((candidate) => (
+                    <figure key={candidate.style} className={`candidate-card ${(selection.design_style || "classic") === candidate.style ? "selected" : ""}`}>
+                      <img src={candidate.image} alt={`${candidate.label}试排`} />
+                      <figcaption>
+                        <strong>{candidate.label}</strong>
+                        <span>{candidate.rhythm.repeats_to_length ? `100cm 约 ${candidate.rhythm.repeats_to_length} 个单元` : `${candidate.width}px 单元`}</span>
+                        <button type="button" className="secondary small" disabled={locked}
+                          onClick={() => { updateSelection({ ...selection, design_style: candidate.style }); setCandidates(null); }}>
+                          用这个风格
+                        </button>
+                      </figcaption>
+                    </figure>
+                  ))}
                 </div>}
               </section>
               {modern && (zones.length>0 || template?.mode==="bordered") && <details className="optional-layers" key={template?.mode}>

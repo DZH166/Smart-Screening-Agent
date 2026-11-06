@@ -603,3 +603,35 @@ def test_classic_style_keeps_the_existing_snapshot_values(workflow):
     assert snapshot['design_style'] == 'classic'
     assert snapshot['params']['spacing'] == pytest.approx(1.0)
     assert snapshot.get('slot_params', {}) == {}
+
+
+def test_candidates_render_styles_locally_without_versions_or_jobs(workflow):
+    design = workflow.create()
+    rows = workflow.service.candidates(workflow.owner, design['id'], workflow.selection,
+                                      ['classic', 'hierarchy'])
+    assert [row['style'] for row in rows] == ['classic', 'hierarchy']
+    assert all(row['image'].startswith('data:image/png;base64,') for row in rows)
+    assert rows[0]['width'] != rows[1]['width']  # different spacing yields a different unit
+    after = workflow.get(design)
+    assert after['versions'] == [] and after['active_job_id'] is None
+
+
+def test_candidates_api_does_not_create_work_or_charge(workflow):
+    design = workflow.create()
+    response = workflow.client.post(
+        f"/api/designs/{design['id']}/candidates",
+        json={**workflow.selection, 'styles': ['classic', 'airy']},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert len(body) == 2 and body[1]['style'] == 'airy'
+    assert workflow.get(design)['versions'] == []
+
+
+def test_candidates_reject_unknown_styles(workflow):
+    design = workflow.create()
+    response = workflow.client.post(
+        f"/api/designs/{design['id']}/candidates",
+        json={**workflow.selection, 'styles': ['not-a-style']},
+    )
+    assert response.status_code == 422
