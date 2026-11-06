@@ -2447,3 +2447,14 @@ small {
   .source-panel,.center-column,.refinement-panel {grid-column:1;grid-row:auto;}
 }
 .library-note,.hide-asset,.library-card > span,.modal-footer > span {color:#42584b;}
+
+.loop-resolution-note {
+  margin: 6px 0 0;
+  padding: 8px 12px;
+  border: 1px solid #f0dfb4;
+  border-radius: 8px;
+  background: #fffaf0;
+  color: #7a5a12;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
