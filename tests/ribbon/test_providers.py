@@ -377,3 +377,62 @@ def test_deepseek_setting_change_during_acquisition_does_not_dispatch(tmp_path,i
     with pytest.raises(ProviderError,match='设置已变化'):
         provider.plan('缩小',snapshot,assets)
     assert not calls and pool.snapshot()['usage']['requests']==0
+
+
+def _image_provider():
+    from ribbon_backend.providers import DeepSeekSeedreamProvider
+    return object.__new__(DeepSeekSeedreamProvider)
+
+
+def test_output_policy_block_is_retried_once(monkeypatch):
+    from hsd_tool.provider_diagnostics import diagnostic
+    from ribbon_backend.providers import ProviderError
+
+    provider = _image_provider()
+    attempts = []
+
+    def once(payload, path, **kwargs):
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise ProviderError("blocked", details=diagnostic("output_policy", "provider"))
+        return {"width": 2048, "height": 2048}
+
+    monkeypatch.setattr(provider, "_image_once", once)
+    assert provider._image({"x": 1}, "out.png")["width"] == 2048
+    assert len(attempts) == 2
+
+
+def test_output_policy_block_after_retry_returns_the_guidance(monkeypatch):
+    from hsd_tool.provider_diagnostics import MESSAGES, diagnostic
+    from ribbon_backend.providers import ProviderError
+
+    provider = _image_provider()
+    attempts = []
+
+    def once(payload, path, **kwargs):
+        attempts.append(1)
+        raise ProviderError(MESSAGES["output_policy"], details=diagnostic("output_policy", "provider"))
+
+    monkeypatch.setattr(provider, "_image_once", once)
+    with pytest.raises(ProviderError) as error:
+        provider._image({"x": 1}, "out.png")
+    assert len(attempts) == 2
+    assert "自动重试一次" in str(error.value)
+
+
+@pytest.mark.parametrize("category", ["input_policy", "service", "rate_limit"])
+def test_other_failures_are_not_retried(monkeypatch, category):
+    from hsd_tool.provider_diagnostics import diagnostic
+    from ribbon_backend.providers import ProviderError
+
+    provider = _image_provider()
+    attempts = []
+
+    def once(payload, path, **kwargs):
+        attempts.append(1)
+        raise ProviderError("failed", details=diagnostic(category, "provider"))
+
+    monkeypatch.setattr(provider, "_image_once", once)
+    with pytest.raises(ProviderError):
+        provider._image({"x": 1}, "out.png")
+    assert len(attempts) == 1

@@ -12,6 +12,7 @@ from contextlib import closing
 import io
 import http.client
 import json
+import logging
 import math
 from pathlib import Path
 import random
@@ -25,6 +26,9 @@ from PIL import Image, ImageDraw
 
 from hsd_tool.provider_diagnostics import MESSAGES, diagnostic, from_http, normalize_details, safe_request_id
 from .imaging import MAX_PIXELS, PARAM_DEFAULTS, _save_png, _star_points, read_image, memory_bounded_operation
+
+
+log = logging.getLogger(__name__)
 
 
 class ProviderError(RuntimeError):
@@ -814,6 +818,20 @@ class DeepSeekSeedreamProvider:
                     self.settings.usage_ledger.add(usage)
 
     def _image(self, payload, output_path, *, expected_size=None, preserve_alpha=False):
+        try:
+            return self._image_once(payload, output_path, expected_size=expected_size,
+                                    preserve_alpha=preserve_alpha)
+        except ProviderError as error:
+            category = (getattr(error, 'diagnostic', {}) or {}).get('category')
+            if category != 'output_policy':
+                raise
+            # An output-review block returns no image, so one bounded repeat is
+            # cheap. After that the employee sees the guidance message instead.
+            log.info("output review blocked an image; retrying once")
+            return self._image_once(payload, output_path, expected_size=expected_size,
+                                    preserve_alpha=preserve_alpha)
+
+    def _image_once(self, payload, output_path, *, expected_size=None, preserve_alpha=False):
         from hsd_tool.material_ark import ArkProviderError, _decode, _image_field, _size
         self._validate()
         try:

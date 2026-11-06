@@ -25,7 +25,7 @@ CODE_GROUPS = {
 CATEGORIES = {code: group for group, codes in CODE_GROUPS.items() for code in codes}
 MESSAGES = {
     'input_policy': '服务拒绝了这次输入。请检查所选素材、参考图及要求后重新提交。',
-    'output_policy': '素材可能包含受版权保护的角色，建议改用本地合成，或再重复试验两次；若仍报错，可能涉及侵权，请更换素材图。',
+    'output_policy': '素材可能包含受版权保护的角色，系统已自动重试一次仍被拦截；建议改用本地合成，或再手动重试一次，若仍报错可能涉及侵权，请更换素材图。',
     'parameters': '服务未接受请求参数，请联系管理员检查图片尺寸和模型设置。',
     'configuration': '模型或接入点不可用，请联系管理员检查配置。',
     'permission': '服务未接受当前凭据或模型权限，请联系管理员。',
