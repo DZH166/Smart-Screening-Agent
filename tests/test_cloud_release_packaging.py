@@ -104,6 +104,12 @@ def test_reviewed_layout_previews_are_bound_to_public_paths_and_exact_bytes():
             release.scan(invalid_name, invalid_value)
 
 
+def test_trial_integration_test_is_explicitly_allowed_but_arbitrary_tests_are_not():
+    release.public_name('ribbon_frontend/tests/trial-integration.mjs')
+    with pytest.raises(RuntimeError):
+        release.public_name('ribbon_frontend/tests/private-business-test.mjs')
+
+
 def test_v3_demo_variants_have_exact_names_bytes_and_mirrors():
     expected = {mode + suffix for mode in release.LAYOUT_WEBP_SHA256
                 for suffix in ('', '-1', '-3', '-6')}

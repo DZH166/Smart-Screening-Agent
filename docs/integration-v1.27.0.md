@@ -24,6 +24,7 @@
 不同轮次存在重叠，不相加为独立用例数或整体准确率。
 
 - 后端整合/v3几何专项77项、调用诊断12项、历史v2请求几何16项通过；新增style-only、label-only无效、旧v2规格/引擎绑定3项HTTP检查通过。
+- 最后冻结源码的合并兼容、风格、原文契约及调用诊断85项通过；此轮与前述专项重叠。
 - 发布白名单、公司案例和首稿引用合同130项通过。
 - TypeScript与API7项通过；Chrome合成接口的trial-integration、loop-preview、refinement-receipt、workspace-performance通过，覆盖逐张进度、忽略取消的迟到结果、角色、回退/下载、断线和幂等。合成UI不代表模型效果。
 - 质量门禁通过：Python编译/导入、宿主JS语法/测试、凭据形状扫描、部署文件检查。
