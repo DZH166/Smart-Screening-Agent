@@ -1,6 +1,6 @@
 #  HSD 图号助手
 
-本次整合版本：**v1.27.0**（发布验收中）。[打开丝带设计](https://39.106.45.116:8443/#ribbon)。本轮分支与交付记录见[整合说明](docs/integration-v1.27.0.md)。
+当前网站：**v1.27.0 / 15ba4435**（2026-11-07 已上线）。[打开丝带设计](https://39.106.45.116:8443/#ribbon)。[Linux Release](https://github.com/DZH166/Smart-Screening-Agent/releases/tag/v1.27.0) 的三附件已校验。本轮分支与交付记录见[整合说明](docs/integration-v1.27.0.md)。
 
 已整合 `codex/ribbon-layout-understanding`：新作品使用 v3 排版，补充散点、场景、边饰和分区行为，图案用途可明确选择；34张私有公司案例与公开程序演示分开呈现。历史作品继续使用原引擎和原下载。[分支原始验证记录](docs/ribbon-layout-understanding-branch.md)保留，不替代本轮整合验收。
 
