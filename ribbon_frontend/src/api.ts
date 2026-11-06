@@ -11,6 +11,7 @@ export type Asset = {
   derived_from?: string;
   deduplicated?: boolean;
 };
+export type DesignStyle = { id: string; label: string; hint: string };
 export type Template = {
   id: string;
   name: string;
@@ -52,8 +53,9 @@ export type Selection = {
   border_ref?: string;
   background_id: string;
   template_id: string;
-  background_tone?: "soft" | "original";
+  background_tone?: "soft" | "quiet" | "original";
   design_density?: "airy" | "balanced" | "rich";
+  design_style?: string;
 };
 export type GenerateRequest = Selection & {
   idempotency_key: string;
@@ -69,6 +71,14 @@ export type Loop = {
   kind: "sequence" | "panel";
   mode_notice?: string;
   motif_resolution?: { max_upscale: number; note: string };
+  rhythm?: {
+    unit_width: number;
+    repeats_to_length: number | null;
+    groups: number;
+    spacing_cv: number;
+    size_variety: number;
+    coverage?: number;
+  };
 };
 export type Snapshot = {
   asset_refs: string[];
@@ -86,8 +96,9 @@ export type Snapshot = {
   loop?: Loop;
   params: Record<string, unknown>;
   layout_engine?: string;
-  background_tone?: "soft" | "original";
+  background_tone?: "soft" | "quiet" | "original";
   design_density?: "airy" | "balanced" | "rich";
+  design_style?: string;
   composite_ref?: string;
 };
 export type Version = {

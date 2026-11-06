@@ -44,7 +44,7 @@ from .ribbon_targets import loop_inputs
 LAYOUT_ENGINE = 'seamless-unit-v2'
 LOOP_ENGINES = ('seamless-unit-v1', LAYOUT_ENGINE)
 QUALITY_LAYOUT_ENGINES = frozenset({'design-rhythm-v1', 'design-rhythm-v2', *LOOP_ENGINES})
-BACKGROUND_TONES = frozenset({'soft', 'original'})
+BACKGROUND_TONES = frozenset({'soft', 'quiet', 'original'})
 DESIGN_DENSITIES = frozenset({'airy', 'balanced', 'rich'})
 TERMINAL = ('SUCCEEDED', 'FAILED')
 
@@ -814,6 +814,31 @@ class Service:
         if result.get('layout_engine') in LOOP_ENGINES:
             result.setdefault('output_profile_source', copy.deepcopy(profile))
         result.pop('composite_ref', None)
+        if base is None:
+            # A named preset fills only what the client left at its defaults.
+            # It writes existing fields, so old snapshots and the layout
+            # engine stay untouched.
+            from .design_style import STYLES, expand
+            wanted = selection.get('design_style', 'classic')
+            if not isinstance(wanted, str) or wanted not in STYLES:
+                raise ServiceError(422, '请选择有效的设计风格')
+            style, params, density, tone, slot_params = expand(
+                wanted, result.get('pattern_slots') or [], result['params'],
+                result.get('design_density', 'balanced'), result.get('background_tone', default_tone),
+                density_given='design_density' in selection,
+                tone_given='background_tone' in selection,
+            )
+            result['design_style'] = style
+            result['params'] = params
+            result['design_density'] = density
+            result['background_tone'] = tone
+            if slot_params:
+                merged = dict(result.get('slot_params') or {})
+                for slot, values in slot_params.items():
+                    merged.setdefault(slot, {})
+                    for key, value in values.items():
+                        merged[slot].setdefault(key, value)
+                result['slot_params'] = merged
         return result
 
     def verified_draft_reference(self, code, mode, expected_sha=None):

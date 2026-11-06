@@ -158,8 +158,9 @@ def _make_background(snapshot, resolve_asset):
                     'RGBA', (right - left, bottom - top), 'white'
                 ) as zone:
                     report = _fill(zone, source, snapshot['template_mode'] == 'scene')
-                    if snapshot.get('background_tone') == 'soft':
-                        with Image.new('RGBA', zone.size, (255, 255, 255, 140)) as veil:
+                    veil_alpha = {'soft': 140, 'quiet': 205}.get(snapshot.get('background_tone'), 0)
+                    if veil_alpha:
+                        with Image.new('RGBA', zone.size, (255, 255, 255, veil_alpha)) as veil:
                             zone.alpha_composite(veil)
                     offset = int(round(snapshot.get('params', {}).get('offset_x', 0))) % zone.width
                     if offset and zone_count > 1:
@@ -254,6 +255,7 @@ def compose(snapshot, resolve_asset, master_path, preview_path):
             production_verified=False,
             verification_scope='period_construction_and_multiscale_pixel_checks',
             profile_source=deepcopy(snapshot['output_profile_source']),
+            rhythm=_rhythm(snapshot),
         )
         result = _finish_render(canvas, snapshot, master_path, preview_path, transforms)
         loop['evidence_digest'] = _digest(loop)
@@ -261,6 +263,32 @@ def compose(snapshot, resolve_asset, master_path, preview_path):
         return result
     finally:
         canvas.close()
+
+
+def _rhythm(snapshot):
+    """Readable numbers for judging a unit before it becomes wallpaper."""
+    geometry = snapshot.get('loop_layout') or {}
+    groups = geometry.get('groups') or []
+    slots = list(((geometry.get('metrics') or {}).get('slots') or {}).values())
+    gaps = [float(g['gap']) for g in groups if isinstance(g.get('gap'), (int, float))]
+    widths = []
+    for slot in slots:
+        try:
+            widths.append(float(slot['target_width_px'][-1]))
+        except (KeyError, IndexError, TypeError, ValueError):
+            continue
+    mean_gap = sum(gaps) / len(gaps) if gaps else 0.0
+    spread = (sum((gap - mean_gap) ** 2 for gap in gaps) / len(gaps)) ** 0.5 if gaps else 0.0
+    unit = float(geometry.get('period_px') or snapshot['output_profile']['width'])
+    source = float((snapshot.get('output_profile_source') or {}).get('width') or 0)
+    return dict(
+        unit_width=round(unit, 1),
+        repeats_to_length=max(1, round(source / unit)) if source > 0 and unit > 0 else None,
+        groups=len(groups),
+        spacing_cv=round(spread / mean_gap, 3) if mean_gap else 0.0,
+        size_variety=round(max(widths) / min(widths), 2) if widths and min(widths) > 0 else 1.0,
+        coverage=(geometry.get('metrics') or {}).get('footprint_ratio'),
+    )
 
 
 def _upscale_ratio(geometry):
