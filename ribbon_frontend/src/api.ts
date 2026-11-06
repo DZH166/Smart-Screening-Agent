@@ -12,6 +12,15 @@ export type Asset = {
   deduplicated?: boolean;
 };
 export type DesignStyle = { id: string; label: string; hint: string };
+export type Candidate = {
+  style: string;
+  label: string;
+  hint: string;
+  image: string;
+  width: number;
+  height: number;
+  rhythm: { unit_width: number; repeats_to_length: number | null; size_variety: number };
+};
 export type Template = {
   id: string;
   name: string;

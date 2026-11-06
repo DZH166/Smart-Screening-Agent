@@ -40,6 +40,10 @@ class Selection(StrictModel):
     design_style: str | None = Field(default=None, max_length=32)
 
 
+class Candidates(Selection):
+    styles: list[str] = Field(default_factory=list, max_length=4)
+
+
 class Generate(Selection):
     idempotency_key: str = Field(min_length=8, max_length=160)
     ai_assisted: StrictBool = False
@@ -240,6 +244,16 @@ def create_app(settings: Settings | None = None, *, service: Service | None = No
     @app.post('/api/designs/{design_id}/restore')
     def restore_design(design_id: str, current=Depends(user)):
         return service.restore_design(current['id'], design_id)
+
+    @app.post('/api/candidates')
+    def candidates(body: Candidates, current=Depends(user)):
+        selection = body.model_dump(exclude={'styles'}, exclude_none=True)
+        return service.candidates(current['id'], None, selection, body.styles)
+
+    @app.post('/api/designs/{design_id}/candidates')
+    def design_candidates(design_id: str, body: Candidates, current=Depends(user)):
+        selection = body.model_dump(exclude={'styles'}, exclude_none=True)
+        return service.candidates(current['id'], design_id, selection, body.styles)
 
     @app.post('/api/designs/{design_id}/generate', status_code=202)
     def generate(design_id: str, body: Generate, current=Depends(user)):
