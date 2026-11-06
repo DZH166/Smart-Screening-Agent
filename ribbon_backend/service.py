@@ -1231,7 +1231,9 @@ class Service:
                 plan = call_model('plan', lambda: provider.plan(prompt, view, assets))
             selection_changed = self.refinement_selection_changed(job, payload, snapshot)
             operations = self.effective_edit_operations(job['provider'], view, plan, selection_changed)
-            plan = {**plan, 'operations': operations}
+            from .background_edit import background_edit_request
+            operations, request_protection = background_edit_request(prompt, view, operations)
+            plan = {**plan, 'operations': operations, 'request_protection': request_protection}
             # Validate every independent image source before the first paid
             # image request. A later oversized/unsupported input must not waste
             # an earlier otherwise valid generation and then discard it.

@@ -197,6 +197,52 @@ def test_individual_edit_requests_one_native_canvas_and_never_resizes_the_source
     assert metadata['is_demo'] is False and metadata['usage'] == {'generated_images': 1, 'input_images': 1}
 
 
+@pytest.mark.parametrize('employee_prompt', [
+    '帮我把背景铺满星星',
+    '删除旧花纹，换成分布均匀的树叶，保留底色',
+    '只在左上角加一片叶子，其余不动',
+])
+def test_background_transport_preserves_original_request_and_does_not_use_motif_preservation_prompt(
+        tmp_path, monkeypatch, employee_prompt):
+    client, _ = provider(tmp_path)
+    source = tmp_path / 'background.png'
+    Image.new('RGBA', (512, 512), '#d8e2cc').save(source)
+    original = source.read_bytes()
+    calls = []
+    def submit(payload, cancel):
+        calls.append(payload)
+        assert base64.b64decode(payload['image'].split(',', 1)[1]) == original
+        assert payload['prompt'].endswith(employee_prompt)
+        assert '独立的丝带底纹' in payload['prompt']
+        assert '保持原有背景。' not in payload['prompt']
+        assert '若要求铺满' in payload['prompt']  # conditional, never an unconditional extra request
+        assert payload['background'] == 'opaque'
+        return {'data': [inline_image((2048, 2048))]}, {'generated_images': 1}, 'synthetic-background-edit'
+    monkeypatch.setattr(client.ark, '_submit', submit)
+    result = client.edit_image(employee_prompt, source, tmp_path / 'out.png', 'background')
+    assert len(calls) == 1 and result['request_id'] == 'synthetic-background-edit'
+    assert source.read_bytes() == original
+
+
+def test_background_scope_also_reaches_openai_without_changing_pattern_edits(tmp_path, monkeypatch):
+    from ribbon_backend.providers import OpenAIProvider
+    client = OpenAIProvider(SimpleNamespace(openai_api_key='synthetic-openai-input-key',
+        language_model='synthetic-language', image_model='synthetic-image', model_timeout=60, image_quality='high'))
+    source = tmp_path / 'source.png'
+    Image.new('RGB', (128, 128), '#aabbcc').save(source)
+    prompts = []
+    def post(endpoint, **kwargs):
+        prompts.append(kwargs['data']['prompt'])
+        return {'data': [inline_image((1024, 1024))]}, 'synthetic-background-contract'
+    monkeypatch.setattr(client, '_post', post)
+    client.edit_image('只在角落添加一片叶子', source, tmp_path / 'background.png', 'background')
+    client.edit_image('保留人物，衣服改为蓝色', source, tmp_path / 'pattern.png', 'asset')
+    assert prompts[0].endswith('只在角落添加一片叶子')
+    assert '独立的丝带底纹' in prompts[0]
+    assert '独立的丝带底纹' not in prompts[1]
+    assert prompts[1].endswith('保留人物，衣服改为蓝色')
+
+
 def test_native_edit_mismatch_preserves_source_usage_and_has_no_retry(tmp_path, monkeypatch):
     client, _ = provider(tmp_path)
     source = tmp_path / 'source.png'

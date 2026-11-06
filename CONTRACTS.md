@@ -466,6 +466,12 @@ New loop editing permits parameters and independent asset/background edits; it f
 
 The React view detects the version-bound loop, shows one short unit by default and optionally reuses the identical preview URL three times with seam guides. Toggling or polling does not download a master or generate another composite. Version-bound PNG download is always the actual one-unit master, never a preview or triple image. Source/diagnostics stay in details; issues stay visible. Existing worker,50-hour retention, reversible deletion, ownership, cache, idempotency and response leases remain.
 
+## Background refinement request protection (development branch)
+
+The `codex/ribbon-background-refine` branch adds private snapshot `edit_plan.request_protection` with `protocol:background-request-v1`, `scope`, `target`, `explicit_content_request`, and `semantic_verified:false`. The HTTP refinement schema and provider routing are unchanged. A selected background/zone image operation retains the employee's original request; a clearly separated background clause is used for layout-scoped mixed edits. High-confidence background content requests cannot be fulfilled by foreground parameters alone or authorize unrequested foreground changes. The guard never invents image operations; ambiguous scope is clarification, with no successful quota event. It is a bounded text safeguard, not general language or output-semantic verification.
+
+Background image instructions preserve coverage/removal/replacement requirements without imposing tiny/low-contrast styling. Existing background presentation remains unchanged. No extra image request, retry, database migration, historical version rewrite or automatic semantic approval is added. See [branch verification](docs/ribbon-background-refinement-branch.md) for actual evidence and delivery status.
+
 ## Ribbon workspace and assisted first drafts (v1.24.0)
 
 New snapshots bind `design-rhythm-v2`; v1 retains its rendering semantics. V2 corrects only the ends hierarchy. `Generate` accepts strict `ai_assisted: boolean` (default false) and optional `reference_code: string|null`. A reference with AI disabled is rejected. Config exposes `ai_draft_available` only for a ready DeepSeek/Seedream runtime. Missing fields retain the original no-model first draft, including older clients.

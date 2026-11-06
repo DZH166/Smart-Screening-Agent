@@ -199,3 +199,78 @@ def test_native_copy_is_failed_result_with_usage_and_without_new_version(workflo
     assert call['status'] == 'FAILED' and call['request_id'] == 'synthetic-copy-call'
     assert json.loads(call['error'])['category'] == 'invalid_result'
     assert json.loads(call['usage_json']) == {'generated_images': 1}
+
+
+def background_refine(workflow, design, prompt, operations, target='background'):
+    workflow.provider.operations = operations
+    job = ok(workflow.client.post(f'/api/designs/{design["id"]}/refinements', json={
+        'idempotency_key': str(uuid4()), 'base_version_id': design['current_version_id'],
+        'prompt': prompt, 'edit_target': target,
+    }))
+    return workflow.work(job), workflow.get(design)
+
+
+def test_original_background_request_reaches_editor_not_weakened_planner_text(workflow):
+    initial = workflow.generate({**workflow.selection, 'background_tone': 'soft'})
+    first = current(initial)
+    before = workflow.download(first)
+    seen = []
+    editor = workflow.provider.edit_image
+    workflow.provider.edit_size = (320, 320)
+    def capture(prompt, source, output, kind):
+        seen.append((prompt, kind))
+        return editor(prompt, source, output, kind)
+    workflow.provider.edit_image = capture
+    original = '帮我把背景铺满星星'
+    done, changed = background_refine(workflow, initial, original,
+        [{'type': 'edit_background', 'prompt': '添加少量极小的低对比度点缀'}])
+    assert done['status'] == 'SUCCEEDED', done
+    assert seen == [(original, 'background')]
+    old, new = first['snapshot'], current(changed)['snapshot']
+    assert new['edit_plan']['operations'][0]['prompt'] == original
+    assert new['asset_refs'] == old['asset_refs'] and new['params'] == old['params']
+    assert new['background_ref'] != old['background_ref']
+    assert new['background_tone'] == old['background_tone'] == 'soft'
+    assert new['pattern_slots'] == old['pattern_slots']
+    assert changed['successful_refinement_count'] == 1
+    assert workflow.download(first) == before
+
+
+def test_background_content_request_cannot_succeed_as_foreground_geometry_only(workflow):
+    initial = workflow.generate()
+    done, same = background_refine(workflow, initial, '底纹铺满叶子装饰',
+        [{'type': 'parameters', 'values': {'scale': .8}}], target='layout')
+    assert done['status'] == 'FAILED', done
+    assert not workflow.provider.edit_calls
+    assert same['current_version_id'] == initial['current_version_id']
+    assert same['successful_refinement_count'] == 0
+
+
+def test_background_content_does_not_leak_foreground_clause_into_editor(workflow):
+    initial = workflow.generate()
+    seen = []
+    editor = workflow.provider.edit_image
+    workflow.provider.edit_size = (320, 320)
+    def capture(prompt, source, output, kind):
+        seen.append((prompt, kind))
+        return editor(prompt, source, output, kind)
+    workflow.provider.edit_image = capture
+    done, after = background_refine(workflow, initial, '图案缩小一些，底纹铺满叶子装饰', [
+        {'type': 'parameters', 'values': {'scale': .8}},
+        {'type': 'edit_background', 'prompt': '底纹添加少量叶子'},
+    ], target='layout')
+    assert done['status'] == 'SUCCEEDED', done
+    assert len(seen) == 1 and '底纹铺满叶子装饰' in seen[0][0]
+    assert '图案缩小' not in seen[0][0]
+    assert current(after)['snapshot']['params']['scale'] == .8
+    assert current(after)['snapshot']['asset_refs'] == current(initial)['snapshot']['asset_refs']
+
+
+def test_negative_background_instruction_still_allows_pure_colour_edit(workflow):
+    initial = workflow.generate()
+    done, after = background_refine(workflow, initial, '不要给背景添加装饰，只把背景改为蓝色',
+        [{'type': 'parameters', 'values': {'background_color': '#225588'}}])
+    assert done['status'] == 'SUCCEEDED', done
+    assert not workflow.provider.edit_calls
+    assert current(after)['snapshot']['params']['background_color'] == '#225588'
+    assert after['successful_refinement_count'] == 1
