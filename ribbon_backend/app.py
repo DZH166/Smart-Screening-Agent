@@ -44,6 +44,10 @@ class Candidates(Selection):
     styles: list[str] = Field(default_factory=list, max_length=4)
 
 
+class CandidateOne(Selection):
+    style: str = Field(min_length=1, max_length=32)
+
+
 class Generate(Selection):
     idempotency_key: str = Field(min_length=8, max_length=160)
     ai_assisted: StrictBool = False
@@ -244,6 +248,17 @@ def create_app(settings: Settings | None = None, *, service: Service | None = No
     @app.post('/api/designs/{design_id}/restore')
     def restore_design(design_id: str, current=Depends(user)):
         return service.restore_design(current['id'], design_id)
+
+    @app.post('/api/candidates/one')
+    def candidate_one(body: CandidateOne, current=Depends(user)):
+        """One style per request: the workspace fills its gallery progressively."""
+        selection = body.model_dump(exclude={'style'}, exclude_none=True)
+        return service.candidate(current['id'], None, selection, body.style)
+
+    @app.post('/api/designs/{design_id}/candidates/one')
+    def design_candidate_one(design_id: str, body: CandidateOne, current=Depends(user)):
+        selection = body.model_dump(exclude={'style'}, exclude_none=True)
+        return service.candidate(current['id'], design_id, selection, body.style)
 
     @app.post('/api/candidates')
     def candidates(body: Candidates, current=Depends(user)):

@@ -500,8 +500,20 @@ def _compose_extensions(canvas, snapshot, resolve_asset, master_path):
     return transforms
 
 
-def _finish_render(canvas, snapshot, master_path, preview_path, object_transforms):
+def _finish_render(canvas, snapshot, master_path, preview_path, object_transforms, *, preview_only=False):
     _, _, dpi = _profile(snapshot['output_profile'])
+    if preview_only:
+        # Style trials only need a small preview: skip the full-width master
+        # write and its read-back validation, which dominate the render time.
+        preview = canvas.copy()
+        try:
+            preview.thumbnail((640, 640), Image.Resampling.LANCZOS)
+            _save_png(preview, Path(preview_path), dpi)
+            return {'width': canvas.width, 'height': canvas.height, 'dpi': dpi,
+                    'object_transforms': object_transforms, 'preview_only': True}
+        finally:
+            preview.close()
+            canvas.close()
     _save_png(canvas, Path(master_path), dpi)
     preview = canvas.copy()
     # A ribbon is a very wide strip; retain useful detail in the bounded preview.
@@ -547,13 +559,14 @@ def _quality_background(background, width, height):
 
 @memory_bounded_operation
 def render(snapshot: dict, resolve_asset: Callable[[str], Path], master_path: Path,
-           preview_path: Path) -> dict:
+           preview_path: Path, *, preview_only: bool = False) -> dict:
     if snapshot.get('layout_engine') not in (None, 'design-rhythm-v1', 'design-rhythm-v2', 'seamless-unit-v1', 'seamless-unit-v2'):
         raise ValueError('该作品的排版引擎不受当前版本支持，请保留原版本并联系管理员')
     require_space(Path(master_path).parent, estimate_render_space(snapshot))
     if snapshot.get('layout_engine') == 'seamless-unit-v2':
         from .loop_pipeline_v2 import compose
-        return compose(snapshot, resolve_asset, master_path, preview_path)
+        return compose(snapshot, resolve_asset, master_path, preview_path,
+                       preview_only=preview_only)
     if snapshot.get('layout_engine') == 'seamless-unit-v1':
         from .loop_pipeline import compose
         return compose(snapshot, resolve_asset, master_path, preview_path)

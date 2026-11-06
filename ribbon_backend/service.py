@@ -1,6 +1,7 @@
 """Durable single-host job service. Files precede a fenced, atomic version commit."""
 from __future__ import annotations
 
+import base64
 import copy
 import hashlib
 import hmac
@@ -144,6 +145,10 @@ class Service:
         self.db = Database(self.root / 'ribbon.sqlite3')
         from .retention import registry_for
         self._leases = registry_for(self.root)
+        # Style previews are pure functions of the selection; cache a few so
+        # re-opening the trial is instant. Bounded and in-memory only.
+        self._candidate_cache = {}
+        self._candidate_lock = threading.Lock()
         self.stop_event = threading.Event()
         self._asset_preview_lock = threading.RLock()
         self.thread = None
@@ -843,62 +848,81 @@ class Service:
 
     @leased_operation
     def candidates(self, owner, design_id, selection, styles=None):
-        """Render up to four style proposals without creating a version or job.
+        """Render one or more style proposals without creating a version or job.
 
-        These are local composition previews: no provider call, no quota event,
-        no stored snapshot. The employee still has to submit a real generate.
+        Each call renders the requested styles one at a time and returns them in
+        order. The UI asks for a single style per request so the workspace can
+        paint a progress bar and stay responsive while the strip is composed.
+        Nothing here writes a version, quota event, snapshot or provider call.
         """
-        import base64
+        wanted = styles or ['classic', 'hierarchy', 'airy']
+        if not isinstance(wanted, list) or not 1 <= len(wanted) <= 4:
+            raise ServiceError(422, '试排一次最多四种风格')
+        from .design_style import STYLES
+
+        for style in wanted:
+            if not isinstance(style, str) or style not in STYLES:
+                raise ServiceError(422, '请选择有效的设计风格')
+        return [self.candidate(owner, design_id, selection, style) for style in wanted]
+
+    def candidate(self, owner, design_id, selection, style):
+        """Compose one style preview in memory (plus a temporary preview PNG)."""
         import tempfile
 
         from .design_style import STYLES
         from .imaging import render
         from .loop_pipeline_v2 import resolve as resolve_loop
 
-        wanted = styles or ['classic', 'hierarchy', 'airy']
-        if not isinstance(wanted, list) or not 1 <= len(wanted) <= 4:
-            raise ServiceError(422, '试排一次最多四种风格')
-        for style in wanted:
-            if not isinstance(style, str) or style not in STYLES:
-                raise ServiceError(422, '请选择有效的设计风格')
-
-        thumbnails = []
+        if not isinstance(style, str) or style not in STYLES:
+            raise ServiceError(422, '请选择有效的设计风格')
         with self.db.connect() as db:
             if design_id:
                 design = self.owned_design(db, owner, design_id)
                 if design['active_job_id']:
                     raise ServiceError(409, '作品正在处理，请等待当前任务结束')
             profile = json.loads(db.execute('SELECT profile_json FROM output_profiles WHERE active=1').fetchone()[0])
-            workspace = self.root / 'tmp'
-            workspace.mkdir(parents=True, exist_ok=True)
-            directory = Path(tempfile.mkdtemp(prefix='candidates-', dir=workspace))
-            try:
-                for index, style in enumerate(wanted):
-                    snapshot = self.selection_snapshot(db, owner, {**selection, 'design_style': style}, profile)
-                    if snapshot.get('layout_engine') != LAYOUT_ENGINE:
-                        raise ServiceError(422, '试排只支持新版循环排版')
-                    snapshot = resolve_loop(snapshot, lambda asset_id: self.verified_asset_path(owner, asset_id))
-                    master = directory / f'{index}.png'
-                    preview = directory / f'{index}-preview.png'
-                    metadata = render(snapshot, lambda asset_id: self.verified_asset_path(owner, asset_id),
-                                      master, preview)
-                    with Image.open(preview) as image:
-                        image.thumbnail((640, 640), Image.Resampling.LANCZOS)
-                        buffer = io.BytesIO()
-                        image.convert('RGB').save(buffer, format='PNG', compress_level=6)
-                    loop = metadata['loop']
-                    thumbnails.append(dict(
-                        style=style,
-                        label=STYLES[style]['label'],
-                        hint=STYLES[style]['hint'],
-                        image='data:image/png;base64,' + base64.b64encode(buffer.getvalue()).decode('ascii'),
-                        width=loop['width'],
-                        height=loop['height'],
-                        rhythm=loop['rhythm'],
-                    ))
-            finally:
-                shutil.rmtree(directory, ignore_errors=True)
-        return thumbnails
+            snapshot = self.selection_snapshot(db, owner, {**selection, 'design_style': style}, profile)
+            if snapshot.get('layout_engine') != LAYOUT_ENGINE:
+                raise ServiceError(422, '试排只支持新版循环排版')
+            key = hashlib.sha256(dump({k: v for k, v in snapshot.items()
+                                       if k not in ('seed', 'loop_layout')}).encode()).hexdigest()
+            cached = self._candidate_cache.get(key)
+            if cached is not None:
+                return {**cached, 'cached': True}
+
+        resolve = lambda asset_id: self.verified_asset_path(owner, asset_id)
+        snapshot = resolve_loop(snapshot, resolve)
+        workspace = self.root / 'tmp'
+        workspace.mkdir(parents=True, exist_ok=True)
+        directory = Path(tempfile.mkdtemp(prefix='candidates-', dir=workspace))
+        try:
+            master = directory / 'master.png'
+            preview = directory / 'preview.png'
+            metadata = render(snapshot, resolve, master, preview, preview_only=True)
+            with Image.open(preview) as image:
+                image.thumbnail((640, 640), Image.Resampling.LANCZOS)
+                buffer = io.BytesIO()
+                image.convert('RGB').save(buffer, format='PNG', compress_level=6)
+            loop = metadata['loop']
+            row = dict(
+                style=style,
+                label=STYLES[style]['label'],
+                hint=STYLES[style]['hint'],
+                image='data:image/png;base64,' + base64.b64encode(buffer.getvalue()).decode('ascii'),
+                width=loop['width'],
+                height=loop['height'],
+                rhythm=loop['rhythm'],
+            )
+        finally:
+            shutil.rmtree(directory, ignore_errors=True)
+        self._remember_candidate(key, row)
+        return row
+
+    def _remember_candidate(self, key, row):
+        with self._candidate_lock:
+            self._candidate_cache[key] = row
+            while len(self._candidate_cache) > 24:
+                self._candidate_cache.pop(next(iter(self._candidate_cache)))
 
     def verified_draft_reference(self, code, mode, expected_sha=None):
         """Only an explicitly chosen, matching installed example may leave the host."""

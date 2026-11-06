@@ -3266,3 +3266,29 @@ button.primary.small {
 .trial-box > summary small {
   display: block;
 }
+
+/* progressive trial feedback */
+.trial-progress {
+  height: 4px;
+  border-radius: 999px;
+  background: #e8ebf2;
+  overflow: hidden;
+}
+.trial-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--ink);
+  transition: width 0.25s ease;
+}
+.candidate-card.is-pending {
+  border-style: dashed;
+}
+.candidate-skeleton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 96px;
+  background: #f6f7fa;
+  color: var(--faint);
+}

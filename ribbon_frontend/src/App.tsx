@@ -463,6 +463,8 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
     }),
     [candidateBusy, setCandidateBusy] = useState(false),
     [candidateError, setCandidateError] = useState(""),
+    [candidateQueue, setCandidateQueue] = useState<string[]>([]),
+    [candidateDone, setCandidateDone] = useState(0),
     [designs, setDesigns] = useState<Design[]>([]);
   const [design, setDesign] = useState<Design | null>(null),
     [selection, setSelection] = useState<Selection>(emptySelection),
@@ -711,18 +713,28 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
       setCandidateError("至少选择两种风格来对比");
       return;
     }
-    setCandidateBusy(true); setCandidateError("");
-    try {
-      const rows = await api<Candidate[]>("/candidates", {
-        method: "POST",
-        body: JSON.stringify({ ...selection, styles: trialStyles }),
-      });
-      setCandidates(rows);
-    } catch (error) {
-      setCandidateError(message(error));
-    } finally {
-      setCandidateBusy(false);
+    const queue = [...trialStyles];
+    setCandidateBusy(true);
+    setCandidateError("");
+    setCandidates([]);
+    setCandidateQueue(queue);
+    setCandidateDone(0);
+    // One style per request keeps the server responsive and lets the gallery
+    // fill in order instead of waiting for the slowest render.
+    for (const style of queue) {
+      try {
+        const row = await api<Candidate>("/candidates/one", {
+          method: "POST",
+          body: JSON.stringify({ ...selection, style }),
+        });
+        setCandidates((list) => [...(list || []), row]);
+      } catch (error) {
+        setCandidateError(message(error));
+      }
+      setCandidateDone((done) => done + 1);
     }
+    setCandidateBusy(false);
+    setCandidateQueue([]);
   }
 
   async function loadCatalog() {
@@ -1538,12 +1550,27 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                     </div>
                     <button type="button" className="primary small" disabled={locked || candidateBusy}
                       onClick={() => void previewCandidates()}>
-                      {candidateBusy ? "正在试排…" : `试排这 ${trialStyles.length} 种风格`}
+                      {candidateBusy ? `正在试排 ${candidateDone}/${candidateQueue.length}` : `试排这 ${trialStyles.length} 种风格`}
                     </button>
+                    {candidateBusy && (
+                      <div className="trial-progress" role="progressbar"
+                        aria-valuemin={0} aria-valuemax={candidateQueue.length} aria-valuenow={candidateDone}>
+                        <span style={{ width: `${candidateQueue.length ? (candidateDone / candidateQueue.length) * 100 : 0}%` }} />
+                      </div>
+                    )}
                     {candidateError && <p className="style-hint" role="alert">{candidateError}</p>}
                   </div>
                 </details>}
                 {!!candidates && <div className="candidate-gallery" aria-label="风格试排">
+                  {candidateQueue.filter((style) => !candidates.some((row) => row.style === style)).map((style) => (
+                    <figure key={`pending-${style}`} className="candidate-card is-pending" aria-busy="true">
+                      <div className="candidate-skeleton"><span className="spinner tiny" /></div>
+                      <figcaption>
+                        <strong>{styles.find((s) => s.id === style)?.label || style}</strong>
+                        <span>正在本地渲染…</span>
+                      </figcaption>
+                    </figure>
+                  ))}
                   {candidates.map((candidate) => (
                     <figure key={candidate.style} className={`candidate-card ${(selection.design_style || "classic") === candidate.style ? "selected" : ""}`}>
                       <img src={candidate.image} alt={`${candidate.label}试排`} />

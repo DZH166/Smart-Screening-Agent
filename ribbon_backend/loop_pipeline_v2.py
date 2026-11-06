@@ -205,7 +205,7 @@ def _borders(canvas, snapshot, resolve_asset):
     return report
 
 
-def compose(snapshot, resolve_asset, master_path, preview_path):
+def compose(snapshot, resolve_asset, master_path, preview_path, *, preview_only=False):
     canvas, zones = _make_background(snapshot, resolve_asset)
     try:
         border = (
@@ -257,7 +257,8 @@ def compose(snapshot, resolve_asset, master_path, preview_path):
             profile_source=deepcopy(snapshot['output_profile_source']),
             rhythm=_rhythm(snapshot),
         )
-        result = _finish_render(canvas, snapshot, master_path, preview_path, transforms)
+        result = _finish_render(canvas, snapshot, master_path, preview_path, transforms,
+                                preview_only=preview_only)
         loop['evidence_digest'] = _digest(loop)
         result['loop'] = loop
         return result
