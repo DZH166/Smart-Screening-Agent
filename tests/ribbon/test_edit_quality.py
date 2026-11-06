@@ -93,4 +93,4 @@ def test_output_policy_message_guides_infringement_retries():
     from hsd_tool.provider_diagnostics import MESSAGES
     message = MESSAGES['output_policy']
     assert '版权' in message and '本地合成' in message
-    assert '两次' in message and '侵权' in message
+    assert '自动重试一次' in message and '侵权' in message
