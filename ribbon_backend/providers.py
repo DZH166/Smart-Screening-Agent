@@ -503,11 +503,13 @@ PLAN_SCHEMA = _object({
     "clarification": {"type": ["string", "null"]},
     "requirements": {"type": "array", "maxItems": 4000, "items": _object({
         "source_id": {"type": "string"}, "target_id": {"type": "string"},
-        "effect": {"type": "string", "enum": ["parameters", "content", "preserve", "clarify"]},
+        "effect": {"type": "string", "enum": ["parameters", "content", "preserve", "clarify"],
+                   "description": "Use exactly one of these four effects; never use operation names such as edit_asset or edit_background as an effect."},
     })},
     "operations": {"type": "array", "maxItems": 8, "items": {"anyOf": [
         _object({"type": {"type": "string", "enum": ["parameters"]},
-                 "source_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+                 "source_ids": {"type": "array", "minItems": 1, "items": {"type": "string"},
+                                "description": "Only source IDs whose requirements.effect is parameters. Never include preserve or clarify IDs. Preservation constraints are automatically appended by the server and must not be listed here."},
                  "intents": {"type": "array", "minItems": 1, "maxItems": 6, "items": _object({
                      "key": {"type": "string", "enum": ["scale", "spacing", "rotation", "offset_x", "offset_y", "background_color"]},
                      "mode": {"type": "string", "enum": ["absolute", "absolute_percent", "delta", "percent", "factor", "direction"]},
@@ -518,9 +520,11 @@ PLAN_SCHEMA = _object({
                  "values": _object({**{k: {"type": ["number", "null"]} for k in ("scale", "spacing", "rotation", "offset_x", "offset_y")},
                                     "background_color": {"type": ["string", "null"]}})}),
         _object({"type": {"type": "string", "enum": ["edit_asset"]}, "asset_id": {"type": "string"}, "prompt": {"type": "string"},
-                 "source_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}}}),
+                 "source_ids": {"type": "array", "minItems": 1, "items": {"type": "string"},
+                                "description": "Only source IDs whose requirements.effect is content for this image target. Never include preserve, parameters or clarify IDs. The server automatically forwards all preserve constraints separately."}}),
         _object({"type": {"type": "string", "enum": ["edit_background", "edit_composite"]}, "prompt": {"type": "string"},
-                 "source_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}}}),
+                 "source_ids": {"type": "array", "minItems": 1, "items": {"type": "string"},
+                                "description": "Only source IDs whose requirements.effect is content for this image target. Never include preserve, parameters or clarify IDs. The server automatically forwards all preserve constraints separately."}}),
     ]}}
 })
 
@@ -530,6 +534,10 @@ You receive text and structured configuration only, not artwork images. Never cl
 Follow snapshot.editing.allowed_operations and allowed_parameters exactly; return at most 8 operations.
 Use the source-bound ribbon-request-v2 contract. source_units are immutable original text spans, including punctuation, quoted words and whitespace. Return exactly one requirements row per source unit with its existing source_id, one stable request_targets target_id, and effect parameters/content/preserve/clarify. Never split a unit, omit a tail, turn a negative/preservation clause into an action, or call an unhandled action preservation. If a unit requests several targets that cannot be executed safely as one operation, return clarification; do not execute only part of it.
 Every operation must list source_ids for its actionable requirements. Every parameters/content requirement must have a compatible operation and every operation needs its own original authorization. Preserve requirements never authorize edits; the server forwards them as constraints. No invented target, extra operation, stylistic embellishment or silent omission is allowed. Content image prompts are reconstructed from original source units by the server; your free-form prompt does not replace the employee's words.
+IMPORTANT: requirements.effect MUST be exactly parameters, content, preserve or clarify; do not put operation names (edit_asset/edit_background/edit_composite) in effect. Image operations.source_ids may contain ONLY content IDs; parameters.source_ids may contain ONLY parameters IDs. NEVER attach a preserve ID to any operation. The server automatically appends preservation constraints; excluding them from source_ids does not discard them.
+中文内容示例：s1="底纹添加装饰，"、s2="保留人物和配色。"。requirements中s1.effect="content"、s2.effect="preserve"；edit_background.source_ids必须只有["s1"]，绝不能是["s1","s2"]。s2由服务端自动作为保留约束加入图片要求，不是动作授权。
+English content example: s1="Add decorations to the background, ", s2="keep the characters and colors." Requirements use s1.effect="content" and s2.effect="preserve". The image operation source_ids MUST be ["s1"], NEVER ["s1","s2"]; the server forwards s2 automatically as a constraint.
+参数示例 / Parameter example: s1="图案缩小20%，" ("Shrink the motifs by 20%, "), s2="保持背景不变。" ("keep the background unchanged."). Use s1.effect="parameters", s2.effect="preserve" and parameters.source_ids=["s1"] only; NEVER include s2. Preserve is a requirement row, not a parameters/content action.
 For parameters supply one intents entry per non-null values key: key, mode, amount, direction and evidence. evidence must be an exact verbatim substring of its bound original unit. amount must quote a real original numeric magnitude, not an invented converted number. absolute means the stated final parameter; delta means current+amount; percent increase/decrease means current*(1+/-amount/100); percent set means current*amount/100 ("缩小到当前20%"); absolute_percent means amount/100 ("缩放比例设为20%"); factor means current*amount with an explicit multiplier; direction has amount=null and only an increase/decrease, with no invented number. Do not use direction to evade an explicit original number. Values remain absolute executable parameters and the server recomputes/checks them. Use the actual current params, not template defaults. For a selected pattern absolute visible rotation compensate layout_params.rotation: local=desired visible angle-global layout rotation. If repeated instances have different intrinsic rotations, do not promise all can be made the same absolute angle by a shared local rotation; request clarification. Solid background_color uses absolute/set/amount=null plus exact original evidence; use #RRGGBB, never invent a palette.
 Parameter edits still obey the selected execution target: a layout parameter affects every motif; select a specific pattern before changing only its geometry. Independent zone/border editing requires selecting that target, not merely naming an unexecuted target in a layout plan. A preserve_only target can only receive preserve requirements.
 Current image editing preserves the input aspect ratio and existing alpha/transparency policy. Do not promise background removal, transparent-to-opaque/opaque-to-transparent conversion, a new canvas shape or unsupported edits; request clarification before dispatch instead. Positions use image pixels, not centimetres, millimetres, inches or percentage-of-canvas offsets. Unsupported unit conversions require clarification rather than treating them as pixels.

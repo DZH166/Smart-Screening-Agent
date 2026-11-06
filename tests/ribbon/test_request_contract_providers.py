@@ -11,7 +11,7 @@ import pytest
 from hsd_tool.ai_key_pool import ApiKeyPool
 from hsd_tool import material_providers as transport
 from ribbon_backend.config import Settings
-from ribbon_backend.providers import ClarificationNeeded, PLAN_SCHEMA, get_provider
+from ribbon_backend.providers import ClarificationNeeded, PLAN_SCHEMA, PLANNER_INSTRUCTIONS, get_provider
 from ribbon_backend.request_contract import PROTOCOL
 from test_request_contract import content, parameter, view, wire
 
@@ -83,6 +83,19 @@ def test_schema_requires_source_bindings_and_per_parameter_intent():
     assert 'intents' in variants[0]['required']
     modes = variants[0]['properties']['intents']['items']['properties']['mode']['enum']
     assert 'absolute_percent' in modes and 'direction' in modes
+
+
+def test_serialized_schema_and_examples_exclude_preserve_from_operation_bindings():
+    schema = json.loads(json.dumps(PLAN_SCHEMA))
+    variants = schema['properties']['operations']['items']['anyOf']
+    assert 'Only source IDs' in variants[0]['properties']['source_ids']['description']
+    assert 'effect is parameters' in variants[0]['properties']['source_ids']['description']
+    for variant in variants[1:]:
+        description = variant['properties']['source_ids']['description']
+        assert 'effect is content' in description and 'Never include preserve' in description
+    assert '中文内容示例' in PLANNER_INSTRUCTIONS and 'English content example' in PLANNER_INSTRUCTIONS
+    assert 'parameters.source_ids=["s1"] only' in PLANNER_INSTRUCTIONS
+    assert 'NEVER attach a preserve ID to any operation' in PLANNER_INSTRUCTIONS
 
 
 @pytest.mark.parametrize('name', ['openai', 'deepseek_seedream'])
