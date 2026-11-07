@@ -1,8 +1,8 @@
 #  HSD 图号助手
 
-v1.28.0 当前升级：按用户要求移除丝带精修，页面只保留“选素材 → 排版与底图 → 生成 → 下载”。换素材或排版后可生成独立新作品，旧作品及历史下载保持。素材提取的单图精修继续保留。检查及交付状态见[本轮记录](docs/ribbon-refinement-retirement-v1.28.0.md)；以下v1.27.0及精修描述保留为历史说明。
+v1.28.0 已上线：按用户要求移除丝带精修，页面只保留“选素材 → 排版与底图 → 生成 → 下载”。换素材或排版后可生成独立新作品，旧作品及历史下载保持。素材提取的单图精修继续保留。检查及交付状态见[本轮记录](docs/ribbon-refinement-retirement-v1.28.0.md)；以下v1.27.0及精修描述保留为历史说明。
 
-当前网站：**v1.27.0 / 15ba4435**（2026-11-07 已上线）。[打开丝带设计](https://39.106.45.116:8443/#ribbon)。[Linux Release](https://github.com/DZH166/Smart-Screening-Agent/releases/tag/v1.27.0) 的三附件已校验。本轮分支与交付记录见[整合说明](docs/integration-v1.27.0.md)。
+当前网站：**v1.28.0 / 01b537ee**（2026-11-08 已上线）。[打开丝带设计](https://39.106.45.116:8443/#ribbon)。[Linux Release](https://github.com/DZH166/Smart-Screening-Agent/releases/tag/v1.28.0) 的三附件已校验。原v1.27.0分支整合记录见[整合说明](docs/integration-v1.27.0.md)。
 
 已整合 `codex/ribbon-layout-understanding`：新作品使用 v3 排版，补充散点、场景、边饰和分区行为，图案用途可明确选择；34张私有公司案例与公开程序演示分开呈现。历史作品继续使用原引擎和原下载。[分支原始验证记录](docs/ribbon-layout-understanding-branch.md)保留，不替代本轮整合验收。
 
