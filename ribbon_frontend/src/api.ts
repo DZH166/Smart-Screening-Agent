@@ -45,16 +45,8 @@ export type Config = {
   ai_draft_available?: boolean;
   auth_mode?: string;
   output_profile: Profile;
-  max_refinements: number;
+  refinement_enabled?: boolean;
   retention_hours?: number;
-  editing?: Editing;
-};
-export type Editing = {
-  allowed_operations: string[];
-  allowed_parameters: string[];
-  composite_edit: boolean;
-  composite_edit_reason: string;
-  planner_sees_images: boolean;
 };
 export type Selection = {
   asset_ids: string[];
@@ -91,14 +83,12 @@ export type Loop = {
   };
 };
 export type Snapshot = {
-  edit_plan?: { request_receipt?: RequestReceipt };
   asset_refs: string[];
   zone_background_refs?: Record<string,string>;
   border_ref?: string;
   zone_colors?: Record<string,string>;
   pattern_slots?: string[];
   pattern_roles?: Record<string, PatternRole>;
-  object_transforms?: {slot_id?: string; x:number; y:number; width:number; height:number}[];
   background_ref: string;
   template_id: string;
   template_mode: string;
@@ -112,23 +102,6 @@ export type Snapshot = {
   design_density?: "airy" | "balanced" | "rich";
   design_style?: string;
   composite_ref?: string;
-};
-export type RequestReceipt = {
-  protocol: "ribbon-request-v2";
-  source_sha256: string;
-  coverage: "checked";
-  verification_scope: "plan_and_geometry_only";
-  image_effect_verified: false;
-  requirements: {
-    id: string;
-    source_id: string;
-    start: number;
-    end: number;
-    kind: "modify" | "preserve";
-    target: string;
-    method: "parameters" | "image" | "preserve";
-    execution: "geometry_verified" | "parameters_applied_unverified" | "image_generated_unverified" | "constraint_forwarded";
-  }[];
 };
 export type PatternRole = "main" | "support" | "accent" | "border";
 export function isDirectLayoutReference(example: {available:boolean; reference_only:boolean; mode_tags:string[]; mode_notes?:Record<string,{fit:string}>}, mode:string): boolean {
@@ -164,7 +137,6 @@ export type Version = {
   design_id: string;
   parent_version_id: string | null;
   sequence: number;
-  prompt: string;
   render_kind: string;
   snapshot: Snapshot;
   preview_url: string;
@@ -172,7 +144,6 @@ export type Version = {
   download_url: string;
   created_at: string;
   provider: string;
-  editing?: Editing;
 };
 export type Job = {
   id: string;
@@ -193,7 +164,6 @@ export type Design = {
   id: string;
   name: string;
   current_version_id: string | null;
-  successful_refinement_count: number;
   active_job_id: string | null;
   revision: number;
   versions: Version[];
@@ -299,7 +269,7 @@ export const post = <T>(path: string, body: unknown) =>
 export const running = (job: Job | null | undefined) =>
   !!job && ["QUEUED", "RUNNING", "RECONCILING"].includes(job.status);
 export const versionName = (version: Version) =>
-  version.sequence === 0 ? "首稿" : `精修 ${version.sequence}`;
+  version.sequence === 0 ? "首稿" : `版本 ${version.sequence}`;
 export function loadLocal<T>(key: string, fallback: T): T {
   try {
     return JSON.parse(localStorage.getItem(key) || "null") ?? fallback;

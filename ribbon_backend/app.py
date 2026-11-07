@@ -58,14 +58,6 @@ class Generate(Selection):
     reference_code: str | None = Field(default=None, strict=True, min_length=1, max_length=32)
 
 
-class Refinement(StrictModel):
-    idempotency_key: str = Field(min_length=8, max_length=160)
-    base_version_id: str
-    edit_target: str = Field(default="layout", min_length=1, max_length=128)
-    prompt: str = Field(min_length=1, max_length=2000)
-    selection: Selection | None = None
-
-
 class Background(StrictModel):
     idempotency_key: str = Field(min_length=8, max_length=160)
     prompt: str = Field(default='', max_length=2000)
@@ -278,9 +270,11 @@ def create_app(settings: Settings | None = None, *, service: Service | None = No
     def generate(design_id: str, body: Generate, current=Depends(user)):
         return service.submit(current['id'], 'generate', body.model_dump(exclude_unset=True), design_id)
 
-    @app.post('/api/designs/{design_id}/refinements', status_code=202)
-    def refine(design_id: str, body: Refinement, current=Depends(user)):
-        return service.submit(current['id'], 'refine', body.model_dump(exclude_unset=True), design_id)
+    @app.post('/api/designs/{design_id}/refinements', deprecated=True)
+    def refine_removed(design_id: str, current=Depends(user)):
+        # A cached page must not submit or plan even if it sends an old/invalid
+        # request body. Previously accepted jobs remain readable through GET.
+        return service.refinement_unavailable(current['id'], design_id)
 
     @app.post('/api/designs/{design_id}/rollback')
     def rollback(design_id: str, body: Rollback, current=Depends(user)):
@@ -289,6 +283,10 @@ def create_app(settings: Settings | None = None, *, service: Service | None = No
     @app.post('/api/background-jobs', status_code=202)
     def background(body: Background, current=Depends(user)):
         return service.submit(current['id'], 'background', body.model_dump())
+
+    @app.get('/api/jobs/by-request/{key}')
+    def accepted_request(key: str, current=Depends(user)):
+        return service.job_by_request(current['id'], key)
 
     @app.get('/api/jobs/{job_id}')
     def job(job_id: str, current=Depends(user)):

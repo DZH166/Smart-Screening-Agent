@@ -79,55 +79,14 @@ try{
   const page=await browser.newPage({viewport:{width:1366,height:768}}),errors=[];
   page.on('pageerror',e=>errors.push(String(e)));
   await page.goto('http://127.0.0.1:'+server.address().port+'/#ribbon');
-  const result=page.getByRole('region',{name:'本版本精修结果',exact:true});
-  await result.getByText('已生成，效果请对照要求',{exact:true}).waitFor();
-  assert.equal(await result.locator('details').getAttribute('open'),null);
-  await result.getByText('查看本次要求',{exact:true}).click();
-  assert.equal(await result.locator('.original-refinement-request').innerText(),source);
-  assert.equal(await result.locator('b').count(),0,'request text is escaped, never interpreted as HTML');
-  assert.equal(await page.getByRole('link',{name:'下载循环单元',exact:true}).count(),1,'download requires no new confirmation');
+  await page.locator(".loop-preview").waitFor();
   await page.locator('.history-panel > summary').click();
-  await page.locator('.version-card').filter({hasText:'精修 2'}).click();
-  assert.equal(await result.locator('details').getAttribute('open'),null,'version changes reset the request disclosure');
-  await result.getByText('查看本次要求',{exact:true}).click();
-  await result.getByText('此旧版本没有保存修改原文。',{exact:true}).waitFor();
-  await page.locator('.version-card').filter({hasText:'首稿'}).click();
-  assert.equal(await page.getByRole('region',{name:'本版本精修结果',exact:true}).count(),0,'first draft does not invent a refinement request');
-  const choose=async(sequence)=>{await page.locator('.version-card').filter({has:page.getByText('精修 '+sequence,{exact:true})}).click();};
-  await choose(3);
-  await result.getByText('参数调整已核对',{exact:true}).waitFor();
-  assert.equal(await result.locator('details').getAttribute('open'),null);
-  await result.getByText('查看本次要求',{exact:true}).click();
-  assert.equal(await result.locator('.refinement-requirements li').count(),2);
-  assert.equal(await result.locator('.refinement-requirements li').first().locator('span').last().textContent(),Array.from(source).slice(0,split+1).join(''),'Python Unicode codepoint ranges preserve emoji and the following characters');
-  await result.getByText('保留要求 · 约束已传递',{exact:true}).waitFor();
-  assert.equal(await result.getByText('已保留',{exact:true}).count(),0,'a forwarded preservation constraint does not claim unchanged image pixels');
-  for(const sequence of [4,5,6,7,8]) {
-    await choose(sequence);
-    await result.getByText('已生成，效果请对照要求',{exact:true}).waitFor();
-    await result.getByText('查看本次要求',{exact:true}).click();
-    if([5,6].includes(sequence)) {
-      await page.waitForTimeout(50);
-      assert.equal(await result.locator('.refinement-requirements li').count(),0,'mismatched hashes and malformed ranges never display a checked receipt');
-    } else await result.locator('.refinement-requirements li').first().waitFor();
-    assert.equal(await result.getByText('参数调整已核对',{exact:true}).count(),0,'image/mixed/preservation-only requests never claim geometry verification of the complete request');
-  }
-  await choose(9);
-  await result.getByText('已生成，效果请对照要求',{exact:true}).waitFor();
-  await result.getByText('查看本次要求',{exact:true}).click();
-  await result.getByText('参数已应用，效果需核对',{exact:true}).waitFor();
-  assert.equal(await result.getByText('参数调整已核对',{exact:true}).count(),0);
-  await choose(14);
-  await result.getByText('已生成，效果请对照要求',{exact:true}).waitFor();
-  await result.getByText('查看本次要求',{exact:true}).click();
-  await result.getByText('参数已应用，效果需核对',{exact:true}).waitFor();
-  assert.equal(await result.getByText('参数调整已核对',{exact:true}).count(),0,'v3 numeric-only receipt must not claim physical geometry verification');
-  for(const sequence of [10,11,12,13]) {
-    await choose(sequence);await result.getByText('查看本次要求',{exact:true}).click();
-    await page.waitForTimeout(50);
-    assert.equal(await result.locator('.refinement-requirements li').count(),0,'duplicate sources/IDs and overlapping or incomplete scopes stay conservative');
-    assert.equal(await result.getByText('参数调整已核对',{exact:true}).count(),0);
+  for(const v of design.versions){
+    await page.locator('.version-card').filter({has:page.getByText(v.sequence ? '版本 '+v.sequence : '首稿',{exact:true})}).click();
+    assert.equal(await page.locator('.refinement-result,.refinement-panel,#refinement,.target-overlay').count(),0);
+    assert.equal(await page.locator('.original-refinement-request,.refinement-requirements').count(),0);
+    assert.equal(await page.locator(`a[download][href="${v.download_url}"]`).count(),1,'history remains downloadable without edit controls');
   }
   assert.deepEqual(errors,[]);assert.equal(calls.filter(c=>c.method!=='GET').length,0);
-  console.log('PASS synthetic version-bound raw request disclosure, no semantic-success or new confirmation gate');
+  console.log('PASS synthetic historical versions keep downloads and do not restore retired editing or receipt UI');
 }finally{await browser.close();await new Promise(resolve=>server.close(resolve));}

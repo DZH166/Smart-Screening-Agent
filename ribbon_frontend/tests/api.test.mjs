@@ -55,7 +55,7 @@ test("gateway and backend errors stay failures, never become demo results", asyn
   try {
     for (const body of [{ error: "登录已失效" }, { detail: "模型未完成" }]) {
       globalThis.fetch = async () => new Response(JSON.stringify(body), { status: 403 });
-      await assert.rejects(post("/designs/a/refinements", {}), error =>
+      await assert.rejects(post("/designs/a/generate", {}), error =>
         error instanceof ApiError && error.status === 403 && error.message === (body.error || body.detail));
     }
   } finally { globalThis.fetch = original; }

@@ -18,7 +18,7 @@ const selection={asset_refs:['pattern'],background_ref:'background',template_id:
 const works=['A','B'].map(id=>({id,name:'合成作品 '+id,current_version_id:'v-'+id,successful_refinement_count:0,active_job_id:null,revision:0,active_job:null,
   versions:[{id:'v-'+id,design_id:id,parent_version_id:null,sequence:0,prompt:'',render_kind:'layered',provider:'test',created_at:'2026-11-07',snapshot:structuredClone(selection),
     preview_url:image+'?work='+id,download_url:'/api/ribbon/versions/v-'+id+'/download'}]}));
-let hold=null, release=null;
+let hold=null, release=null, scope="A";
 const calls=[],writes=[],jobs=new Map();
 const server=createServer(async(req,res)=>{
   const p=new URL(req.url,'http://localhost').pathname;
@@ -35,18 +35,13 @@ const server=createServer(async(req,res)=>{
     if(p==='/api/ribbon/templates')return json([{id:'grid',name:'整齐平铺',mode:'grid',version:1,enabled:true,thumbnail_url:image,rules:{}}]);
     if(p==='/api/ribbon/design-styles')return json(styles);
     if(p==='/api/ribbon/designs')return json(works);
-    const candidate=/^\/api\/ribbon\/designs\/([^/]+)\/candidates\/one$/.exec(p);
+    const candidate=p==='/api/ribbon/candidates/one' ? [p,scope] : null;
     if(candidate){let text='';for await(const part of req)text+=part;const body=JSON.parse(text);calls.push({id:candidate[1],...body});
       assert.equal(req.headers['x-hsd-token'],'synthetic-token');
       if(hold===candidate[1]+':'+body.style)await new Promise(resolve=>{release=resolve;});
       return json({style:body.style,label:candidate[1]+' '+body.style,hint:'合成试排',image:'data:image/svg+xml;base64,'+Buffer.from(svg).toString('base64'),width:1200,height:520});}
-    const design=/^\/api\/ribbon\/designs\/([^/]+)(\/refinements)?$/.exec(p);
-    if(design){const work=works.find(w=>w.id===design[1]);if(!work)return json({detail:'missing'},404);
-      if(design[2]){let text='';for await(const part of req)text+=part;const body=JSON.parse(text);writes.push(body);
-        const prior=work.versions.find(v=>v.id===work.current_version_id), next={...structuredClone(prior),id:prior.id+'-next',sequence:prior.sequence+1,parent_version_id:prior.id,prompt:body.prompt};
-        next.snapshot.design_style=body.selection.design_style;work.versions.push(next);work.current_version_id=next.id;work.successful_refinement_count++;
-        const job={id:'fixture-job',design_id:work.id,kind:'refine',provider:'test',status:'SUCCEEDED',phase:'合成保存',result_version_id:next.id};jobs.set(job.id,job);return json(job);}
-      return json(work);}
+    const design=/^\/api\/ribbon\/designs\/([^/]+)$/.exec(p);
+    if(design){const work=works.find(w=>w.id===design[1]);return work ? json(work) : json({detail:'missing'},404);}
     if(p.startsWith('/api/ribbon/jobs/'))return json(jobs.get(p.split('/').at(-1)));
     return json({detail:'synthetic route missing'},404);
   }catch(error){json({detail:String(error)},500);}
@@ -62,16 +57,13 @@ try {
   await page.getByRole('heading',{name:'合成作品 A',exact:true}).waitFor();
   const style=id=>page.locator('.style-chips button').filter({hasText:styles.find(s=>s.id===id).label});
   const run=()=>page.getByRole('button',{name:/^试排这/});
-  const choose=async id=>{await page.getByRole('button',{name:'我的作品',exact:false}).click();await page.locator('.design-list-item').filter({has:page.getByText('合成作品 '+id,{exact:true})}).click();await page.getByRole('heading',{name:'合成作品 '+id,exact:true}).waitFor();};
+  const choose=async id=>{scope=id;await page.getByRole('button',{name:'我的作品',exact:false}).click();await page.locator('.design-list-item').filter({has:page.getByText('合成作品 '+id,{exact:true})}).click();await page.getByRole('heading',{name:'合成作品 '+id,exact:true}).waitFor();};
   await style('hierarchy').click();
   assert.equal(await style('hierarchy').getAttribute('aria-pressed'),'true');
-  assert.equal(await page.locator('.refine-button').isEnabled(),true,'style-only change activates local configuration submission');
+  assert.equal(await page.getByRole('button',{name:'生成新作品',exact:true}).isEnabled(),true,'style-only change can create a separate work');
   await page.reload();
   await page.getByRole('heading',{name:'合成作品 A',exact:true}).waitFor();
   assert.equal(await style('hierarchy').getAttribute('aria-pressed'),'true','unsaved employee style survives reload');
-  await page.locator('.refine-button').click();
-  await page.locator('.remaining-edits strong').filter({hasText:'1'}).waitFor();
-  assert.equal(writes.length,1);assert.equal(writes[0].prompt,'应用所选配置');assert.equal(writes[0].selection.design_style,'hierarchy');
   await page.locator('.trial-box > summary').click();
   hold='A:hierarchy';
   await run().click();
@@ -100,5 +92,5 @@ try {
   assert.equal(await page.locator('.candidate-gallery').count(),0,'selection change clears old trial results');
   assert.equal(calls.filter(c=>c.id==='B').length,3,'selection change stops the remaining old-selection queue');
   assert.deepEqual(errors,[]);
-  console.log(JSON.stringify({source:'synthetic_http_browser',checks:['style-only-submit','unsaved-style-reload','progressive-trial','employee-style-choice','stale-work-and-selection'],requests:calls.length,real_model_calls:0}));
+  console.log(JSON.stringify({source:'synthetic_http_browser',checks:['new-work-style-selection','unsaved-style-reload','progressive-trial','employee-style-choice','stale-work-and-selection'],requests:calls.length,real_model_calls:0}));
 }finally{hold=null;release?.();await browser.close();await new Promise(resolve=>server.close(resolve));}

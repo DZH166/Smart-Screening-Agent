@@ -49,6 +49,7 @@ QUALITY_LAYOUT_ENGINES = frozenset({'design-rhythm-v1', 'design-rhythm-v2', *LOO
 BACKGROUND_TONES = frozenset({'soft', 'quiet', 'original'})
 DESIGN_DENSITIES = frozenset({'airy', 'balanced', 'rich'})
 TERMINAL = ('SUCCEEDED', 'FAILED')
+REFINEMENT_REMOVED = '丝带精修已停用；如需重新设计，请新建作品。原作品仍可查看、回退和下载。'
 
 
 def now():
@@ -331,15 +332,29 @@ class Service:
         with self.db.transaction() as db:
             db.execute('DELETE FROM sessions WHERE token_hash=?', (digest((token or '').encode()),))
 
+    @staticmethod
+    def public_editing():
+        # Historic snapshots keep their original capability records; only the
+        # current public entry point is retired. Accepted jobs can still settle.
+        return dict(enabled=False, allowed_operations=[], allowed_parameters=[],
+                    composite_edit=False, composite_edit_reason=REFINEMENT_REMOVED,
+                    planner_sees_images=False)
+
     def config(self):
-        from .providers import workflow_editing
         with self.db.connect() as db:
             profile = json.loads(db.execute('SELECT profile_json FROM output_profiles WHERE active=1').fetchone()[0])
         settings = self.current_settings()
-        return dict(provider=settings.provider, ai_ready=settings.ai_ready, auth_mode=self.settings.auth_mode, output_profile={k: profile[k] for k in ('id', 'version', 'name', 'is_demo')}, max_refinements=2,
-                    ai_draft_available=settings.provider == 'deepseek_seedream' and settings.ai_ready,
+        return dict(provider=settings.provider, ai_ready=settings.image_ready, auth_mode=self.settings.auth_mode, output_profile={k: profile[k] for k in ('id', 'version', 'name', 'is_demo')}, max_refinements=0,
+                    refinement_enabled=False, refinement_disabled_reason=REFINEMENT_REMOVED,
+                    ai_draft_available=settings.provider == 'deepseek_seedream' and settings.image_ready,
                     retention_hours=self.settings.retention_seconds // 3600,
-                    editing=workflow_editing(settings.provider, dict(output_profile=profile, template_mode='stagger')))
+                    editing=self.public_editing())
+
+    @leased_operation
+    def refinement_unavailable(self, owner, design_id):
+        with self.db.connect() as db:
+            self.owned_design(db, owner, design_id)
+        raise ServiceError(410, REFINEMENT_REMOVED)
 
     def asset_public(self, row):
         prefix = f"{getattr(self.settings, 'api_prefix', '/api')}/assets/{row['id']}"
@@ -734,11 +749,10 @@ class Service:
         return self.design(owner, design_id)
 
     def version_public(self, row):
-        from .providers import workflow_editing
         prefix = getattr(self.settings, 'api_prefix', '/api')
         snapshot = json.loads(row['snapshot_json'])
         return {**{k: row[k] for k in ('id', 'design_id', 'parent_version_id', 'sequence', 'prompt', 'render_kind', 'provider', 'created_at')}, 'snapshot': snapshot,
-                'editing': workflow_editing(self.current_settings().provider, snapshot),
+                'editing': self.public_editing(),
                 'preview_url': f"{prefix}/versions/{row['id']}/preview", 'view_url': f"{prefix}/versions/{row['id']}/view", 'download_url': f"{prefix}/versions/{row['id']}/download"}
 
     @staticmethod
@@ -783,6 +797,19 @@ class Service:
             row = db.execute('SELECT * FROM jobs WHERE id=? AND owner_id=?', (job_id, owner)).fetchone()
         if not row:
             raise ServiceError(404, '任务不存在或无权访问')
+        return self.job_public(row)
+
+    @leased_operation
+    def job_by_request(self, owner, key):
+        """Read an accepted receipt without resubmitting an unknown operation."""
+        if not isinstance(key, str) or not 8 <= len(key) <= 160:
+            raise ServiceError(404, '没有找到已受理记录，未重新提交')
+        with self.db.connect() as db:
+            if db.execute('SELECT 1 FROM expired_requests WHERE owner_id=? AND idempotency_key=?', (owner, key)).fetchone():
+                raise ServiceError(410, '这次提交已过保存期限，未再次调用模型')
+            row = db.execute('SELECT * FROM jobs WHERE owner_id=? AND idempotency_key=?', (owner, key)).fetchone()
+        if not row:
+            raise ServiceError(404, '没有找到已受理记录，未重新提交')
         return self.job_public(row)
 
     def selection_snapshot(self, db, owner, selection, profile=None, base=None):
@@ -988,7 +1015,7 @@ class Service:
             raise ServiceError(422, '选择参考案例前请启用 AI 搭配')
         if not assisted:
             return
-        available = settings.provider == 'deepseek_seedream' and settings.ai_ready
+        available = settings.provider == 'deepseek_seedream' and settings.image_ready
         fixture = settings.provider == 'test' and self.settings.auth_mode == 'demo' and settings.enabled
         if not (available or fixture):
             raise ServiceError(503, 'AI 搭配尚未启用或真实服务未就绪，请联系管理员')
@@ -1035,6 +1062,11 @@ class Service:
                 if previous['request_hash'] != request_hash:
                     raise ServiceError(409, '相同提交标识对应了不同内容，请重新提交')
                 return self.job_public(previous)
+            # Only replay a genuinely accepted request. New refinement work is
+            # retired regardless of provider, UI version, or remaining quota.
+            if kind == 'refine':
+                self.owned_design(db, owner, design_id)
+                raise ServiceError(410, REFINEMENT_REMOVED)
             payload = copy.deepcopy(payload)
             settings = self.current_settings()
             payload['model_config'] = dict(language_model=settings.language_model, image_model=settings.image_model, image_quality=settings.image_quality, config_revision=getattr(settings, 'config_revision', ''))
@@ -1045,7 +1077,7 @@ class Service:
                     raise ServiceError(409, '作品正在处理，请等待当前任务结束')
                 if kind == 'generate':
                     if design['current_version_id']:
-                        raise ServiceError(409, '已有首稿，更改配置请使用精修')
+                        raise ServiceError(409, '作品已有首稿；如需重新设计，请新建作品，原版本不会被覆盖')
                     payload['snapshot'] = self.selection_snapshot(db, owner, payload)
                     self.prepare_ai_draft(db, owner, payload, settings)
                 else:

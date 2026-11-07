@@ -1,5 +1,15 @@
 # Internal implementation contract
 
+## Ribbon refinement retirement v1.28.0
+
+New ribbon refinement is retired. The authenticated, owner-checked legacy POST returns410 without planning, accepting work, writing a version or charging quota. `Service.submit` may replay a matching previously accepted idempotency record, but rejects new `refine` work before provider configuration or execution. Public current editing capabilities are empty and maximum new refinements is zero; immutable historical snapshots are not rewritten.
+
+`GET /api/jobs/by-request/{key}` is an authenticated owner-scoped, no-store recovery read. It returns the existing public job,404 for unknown and410 for an expired tombstone. It does not return request text or payload and does not enqueue work. New clients resolve legacy pending refinement requests by this read only; failed reads retain context rather than resending the retired POST. Existing job execution/commit checks remain solely for previously accepted legacy work.
+
+The workspace removes refinement inputs, scope overlays, suggestions, receipts and quota presentation. Editing selection after a saved output produces a new independent work through the existing create/generate path; the existing work and its version-bound downloads remain immutable. Trials use the current new-work profile/engine, while historical preview/downloads retain their saved profile/engine. Library, references, background generation, ownership, deletion/restore and50-hour retention remain. Material extraction's separate refinement is outside this change.
+
+Image generation readiness depends on image credentials; language capability is checked only at the legacy planner entry. Shared DeepSeek and material/numbering settings are not deleted. Historical contracts below describe retired capabilities and do not authorize new ribbon refinement.
+
 ## Ribbon integration v1.27.0
 
 The integration preserves main's progressive style trials, quiet backgrounds, bounded output-review retry and persistent cloud sessions while adding request-v2 and layout-v3. Existing works retain their bound engine and output profile. Style changes must change real geometry; a style label alone cannot create a successful refinement. Candidate requests for an existing work bind its current version/profile/engine, not the global new-work defaults. UI requests cancel stale trials and reject late results after work, version, selection or style changes.

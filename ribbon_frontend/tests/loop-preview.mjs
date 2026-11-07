@@ -19,7 +19,7 @@ const assets = ["flower", "star"].map(name => ({ id: `demo-${name}`, name: `合�
 assets.push({ id: "demo-bg-sage", name: "合成底图", kind: "background", source: "synthetic", is_demo: true, shared: true, url: fixture, thumbnail_url: fixture });
 const templates = ["stagger", "ends", "split", "bordered", "scene", "scatter"].map(mode => ({ id: mode, name: mode, mode, version: 1, enabled: true, rules: {}, thumbnail_url: fixture }));
 const makeVersion = (id, sequence, parent, engine = "seamless-unit-v1", mode = "stagger") => ({
-  id, design_id: "LOOP", sequence, parent_version_id: parent, prompt: sequence ? "合成精修" : "", render_kind: "parameters", provider: "test", created_at: "2026-11-04", editing,
+  id, design_id: "LOOP", sequence, parent_version_id: parent, prompt: sequence ? "旧版本说明" : "", render_kind: "parameters", provider: "test", created_at: "2026-11-04", editing,
   preview_url: `${fixture}?version=${id}`, view_url: `/api/ribbon/versions/${id}/view`, download_url: `/api/ribbon/versions/${id}/download`,
   snapshot: { asset_refs: ["demo-flower", "demo-star"], background_ref: "demo-bg-sage", template_id: mode, template_mode: mode, template_version: 1,
     layout_engine: engine, design_density: "balanced", background_tone: "soft", params: {}, output_profile: engine === "seamless-unit-v1" ? unitProfile : sourceProfile,
@@ -91,12 +91,7 @@ const server = createServer(async (req, res) => {
           work.current_version_id = work.versions.find(item => item.id === work.current_version_id).parent_version_id;
           work.revision++; return json(work);
         }
-        assert.equal(data.base_version_id, work.current_version_id);
-        const sequence = work.versions.length, next = makeVersion(`loop-${sequence}`, sequence, work.current_version_id);
-        next.snapshot.loop = { ...next.snapshot.loop, status: "checked", kind: "sequence", issues: [], mode_notice: undefined };
-        work.versions.push(next); work.current_version_id = next.id; work.successful_refinement_count++; work.revision++;
-        const job = { id: `synthetic-job-${sequence}`, design_id: id, kind: "refinement", status: "SUCCEEDED", phase: "completed", attempt: 1, provider: "test", error: null, result_version_id: next.id, needs_clarification: false };
-        jobs.set(job.id, job); return json(job);
+        return json({detail:"retired"},410);
       }
       if (id === "SLOW") await new Promise(resolve => { releaseSlow = resolve; });
       return json(work);
@@ -117,6 +112,7 @@ try {
   const choose = async id => {
     await page.getByRole("button", { name: "我的作品", exact: false }).click();
     await page.locator(".design-list-item").filter({ has: page.getByText(`合成作品 ${id}`, { exact: true }) }).click();
+    if(id!=="SLOW" && id!=="EMPTY")await page.locator(`a[download][href="${works.find(w=>w.id===id).versions.find(v=>v.id===works.find(w=>w.id===id).current_version_id).download_url}"]`).waitFor();
   };
   const refresh = async id => {
     const response = page.waitForResponse(value => new URL(value.url()).pathname === `/api/ribbon/designs/${id}`);
@@ -163,9 +159,10 @@ try {
   assert.match(await readFile(await download.path(), "utf8"), /width="1200" height="520"/, "download is the full-size single unit, not a three-unit strip");
   await page.locator(".loop-technical-details summary").click();
   assert.match(await page.locator(".loop-technical-details").innerText(), /11811×520px/);
-  await page.locator(".refinement-body textarea").fill("图案缩小一些");
-  await page.getByRole("button", { name: "开始精修", exact: true }).click();
-  await page.waitForFunction(() => document.querySelector("#ribbon-mount").shadowRoot.querySelector('a[download]')?.getAttribute("href") === "/api/ribbon/versions/loop-1/download");
+  const historic = makeVersion("loop-1",1,"loop-0");
+  historic.snapshot.loop = {...historic.snapshot.loop,status:"checked",kind:"sequence",issues:[],mode_notice:undefined};
+  loopWork.versions.push(historic); loopWork.current_version_id=historic.id;
+  await refresh("LOOP");
   await assertUnit("loop-1");
   await page.locator(".loop-technical-details summary").click();
   assert.equal(await page.getByText("工程循环检查通过", { exact: true }).isVisible(), true);
@@ -175,17 +172,11 @@ try {
   await page.locator(".version-card").first().click();
   assert.equal(await page.getByRole("link", { name: "下载所选版本", exact: true }).getAttribute("href"), "/api/ribbon/versions/loop-0/download");
   assert.equal(await page.getByText("合成提示：请复核接缝附近的留白。", { exact: true }).isVisible(), true);
-  assert.equal(await page.getByRole("button", { name: "开始精修", exact: true }).isEnabled(), false);
+  assert.equal(await page.locator(".refinement-panel").count(), 0);
   await page.getByRole("button", { name: "返回当前版本", exact: true }).click();
   await page.getByRole("button", { name: "回退上一版", exact: true }).click();
   await assertUnit("loop-0");
-  assert.equal(loopWork.successful_refinement_count, 1, "rollback does not refund quota");
-  await page.locator(".refinement-body textarea").fill("图案缩小一些");
-  await page.getByRole("button", { name: "开始精修", exact: true }).click();
-  await page.waitForFunction(() => document.querySelector("#ribbon-mount").shadowRoot.querySelector('a[download]')?.getAttribute("href") === "/api/ribbon/versions/loop-2/download");
-  await assertUnit("loop-2");
-  assert.equal(loopWork.versions.at(-1).parent_version_id, "loop-0", "new refinement follows the rollback parent");
-  await page.getByRole("button", { name: "精修次数已用完", exact: true }).waitFor();
+  assert.equal(loopWork.versions.length,2,"history remains intact after rollback");
   const staleImage = await page.locator(".loop-unit-view img").elementHandle();
   await choose("SLOW");
   await page.getByText("正在打开作品…", { exact: true }).waitFor();
@@ -202,40 +193,25 @@ try {
   await page.locator(".ribbon-display.detail img").waitFor();
   assert.equal(await page.locator(".ribbon-display img").getAttribute("src"), "/api/ribbon/versions/old-v2/view", "legacy detail still uses its own full-resolution file");
   await choose("BORDER");
-  assert.equal(await page.locator(".pattern-role").count(),0,"v2 works retain old role semantics");
+  assert.equal(await page.locator(".pattern-role").count(),1,"new-work controls use current role capabilities even when viewing an old version");
   await page.getByText("独立边饰",{exact:true}).click();
   await page.getByRole("button",{name:"选择上下边饰"}).click();
   const borders=page.getByRole("dialog",{name:"选择边饰",exact:true});
   await borders.locator(".library-card").filter({hasText:"合成图案 star"}).click();
   await borders.getByRole("button",{name:"完成选择"}).click();
-  await page.getByRole("button",{name:"开始精修",exact:true}).click();
-  await page.locator('a[download][href="/api/ribbon/versions/loop-1/download"]').waitFor();
-  assert.equal(writes.at(-1).data.selection.border_ref,"demo-star");
-  assert.deepEqual(writes.at(-1).data.selection.asset_ids,["demo-flower"]);
+  assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem("ribbon:synthetic-loop-user:selection")).value.border_ref),"demo-star");
   await choose("ZONES");
   await page.getByText("分区底纹",{exact:true}).click();
   await page.getByRole("button",{name:"选择左区底纹",exact:true}).click();
   const sources=page.getByRole("dialog",{name:"左区底纹",exact:true});
   await sources.locator(".library-card").first().click();
   await sources.getByRole("button",{name:"完成选择"}).click();
-  await page.getByRole("button",{name:"开始精修",exact:true}).click();
-  await page.locator('a[download][href="/api/ribbon/versions/loop-1/download"]').waitFor();
-  assert.deepEqual(writes.at(-1).data.selection.zone_background_refs,{left:"demo-bg-sage"});
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem("ribbon:synthetic-loop-user:selection")).value.zone_background_refs),{left:"demo-bg-sage"});
   await choose("TARGET");
-  const target = page.getByLabel("精修范围",{exact:true}).and(page.locator("select"));
-  await target.selectOption("stable-star");
-  assert.equal(await page.locator(".loop-unit-view .target-overlay rect").count(),2);
-  const imageBounds = await page.locator(".loop-unit-view img").boundingBox();
-  const targetBounds = await page.locator(".loop-unit-view .target-overlay").boundingBox();
-  for(const key of ["x","y","width","height"]) assert.ok(Math.abs(imageBounds[key]-targetBounds[key])<=1, `highlight matches displayed pixels: ${key}`);
-  await page.locator("#refinement").fill("向右移动10像素");
-  await page.getByRole("button",{name:"开始精修",exact:true}).click();
-  await page.locator('a[download][href="/api/ribbon/versions/loop-1/download"]').waitFor();
-  assert.equal(writes.at(-1).data.edit_target,"stable-star");
-  assert.equal(writes.at(-1).data.base_version_id,"target-0");
+  assert.equal(await page.locator(".target-overlay, #refinement").count(),0,"old target metadata does not restore removed editing controls");
   await choose("ROLES");
   await page.getByLabel("图案 1 的排版角色",{exact:true}).waitFor();
-  assert.equal(await page.locator(".loop-unit-view").isVisible(),true,"v3 has loop preview and stable-target editing");
+  assert.equal(await page.locator(".loop-unit-view").isVisible(),true,"v3 retains its loop preview");
   assert.equal(await page.getByLabel("图案 2 的排版角色",{exact:true}).inputValue(),"accent","snapshot stable slots restore the current asset role");
   const roleViewport = page.viewportSize();
   for (const width of [1366,1920]) {
@@ -245,18 +221,16 @@ try {
   }
   await page.setViewportSize(roleViewport);
   await page.getByLabel("图案 1 的排版角色",{exact:true}).selectOption("accent");
-  assert.equal(await page.getByRole("button",{name:"开始精修",exact:true}).isEnabled(),false,"accent-only content cannot become a valid composition");
+  assert.equal(await page.getByRole("button",{name:"生成新作品",exact:true}).isEnabled(),false,"accent-only content cannot become a valid composition");
   await page.getByLabel("图案 1 的排版角色",{exact:true}).selectOption("main");
   await page.getByLabel("图案 2 的排版角色",{exact:true}).selectOption("support");
-  assert.equal(await page.getByRole("button",{name:"开始精修",exact:true}).isEnabled(),true,"role selection alone is a real local refinement request");
-  await page.getByRole("button",{name:"开始精修",exact:true}).click();
-  await page.locator('a[download][href="/api/ribbon/versions/loop-1/download"]').waitFor();
-  assert.deepEqual(writes.at(-1).data.selection.pattern_roles,{"demo-flower":"main","demo-star":"support"},"wire roles bind asset IDs, not stable snapshot IDs");
+  assert.equal(await page.getByRole("button",{name:"生成新作品",exact:true}).isEnabled(),true,"valid roles prepare a new work");
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem("ribbon:synthetic-loop-user:selection")).value.pattern_roles),{"demo-flower":"main","demo-star":"support"});
   await choose("EMPTY");
   await page.getByRole("button", { name: "生成首稿", exact: true }).waitFor();
   assert.equal(await page.locator(".loop-preview, a[download]").count(), 0);
   assert.deepEqual(errors, []);
-  const result = { fixture: "synthetic HTTP only; no business images, no model calls", initialPreviewReads, repeatControlsExtraReads: 0, loopDefault: "unit", repeatedCopies: 3, seams: true, warningsVisible: true, sourceDetailsCollapsed: true, pollingPreservesView: true, versionDownload: true, refinementRollbackBranch: true, legacyV1V2: true, switchingRejectsStaleImageAndResponse: true, responsiveWidths: [1920, 1366, 640, 375] };
+  const result = { fixture: "synthetic HTTP only; no business images, no model calls", initialPreviewReads, repeatControlsExtraReads: 0, loopDefault: "unit", repeatedCopies: 3, seams: true, warningsVisible: true, sourceDetailsCollapsed: true, pollingPreservesView: true, versionDownload: true, historicRollback: true, legacyV1V2: true, switchingRejectsStaleImageAndResponse: true, responsiveWidths: [1920, 1366, 640, 375] };
   await writeFile(path.join(out, "loop-preview.json"), JSON.stringify(result, null, 2));
   console.log(JSON.stringify(result));
-} finally { releaseSlow?.(); await browser.close(); await new Promise(resolve => server.close(resolve)); }
+} finally { releaseSlow?.(); await browser.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }

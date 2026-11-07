@@ -28,7 +28,7 @@
     <main>
       <section class="panel">
         <div class="section-heading"><h2>火山方舟 · 丝带图片模型</h2></div>
-        <p>用于丝带的底图与精修。文字理解沿用 <a href="/admin/deepseek">DeepSeek 配置</a>，员工无需各自填写。</p>
+        <p>用于生成丝带底图与搭配装饰，员工无需各自填写。</p>
         <p id="ribbon-model-state" class="state-line">正在读取设置…</p>
         <form id="ribbon-form" autocomplete="off">
           <label for="ribbon-key">API Key</label>
@@ -53,7 +53,7 @@
         </details>
         <form id="ribbon-enable-form">
           <div class="section-heading">
-            <label class="enable-control"><input id="ribbon-enabled" type="checkbox" disabled><span>启用丝带 AI 底图与精修</span></label>
+            <label class="enable-control"><input id="ribbon-enabled" type="checkbox" disabled><span>启用丝带 AI 底图</span></label>
             <button id="ribbon-enable-save" class="button secondary" type="submit" disabled>保存开关</button>
           </div>
         </form>
@@ -65,10 +65,10 @@
             <li>丝带默认沿用素材提取里的火山方舟 Key 与图片模型，不填也能用；这里填写是为了让丝带单独使用另一套配置。</li>
             <li>填写 API Key 与图片模型 ID 后保存，两者都填才会切换到丝带专用配置；只填一项不会生效。</li>
             <li>点“删除配置”会清空丝带专用配置，自动回到沿用素材提取的状态，不影响素材提取本身。</li>
-            <li>保存设置不会调用模型；启用后员工点“生成底图”或“精修”才会产生调用与费用。</li>
+            <li>保存设置不会调用模型；生成 AI 底图或启用 AI 搭配的作品时才会调用图片模型。</li>
             <li>切换配置后，正在处理的任务会明确失败并保留原版本，不会用新配置偷偷续跑。</li>
           </ol>
-          <p class="muted">图片服务使用火山方舟北京接口；DeepSeek 的文字理解配置独立保存在 <a href="/admin/deepseek">DeepSeek 页面</a>。</p>
+          <p class="muted">图片服务使用火山方舟北京接口。上传的人物和文字由程序保留并排版。</p>
         </details>
       </section>
     </main>

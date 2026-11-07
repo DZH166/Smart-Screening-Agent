@@ -163,3 +163,21 @@ def test_no_protector_has_no_plaintext_fallback(tmp_path):
     with pytest.raises(ValueError):
         activate(settings)
     assert not settings.path.exists()
+
+
+def test_openai_image_only_config_can_save_reload_and_remains_revision_pinned(tmp_path):
+    settings = store(tmp_path)
+    saved = settings.save(dict(expected_revision=0, provider='openai', api_key=KEY,
+        image_model='model-image', enabled=True))
+    assert saved['configured'] and saved['language_model'] == ''
+    restored = store(tmp_path)
+    assert restored.snapshot() == saved
+    runtime = restored.runtime_settings(Settings(auth_mode='hsd'))
+    assert runtime.image_ready and runtime.ai_ready and not runtime.plan_ready
+    binding = {name: getattr(runtime, name) for name in ('language_model', 'image_model', 'image_quality', 'config_revision')}
+    assert restored.provider_for_job('openai', binding).name == 'openai'
+    restored.save(dict(expected_revision=1, image_model='model-image-changed'))
+    with pytest.raises(ProviderError, match='设置已变化'):
+        runtime.runtime_validator()
+    with pytest.raises(ProviderError, match='设置已变化'):
+        restored.provider_for_job('openai', binding)

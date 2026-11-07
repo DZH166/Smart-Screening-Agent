@@ -57,7 +57,7 @@ def test_host_auth_namespace_and_header_spoof(employee_app):
     assert config['output_profile']['is_demo'] is True
 
 
-def test_first_draft_parent_versions_quota_and_exact_download(employee_app):
+def test_first_draft_retired_refinement_and_exact_download(employee_app):
     client = employee_app.test_client()
     login(client)
     design = read(call(client, '/designs', {'name': 'Synthetic ribbon'}))
@@ -67,27 +67,20 @@ def test_first_draft_parent_versions_quota_and_exact_download(employee_app):
     first = wait_job(client, first)
     assert first['status'] == 'SUCCEEDED', first
     v0 = first['result_version_id']
-    # Applying identical selections is a no-op, not a billable refinement.
-    # Exercise real layout changes on both branches from the original V0.
-    modified = {**selected, 'template_id': next(t['id'] for t in read(call(client, '/templates'))
-                    if t['mode'] in ('grid', 'single') and t['id'] != selected['template_id'])}
-    for n in (1, 2):
-        job = read(call(client, f'/designs/{design["id"]}/refinements', {
-            'base_version_id': v0, 'idempotency_key': f'change-selection-{n}',
-            'prompt': '应用所选配置', 'selection': modified}))
-        completed = wait_job(client, job)
-        assert completed['status'] == 'SUCCEEDED', completed
-        current = read(call(client, '/designs/' + design['id']))
-        assert current['successful_refinement_count'] == n
-        result = read(call(client, f'/designs/{design["id"]}/rollback',
-                           {'expected_version_id': completed['result_version_id']}))
-        assert result['current_version_id'] == v0
     current = read(call(client, '/designs/' + design['id']))
-    assert current['successful_refinement_count'] == 2
-    assert all(v['parent_version_id'] == v0 for v in current['versions'] if v['sequence'])
+    service = employee_app.config['HSD_RIBBON'].service
+    with service.db.connect() as db:
+        before = {table: db.execute('SELECT COUNT(*) FROM ' + table).fetchone()[0]
+                  for table in ('jobs', 'versions', 'quota_events', 'provider_calls')}
     assert call(client, f'/designs/{design["id"]}/refinements', {
-        'base_version_id': v0, 'idempotency_key': 'third-change-selection',
-        'prompt': '应用所选配置', 'selection': selected}).status_code == 409
+        'base_version_id': v0, 'idempotency_key': 'retired-change-selection',
+        'prompt': '应用所选配置', 'selection': selected}).status_code == 410
+    found = read(call(client, '/jobs/by-request/first-synthetic-request'))
+    assert found['id'] == first['id'] and found['status'] == 'SUCCEEDED'
+    assert call(client, '/jobs/by-request/never-accepted-request').status_code == 404
+    assert current['successful_refinement_count'] == 0 and len(current['versions']) == 1
+    with service.db.connect() as db:
+        assert {table: db.execute('SELECT COUNT(*) FROM ' + table).fetchone()[0] for table in before} == before
     version = next(v for v in current['versions'] if v['id'] == v0)
     assert version['download_url'].startswith('/api/ribbon/versions/')
     response = cloud_request(client, version['download_url'])

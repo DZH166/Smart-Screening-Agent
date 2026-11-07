@@ -4,8 +4,8 @@
  *
  * The ribbon workspace may reuse the material tool's 火山方舟 key/model, or hold
  * its own copy. Empty fields mean "inherit"; saving both fields switches this
- * workspace to its own configuration, deleting them switches back. DeepSeek is
- * always the shared pool and is configured on /admin/deepseek.
+ * workspace to its own configuration, deleting them switches back. Ribbon
+ * generation needs only image credentials; other tools keep their own settings.
  */
 (() => {
   const $ = id => document.getElementById(id);

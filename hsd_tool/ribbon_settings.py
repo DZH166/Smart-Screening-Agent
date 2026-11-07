@@ -90,7 +90,7 @@ class RibbonSettings:
                     if not _valid_key(ark_key):
                         raise ValueError(_ERROR)
                 self._check_secret_fields(record, key)
-                if record['enabled'] and record['provider'] == 'openai' and not (key and record['language_model'] and record['image_model']):
+                if record['enabled'] and record['provider'] == 'openai' and not (key and record['image_model']):
                     raise ValueError(_ERROR)
                 self._record, self._key, self._ark_key = record, key, ark_key
         except Exception:
@@ -127,8 +127,7 @@ class RibbonSettings:
     def _inherited(self):
         ai = self.ai_settings.runtime() if self.ai_settings else {}
         ark = self.material_settings.runtime() if self.material_settings else {}
-        ready = bool(ai.get('enabled') and (ai.get('api_key') or any(k.get('enabled') for k in ai.get('keys', [])))
-                     and ark.get('enabled') and ark.get('ark_key') and ark.get('model_id') and self.key_pool)
+        ready = bool(ark.get('enabled') and ark.get('ark_key') and ark.get('model_id'))
         return ai, ark, ready
 
     def snapshot(self):
@@ -136,9 +135,8 @@ class RibbonSettings:
             ai, ark, inherited_ready = self._inherited()
             record = self._record
             ark_key, ark_model, ark_ready = self._override(record, ark)
-            host_ready = bool(ai.get('enabled') and (ai.get('api_key') or any(k.get('enabled') for k in ai.get('keys', [])))
-                              and self.key_pool and ark_ready)
-            configured = bool(self._key and record['language_model'] and record['image_model']) if record['provider'] == 'openai' else host_ready
+            host_ready = ark_ready
+            configured = bool(self._key and record['image_model']) if record['provider'] == 'openai' else host_ready
             return {k: record[k] for k in ('provider', 'enabled', 'language_model', 'image_model', 'image_quality', 'revision')} | {
                 'configured': configured, 'openai_configured': bool(self._key),
                 'ark_configured': bool(self._ark_key), 'ark_model': record.get('ark_model', ''),
@@ -205,8 +203,8 @@ class RibbonSettings:
                 if ark_key and ark_key in record[field]:
                     raise ValueError('请将 API Key 填入密钥框，不要填进模型 ID。')
             self._check_secret_fields(record, key)
-            if record['enabled'] and record['provider'] == 'openai' and not (key and record['language_model'] and record['image_model']):
-                raise ValueError('启用 OpenAI 前，请保存 Key 和两个模型 ID。')
+            if record['enabled'] and record['provider'] == 'openai' and not (key and record['image_model']):
+                raise ValueError('启用 OpenAI 前，请保存 Key 和图片模型 ID。')
             record['encrypted_openai_key'] = encrypted
             record['encrypted_ark_key'] = encrypted_ark
             if record == self._record and not self._warning:
@@ -237,15 +235,15 @@ class RibbonSettings:
                 ark.get('revision', 0) if inherited else None,
                 record.get('ark_model', ''),
                 bool(self._ark_key)], separators=(',', ':')).encode()).hexdigest()
-            ready = inherited_ready if not self._ark_key and not record.get('ark_model') else bool(
-                ai.get('enabled') and (ai.get('api_key') or any(k.get('enabled') for k in ai.get('keys', [])))
-                and self.key_pool and ark_ready)
+            ready = ark_ready
+            planning_ready = bool(ai.get('enabled') and (ai.get('api_key') or
+                any(key.get('enabled') for key in ai.get('keys', []))) and self.key_pool)
             current = replace(base, provider=record['provider'], config_revision=revision,
                 enabled=record['enabled'] and (ready if inherited else True),
                 openai_api_key='' if inherited else self._key,
                 language_model=MODEL if inherited else record['language_model'],
                 image_model=ark_model if inherited else record['image_model'],
-                image_quality=record['image_quality'], deepseek_pool=self.key_pool,
+                image_quality=record['image_quality'], deepseek_pool=self.key_pool if planning_ready else None,
                 ark_key=ark_key if inherited else '', usage_ledger=self.usage_ledger)
             current.runtime_validator = lambda: self._assert_current(base, current)
             return current
@@ -253,7 +251,7 @@ class RibbonSettings:
     def _assert_current(self, base, saved):
         from ribbon_backend.providers import ProviderError
         current = self.runtime_settings(base)
-        if current.config_revision != saved.config_revision or not current.ai_ready:
+        if current.config_revision != saved.config_revision or not current.image_ready:
             raise ProviderError('管理员模型设置已变化或服务已停用；未继续调用，请确认设置后重新提交。')
 
     def provider_for_job(self, provider, model_config, *, base=None):

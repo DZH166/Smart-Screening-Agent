@@ -651,8 +651,8 @@ class OpenAIProvider:
         self.validate_runtime = getattr(settings, 'runtime_validator', None)
         if not self.api_key:
             raise ProviderError("真实 AI 尚未配置 OPENAI_API_KEY；不会自动改用测试结果")
-        if not self.language_model or not self.image_model:
-            raise ProviderError("请配置 LANGUAGE_MODEL 和 IMAGE_MODEL，并确认账号对模型的访问权限")
+        if not self.image_model:
+            raise ProviderError("请配置 IMAGE_MODEL，并确认账号对模型的访问权限")
         if self.quality not in ("low", "medium", "high", "xhigh", "max", "auto"):
             raise ProviderError("IMAGE_QUALITY 无效")
 
@@ -695,6 +695,8 @@ class OpenAIProvider:
             raise ProviderError("OpenAI 返回无法解析的响应；结果未确认，未提交结果", uncertain_result=True) from exc
 
     def plan(self, prompt: str, snapshot: dict, assets: list[dict]) -> dict:
+        if not self.language_model:
+            raise ProviderError('历史编辑任务需要语言模型配置；未调用图片模型，也未改用测试结果。')
         if not prompt or len(prompt) > 4000:
             raise ClarificationNeeded("请填写具体修改要求（不超过 4000 字）")
         editing = workflow_editing(self.name, snapshot)
@@ -820,16 +822,19 @@ class DeepSeekSeedreamProvider:
         self.settings = settings
         self.pool = settings.deepseek_pool
         self.language_model, self.image_model = settings.language_model, settings.image_model
-        if not self.pool or not settings.ark_key:
-            raise ProviderError('请管理员先配置并启用 DeepSeek 和火山方舟，未改用测试结果。')
+        if not settings.image_ready:
+            raise ProviderError('请管理员先配置并启用火山方舟图片服务，未改用测试结果。')
         try:
             self.ark = ArkMaterialProvider(settings.ark_key, self.image_model, timeout=min(240, settings.model_timeout))
         except ArkProviderError:
             raise ProviderError('火山方舟 Key 或模型 ID 不适用于当前丝带图片接口，请管理员检查配置。') from None
 
-    def _validate(self):
+    def _validate(self, *, require_plan=False):
         if self.settings.runtime_validator:
             self.settings.runtime_validator()
+        if not (self.settings.plan_ready if require_plan else self.settings.image_ready):
+            raise ProviderError('历史编辑任务需要可用的 DeepSeek 语言模型和 Key。' if require_plan else
+                                '火山方舟图片服务尚未配置或已停用；未调用模型。')
 
     def plan(self, prompt, snapshot, assets):
         from hsd_tool.material_providers import DEEPSEEK_ENDPOINT, _default_transport, _strict_json, MaterialProviderError
@@ -837,7 +842,7 @@ class DeepSeekSeedreamProvider:
         from hsd_tool.ai_client import DeepSeekClient
         if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 4000:
             raise ClarificationNeeded('请填写具体修改要求（不超过 4000 字）')
-        self._validate()
+        self._validate(require_plan=True)
         editing = workflow_editing(self.name, snapshot)
         if not editing['allowed_operations']:
             raise ClarificationNeeded(editing['composite_edit_reason'])
@@ -862,7 +867,7 @@ class DeepSeekSeedreamProvider:
             # Acquiring a credential does not reserve a slot in the shared pool.
             # Recheck after acquisition so a just-saved setting cannot dispatch
             # a request with the newer credential under an older job binding.
-            self._validate()
+            self._validate(require_plan=True)
             if not self.pool.validate_credential(credential['id'], credential['api_key']):
                 raise ProviderError('DeepSeek Key 已停用或正在冷却，请稍后重试。')
             attempted = True

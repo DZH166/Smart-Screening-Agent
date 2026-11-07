@@ -32,14 +32,25 @@ class Settings:
     space_reserver: object = field(default=None, repr=False)
 
     @property
-    def ai_ready(self):
-        if not self.enabled or not self.language_model or not self.image_model:
+    def image_ready(self):
+        if not self.enabled or not self.image_model:
             return False
         if self.provider == 'openai':
             return bool(self.openai_api_key)
         if self.provider == 'deepseek_seedream':
-            return bool(self.deepseek_pool and self.ark_key)
+            return bool(self.ark_key)
         return False
+
+    @property
+    def plan_ready(self):
+        # Retained only for previously accepted editing jobs. New background
+        # generation must not require an unrelated text model or key pool.
+        return bool(self.image_ready and self.language_model and
+                    (self.provider == 'openai' or self.deepseek_pool))
+
+    @property
+    def ai_ready(self):
+        return self.image_ready
 
     def __post_init__(self):
         self.data_dir = Path(self.data_dir).resolve()

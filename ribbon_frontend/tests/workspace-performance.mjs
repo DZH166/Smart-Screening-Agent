@@ -271,43 +271,17 @@ await run("worksList",async p=>{
  await p.getByRole("button",{name:/我的作品/}).click();await p.waitForTimeout(150);
  return {newReads:list-before,deleteEnabled:await p.getByRole("button",{name:"删除合成作品 A",exact:true}).isEnabled()};
 });
-await run("lostSubmit",async p=>{
- const keys=[]; await p.route("**/api/ribbon/designs/A/refinements",r=>{keys.push(r.request().postDataJSON().idempotency_key);return keys.length===1?r.abort("connectionreset"):json(r,{detail:"受控终态：父版本已变化"},409)});
- await p.goto(url);await heading(p).waitFor();await p.locator("#refinement").fill("把图案缩小一点");await p.locator(".refine-button").click();
- await p.getByRole("button",{name:/恢复提交/}).click(); await p.waitForTimeout(100);
- return {posts:keys.length,same:keys.length===2&&keys[0]===keys[1],retainsVersion:await p.getByRole("link",{name:"下载当前图",exact:true}).isVisible()};
-});
-await run("longRefineAuthReadFailure",async p=>{
- let posts=0,reads=0,authReads=0,started=0;
- const finished=()=>started>0&&Date.now()-started>=17000;
- const job=()=>({id:"qa-long-refine",kind:"refinement",status:finished()?"FAILED":"RUNNING",error:finished()?"合成图片服务认证失败（HTTP 401）；原版本已保留。":null});
- await p.route("**/api/ribbon/designs/A/refinements",r=>{posts++;started=Date.now();return json(r,job())});
- await p.route("**/api/ribbon/designs/A",r=>json(r,{...works[0],active_job_id:started&&!finished()?"qa-long-refine":null,active_job:started&&!finished()?job():null}));
- await p.route("**/api/ribbon/jobs/qa-long-refine",r=>{reads++;return json(r,job())});
- await p.route("**/api/ribbon/auth/me",r=>++authReads===2?json(r,{detail:"合成登录状态读取暂时失败"},503):json(r,{id:"synthetic-performance",username:"合成员工",role:"employee"}));
- await p.goto(url);await heading(p).waitFor();
- await p.locator("#refinement").fill("保留这次精修要求");
- await p.locator("#refinement").evaluate(el=>el.dataset.authRecovery="same-workspace");
- await p.locator(".refine-button").click();
- await p.locator('[data-workspace="numbering"]').click();await p.locator('[data-workspace="ribbon"]').click();
- await p.getByText("连接暂时中断，已保留当前作品。",{exact:true}).waitFor();
- assert.equal(await heading(p).isVisible(),true);
- assert.equal(await p.locator("#refinement").getAttribute("data-auth-recovery"),"same-workspace");
- assert.equal(await p.locator("#refinement").inputValue(),"保留这次精修要求");
- assert.equal(await p.getByRole("button",{name:"重新登录",exact:true}).count(),0,"a temporary read failure never asks for login");
- await p.getByRole("button",{name:"重新连接",exact:true}).click();
- await p.getByText("合成图片服务认证失败（HTTP 401）；原版本已保留。",{exact:true}).waitFor({timeout:25000});
- return {posts,pollReads:reads,elapsedAtLeast17Seconds:Date.now()-started>=17000,retained:await heading(p).isVisible(),sameWorkspace:await p.locator("#refinement").getAttribute("data-auth-recovery")==="same-workspace",loggedOut:await p.getByText("登录已失效，请重新打开网站后继续。",{exact:true}).count()};
-});
+// Lost generation submissions and old edit-request recovery are covered by
+// workspace-without-refinement.mjs; no new editing route is exercised here.
 await run("authReadTimeout",async p=>{
  await p.addInitScript(()=>{const setNormally=window.setTimeout.bind(window);window.setTimeout=(fn,delay,...args)=>setNormally(fn,delay===15000?35:delay,...args)});
  let reads=0;
  await p.route("**/api/ribbon/auth/me",async r=>{if(++reads===2)await new Promise(resolve=>setTimeout(resolve,180));await json(r,{id:"synthetic-performance",username:"合成员工",role:"employee"}).catch(()=>{})});
- await p.goto(url);await heading(p).waitFor();await p.locator("#refinement").fill("超时也保留输入");
+ await p.goto(url);await heading(p).waitFor();await p.locator(".background-prompt-box > summary").click();await p.locator("#background-prompt").fill("超时也保留输入");
  await p.locator('[data-workspace="numbering"]').click();await p.locator('[data-workspace="ribbon"]').click();
  await p.getByText("连接暂时中断，已保留当前作品。",{exact:true}).waitFor();
  assert.equal(await p.getByRole("button",{name:"重新登录",exact:true}).count(),0,"a timeout never asks for login");
- const retained=await heading(p).isVisible()&&await p.locator("#refinement").inputValue()==="超时也保留输入";
+ const retained=await heading(p).isVisible()&&await p.locator("#background-prompt").inputValue()==="超时也保留输入";
  await p.getByRole("button",{name:"重新连接",exact:true}).click();
  await p.getByText("连接暂时中断，已保留当前作品。",{exact:true}).waitFor({state:"hidden"});
  return {retained,recovered:await heading(p).isVisible()};
@@ -317,7 +291,7 @@ await run("realAuthRejection",async p=>{
  await p.goto(url);await heading(p).waitFor();
  await p.locator('[data-workspace="numbering"]').click();await p.locator('[data-workspace="ribbon"]').click();
  await p.getByText("合成员工登录确已失效",{exact:true}).waitFor();
- const locked=await p.locator(".refine-button").count()===0&&await p.getByRole("link",{name:"下载当前图",exact:true}).count()===0;
+ const locked=await p.locator(".generation-button").count()===0&&await p.getByRole("link",{name:"下载当前图",exact:true}).count()===0;
  const relogin=await p.getByRole("button",{name:"重新登录",exact:true}).isVisible(),reconnect=await p.getByRole("button",{name:"重新连接",exact:true}).count();
  const navigation=p.waitForEvent("framenavigated",frame=>frame===p.mainFrame());
  await p.getByRole("button",{name:"重新登录",exact:true}).click();await navigation;
@@ -332,13 +306,13 @@ await run("obsoleteAuthRejection",async p=>{
    return json(r,{id:"synthetic-performance",username:"合成员工",role:"employee"});
  });
  try {
-   await p.goto(url);await heading(p).waitFor();await p.locator("#refinement").fill("迟到的结果不能清掉输入");
+   await p.goto(url);await heading(p).waitFor();await p.locator(".background-prompt-box > summary").click();await p.locator("#background-prompt").fill("迟到的结果不能清掉输入");
    await p.locator('[data-workspace="numbering"]').click();await p.locator('[data-workspace="ribbon"]').click();await started;
    await p.locator('[data-workspace="numbering"]').click();
    const currentRead=p.waitForResponse(r=>r.url().endsWith("/api/ribbon/auth/me")&&r.status()===200);
    await p.locator('[data-workspace="ribbon"]').click();await currentRead;
    releaseOld();await p.waitForTimeout(120);
-   return {retained:await heading(p).isVisible()&&await p.locator("#refinement").inputValue()==="迟到的结果不能清掉输入",obsoleteNotice:await p.getByText("过时读取的登录失效结果",{exact:true}).count()};
+   return {retained:await heading(p).isVisible()&&await p.locator("#background-prompt").inputValue()==="迟到的结果不能清掉输入",obsoleteNotice:await p.getByText("过时读取的登录失效结果",{exact:true}).count()};
  } finally {releaseOld?.()}
 });
 
@@ -347,8 +321,6 @@ await run("obsoleteAuthRejection",async p=>{
     assert.equal(result.idleDisconnect.recovered,true);
     assert.equal(result.failedPreview.retry,true);assert.equal(result.failedPreview.visibleOk,true);
     assert.deepEqual(result.worksList,{newReads:1,deleteEnabled:true});
-    assert.deepEqual(result.lostSubmit,{posts:2,same:true,retainsVersion:true});
-    assert.equal(result.longRefineAuthReadFailure.posts,1);assert.ok(result.longRefineAuthReadFailure.pollReads>=8);assert.equal(result.longRefineAuthReadFailure.elapsedAtLeast17Seconds,true);assert.equal(result.longRefineAuthReadFailure.retained,true);assert.equal(result.longRefineAuthReadFailure.sameWorkspace,true);assert.equal(result.longRefineAuthReadFailure.loggedOut,0);
     assert.deepEqual(result.authReadTimeout,{retained:true,recovered:true});
     assert.deepEqual(result.realAuthRejection,{locked:true,relogin:true,reconnect:0,reloadKeepsWorkspaceHash:true});
     assert.deepEqual(result.obsoleteAuthRejection,{retained:true,obsoleteNotice:0});

@@ -296,7 +296,7 @@ def test_partial_or_mismatched_teaching_case_is_rejected_before_read_or_model(ap
     assert provider.calls == []
 
 
-def test_historical_v1_defaults_and_density_edit_keep_the_saved_engine_and_download(api, monkeypatch):
+def test_historical_v1_keeps_saved_engine_and_download_after_edit_retirement(api, monkeypatch):
     service, client, provider, owner, choice = api
     original = service.selection_snapshot
     def historical(*args, **kwargs):
@@ -318,12 +318,9 @@ def test_historical_v1_defaults_and_density_edit_keep_the_saved_engine_and_downl
     submitted = client.post(f'/api/designs/{work["id"]}/refinements', json=dict(
         idempotency_key=str(uuid4()), base_version_id=previous['id'], prompt='应用所选配置',
         selection={**choice, 'design_density': 'airy', 'background_tone': 'soft'}))
-    job, final = state(api, work, submitted)
-    assert job['status'] == 'SUCCEEDED'
-    latest = final['versions'][-1]['snapshot']
-    assert latest['layout_engine'] == 'design-rhythm-v1' and latest['design_density'] == 'airy'
-    assert 'loop' not in latest and 'output_profile_source' not in latest
-    assert latest['output_profile'] == previous['snapshot']['output_profile']
-    assert latest['background_tone'] == 'soft' and final['successful_refinement_count'] == 1
-    assert final['versions'][0] == previous and service.version_file(owner, previous['id']).read_bytes() == content
+    assert submitted.status_code == 410
+    final = service.design(owner, work['id'])
+    assert final['versions'] == first['versions'] and final['successful_refinement_count'] == 0
+    assert final['current_version_id'] == previous['id']
+    assert service.version_file(owner, previous['id']).read_bytes() == content
     assert provider.calls == []

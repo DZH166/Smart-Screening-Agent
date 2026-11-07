@@ -106,6 +106,7 @@ def test_reviewed_layout_previews_are_bound_to_public_paths_and_exact_bytes():
 
 def test_trial_integration_test_is_explicitly_allowed_but_arbitrary_tests_are_not():
     release.public_name('ribbon_frontend/tests/trial-integration.mjs')
+    release.public_name('ribbon_frontend/tests/workspace-without-refinement.mjs')
     with pytest.raises(RuntimeError):
         release.public_name('ribbon_frontend/tests/private-business-test.mjs')
 

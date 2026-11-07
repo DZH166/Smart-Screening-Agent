@@ -24,7 +24,6 @@ import {
   type Template,
   type User,
   type Version,
-  type RequestReceipt,
   type PatternRole,
   patternRoleChoices,
   normalizedPatternRoles,
@@ -269,58 +268,16 @@ function recommendedSelection(
 
 function restoreSelection(value: Selection, version?: Version): Selection {
   const snapshot = version?.snapshot;
-  const modern = !version || ["design-rhythm-v1", "design-rhythm-v2", "seamless-unit-v1", "seamless-unit-v2", "seamless-unit-v3"].includes(snapshot?.layout_engine || "");
-  const next: Selection = {
-    ...value,
-    background_tone: value.background_tone ?? snapshot?.background_tone ?? (modern ? "soft" : "original"),
+  // These are settings for a new work, not editable capabilities of the
+  // displayed historic version. Reuse its choices without downgrading the form.
+  return {...value,
+    background_tone:value.background_tone ?? snapshot?.background_tone ?? (version ? "original" : "soft"),
+    design_density:value.design_density ?? snapshot?.design_density ?? "balanced",
+    design_style:value.design_style ?? snapshot?.design_style ?? "classic",
   };
-  if (version && !["seamless-unit-v2", "seamless-unit-v3"].includes(snapshot?.layout_engine || "")) {
-    delete next.zone_background_refs;
-    delete next.border_ref;
-  }
-  if (version && snapshot?.layout_engine !== "seamless-unit-v3") delete next.pattern_roles;
-  if (modern) {
-    next.design_density = value.design_density ?? snapshot?.design_density ?? "balanced";
-    next.design_style = value.design_style ?? snapshot?.design_style ?? "classic";
-  } else {
-    // A cached draft cannot grant a legacy version the new layout controls.
-    delete next.design_density;
-    delete next.design_style;
-  }
-  return next;
 }
 
-function TargetOverlay({version, target}: {version:Version; target:string}) {
-  const loop = version.snapshot.loop!;
-  if (target === "layout" || !target) return null;
-  const {width:w,height:h} = loop;
-  const zones = zonesByMode[version.snapshot.template_mode] || [];
-  const ix = zones.indexOf(target.slice(5));
-  let boxes: number[][] = [];
-  const zoneBoxes = (index:number): number[][] => {
-    if (version.snapshot.template_mode === "stacked") return [[0,index*h/zones.length,w,h/zones.length]];
-    // Panels are fixed partitions; a background/pattern offset stays inside
-    // each zone, so the highlight must not follow it.
-    return [[index*w/zones.length,0,w/zones.length,h]];
-  };
-  if (target === "background") {
-    boxes = zones.length ? zones.flatMap((zone,i)=>(version.snapshot.zone_background_refs?.[zone] || version.snapshot.zone_colors?.[zone]) ? [] : zoneBoxes(i)) : [[0,0,w,h]];
-  } else if (target === "border") boxes = [[0,.08*h,w,.115*h],[0,.805*h,w,.115*h]];
-  else if (target.startsWith("zone:") && ix >= 0) boxes = zoneBoxes(ix);
-  else {
-    for (const t of version.snapshot.object_transforms || []) {
-      if (t.slot_id !== target) continue;
-      const left = t.x-t.width/2, top = t.y-t.height/2;
-      boxes.push([left,top,t.width,t.height]);
-      if (left<0) boxes.push([left+w,top,t.width,t.height]);
-      if (left+t.width>w) boxes.push([left-w,top,t.width,t.height]);
-    }
-  }
-  return <svg className="target-overlay" viewBox={`0 0 ${w} ${h}`} aria-label="精修范围">
-    {boxes.map(([x,y,width,height],i)=><rect key={i} {...{x,y,width,height}} vectorEffect="non-scaling-stroke"/>)}
-  </svg>;
-}
-function LoopPreview({ version, sizeLabel, target }: { version: Version; sizeLabel: string; target:string }) {
+function LoopPreview({ version, sizeLabel }: { version: Version; sizeLabel: string }) {
   const [continuous, setContinuous] = useState(false);
   const [seams, setSeams] = useState(false);
   const loop = version.snapshot.loop!;
@@ -331,14 +288,14 @@ function LoopPreview({ version, sizeLabel, target }: { version: Version; sizeLab
       <span>{continuous ? "同一单元横向重复 3 次" : sizeLabel}</span>
     </div>
     <div className="loop-unit-view" hidden={continuous}>
-      <div className="target-layer"><RecoverableImage src={version.preview_url} decoding="async" alt={`${versionName(version)}的循环单元预览`} />{!continuous && <TargetOverlay version={version} target={target}/>}</div>
+      <div className="loop-image"><RecoverableImage src={version.preview_url} decoding="async" alt={`${versionName(version)}的循环单元预览`} /></div>
     </div>
     {/* Keep the same URLs mounted: changing the view only changes visibility,
         never requests a new master or a separately rendered long-strip file. */}
     <div className="loop-continuity" hidden={!continuous}>
       <div className={`loop-continuity-track ${seams ? "show-seams" : ""}`}>
         {[0, 1, 2].map(index => <div className="loop-repeat" key={index}>
-          <RecoverableImage src={version.preview_url} decoding="async" alt={index === 0 ? `${versionName(version)}的三次连续效果预览` : ""} />{continuous && <TargetOverlay version={version} target={target}/>}
+          <RecoverableImage src={version.preview_url} decoding="async" alt={index === 0 ? `${versionName(version)}的三次连续效果预览` : ""} />
         </div>)}
       </div>
     </div>
@@ -384,72 +341,12 @@ function RecoverableImage({src, alt, quiet, ...props}: React.ImgHTMLAttributes<H
     {failed ? (quiet ? <span className="image-quiet" role="presentation" title={`${alt || "图片"}暂不可用`}><Icon name="grid" size={14} /></span> : <span className="image-recovery" role="status"><span>{alt || "图片"}加载失败</span><span role="button" tabIndex={0} className="secondary small" onClick={e=>{e.stopPropagation();retry();}} onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();e.stopPropagation();retry();}}}>重新加载图片</span></span>) :
     !loaded && props.loading !== "lazy" && <span className="image-loading">图片加载中…</span>}</>;
 }
-function RefinementResult({ version }: { version: Version }) {
-  const raw = version.snapshot.edit_plan?.request_receipt;
-  const fingerprint = JSON.stringify(raw ?? null);
-  const binding = JSON.stringify([version.id,version.prompt,fingerprint]);
-  const [verified,setVerified] = useState<{binding:string;receipt:RequestReceipt}|null>(null);
-  useEffect(() => {
-    let cancelled=false;
-    setVerified(null);
-    if (version.sequence===0 || !version.prompt || !raw ||
-        raw.protocol!=="ribbon-request-v2" || raw.coverage!=="checked" ||
-        raw.verification_scope!=="plan_and_geometry_only" || raw.image_effect_verified!==false ||
-        !/^[0-9a-f]{64}$/.test(raw.source_sha256 || "") || !Array.isArray(raw.requirements) ||
-        !raw.requirements.length || raw.requirements.length>128 || !crypto.subtle) return;
-    const length=Array.from(version.prompt).length, ids=new Set<string>(), sources=new Set<string>();
-    for (const r of raw.requirements) {
-      if (!r || typeof r!=="object" || typeof r.id!=="string" || !r.id || r.id.length>128 || ids.has(r.id) ||
-          typeof r.source_id!=="string" || !r.source_id || r.source_id.length>128 || sources.has(r.source_id) ||
-          typeof r.target!=="string" || !r.target || r.target.length>160 ||
-          !Number.isSafeInteger(r.start) || !Number.isSafeInteger(r.end) ||
-          r.start<0 || r.start>=r.end || r.end>length ||
-          !(r.kind==="preserve" && r.method==="preserve" && r.execution==="constraint_forwarded" ||
-            r.kind==="modify" && (r.method==="parameters" && ["geometry_verified","parameters_applied_unverified"].includes(r.execution) ||
-                                 r.method==="image" && r.execution==="image_generated_unverified"))) return;
-      ids.add(r.id);
-      sources.add(r.source_id);
-    }
-    // The source contract partitions every code point exactly once. Duplicate,
-    // overlapping or missing spans cannot support a checked request label.
-    let cursor=0;
-    for (const r of [...raw.requirements].sort((a,b)=>a.start-b.start)) {
-      if (r.start!==cursor) return;
-      cursor=r.end;
-    }
-    if (cursor!==length) return;
-    void crypto.subtle.digest("SHA-256",new TextEncoder().encode(version.prompt)).then(bytes=>{
-      const digest=Array.from(new Uint8Array(bytes),b=>b.toString(16).padStart(2,"0")).join("");
-      if (!cancelled && digest===raw.source_sha256) setVerified({binding,receipt:raw});
-    }).catch(()=>{/* Unsupported verification stays conservative. */});
-    return ()=>{cancelled=true;};
-  }, [binding]);
-  if (version.sequence === 0) return null;
-  const receipt=verified?.binding===binding ? verified.receipt : null;
-  const modifications=receipt?.requirements.filter(r=>r.kind==="modify") || [];
-  const physicalGeometry=version.snapshot.layout_engine==="seamless-unit-v2";
-  const geometryChecked=physicalGeometry && modifications.length>0 && modifications.every(r=>r.execution==="geometry_verified");
-  const characters=Array.from(version.prompt || "");
-  return <section className="refinement-result" aria-label="本版本精修结果">
-    <p>{geometryChecked ? "参数调整已核对" : "已生成，效果请对照要求"}</p>
-    <details key={version.id}>
-      <summary>查看本次要求</summary>
-      <p className="original-refinement-request">{version.prompt || "此旧版本没有保存修改原文。"}</p>
-      {receipt && <>
-        <ul className="refinement-requirements" aria-label="本次要求处理记录">
-          {receipt.requirements.map(r=><li key={r.id}>
-            <span className="refinement-requirement-status">{r.kind==="preserve" ? "保留要求 · 约束已传递" :
-              r.execution==="geometry_verified" && physicalGeometry ? "参数已核对" :
-              r.method==="parameters" ? "参数已应用，效果需核对" : "已生成 · 效果请对照"}</span>
-            <span>{characters.slice(r.start,r.end).join("")}</span>
-          </li>)}
-        </ul>
-        <p className="refinement-verification-note">{physicalGeometry && modifications.some(r=>r.execution==="geometry_verified") ? "已核对原文引用及参数调整" : "已核对原文引用"}；图片效果仍需对照要求，保留约束已传递给处理流程。</p>
-      </>}
-    </details>
-  </section>;
-}
-
+type CreationDraft = {
+  selection: Selection;
+  backgroundPrompt: string;
+  aiDraftChoice: boolean | null;
+  aiDraftReference: {code:string;mode:string} | null;
+};
 type Pending = {
   path: string;
   body: Record<string, unknown>;
@@ -458,7 +355,7 @@ type Pending = {
 };
 const phaseNames: Record<string, string> = {
   queued: "等待处理",
-  planning: "正在理解修改要求",
+  planning: "正在准备设计",
   rendering: "正在生成设计",
   editing: "正在编辑图像",
   saving: "正在保存结果",
@@ -521,6 +418,9 @@ export default function App({ active, view }: WorkspaceProps) {
 
 function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: User; onLogout: () => void }) {
   const prefix = `ribbon:${user.id}:`;
+  const [creationUncertain,setCreationUncertain] = useState(() => loadLocal<boolean>(prefix + "creationUncertain",false) === true);
+  const [savedCreation] = useState<CreationDraft | null>(() => creationUncertain ? loadLocal(prefix + "creationDraft",null) : null);
+  const creationGate = useRef(creationUncertain), creationDraft = useRef(savedCreation);
   const [initRetry,setInitRetry] = useState(0);
   const [initError,setInitError] = useState("");
   const [listLoading,setListLoading] = useState(false);
@@ -542,13 +442,12 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
     [candidateDone, setCandidateDone] = useState(0),
     [designs, setDesigns] = useState<Design[]>([]);
   const [design, setDesign] = useState<Design | null>(null),
-    [selection, setSelection] = useState<Selection>(emptySelection),
+    [selection, setSelection] = useState<Selection>(savedCreation?.selection || emptySelection),
     [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
   // A ribbon is a very wide strip: "detail" shows it at a readable height and
   // scrolls sideways, "fit" shows the whole length at once.
   const [previewZoom, setPreviewZoom] = useState<"detail" | "fit">("detail");
-  const [prompt, setPrompt] = useState(""),
-    [backgroundPrompt, setBackgroundPrompt] = useState(""),
+  const [backgroundPrompt, setBackgroundPrompt] = useState(savedCreation?.backgroundPrompt || ""),
     [job, setJob] = useState<Job | null>(null),
     [backgroundJob, setBackgroundJob] = useState<Job | null>(null),
     [loading, setLoading] = useState(true),
@@ -564,7 +463,6 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
     [pending, setPending] = useState<Pending | null>(() =>
       loadLocal(prefix + "pending", null),
     );
-  const [editTarget,setEditTarget] = useState("layout");
   const [libraryRole,setLibraryRole] = useState("");
   useEffect(() => { if (modal !== "pattern" && modal !== "background") setLibraryRole(""); }, [modal]);
   const [search, setSearch] = useState(""),
@@ -580,8 +478,14 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
   const [deletedLoading, setDeletedLoading] = useState(false);
   // The default follows the server capability. An explicit opt-out lasts for
   // this draft only; switching works clears both the choice and its reference.
-  const [aiDraftChoice, setAiDraftChoice] = useState<boolean | null>(null);
-  const [aiDraftReference, setAiDraftReference] = useState<{ code: string; mode: string } | null>(null);
+  const [aiDraftChoice, setAiDraftChoice] = useState<boolean | null>(savedCreation?.aiDraftChoice ?? null);
+  const [aiDraftReference, setAiDraftReference] = useState<{ code: string; mode: string } | null>(savedCreation?.aiDraftReference || null);
+  useEffect(() => {
+    if (!creationUncertain || loading || designTarget) return;
+    const value = {selection,backgroundPrompt,aiDraftChoice,aiDraftReference};
+    creationDraft.current = value;
+    saveLocal(prefix + "creationDraft",value);
+  }, [creationUncertain,selection,backgroundPrompt,aiDraftChoice,aiDraftReference,loading,designTarget]);
   const examplesCache = useRef<LayoutExamplesCatalog | null>(null);
   useEffect(() => {
     if (!active || view !== "ribbon") {
@@ -619,15 +523,16 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
     current = design?.versions?.find((v) => v.id === design.current_version_id),
     selected =
       design?.versions?.find((v) => v.id === selectedVersionId) || current;
-  const remaining = Math.max(0, 2 - (design?.successful_refinement_count || 0));
   const processing = !!design?.active_job_id || running(job),
     backgroundProcessing = running(backgroundJob),
     locked = busy || processing || !!pending || uploading || !!designTarget;
   const isHistory = !!selected && selected.id !== design?.current_version_id;
   const shownProfile = selected?.snapshot?.output_profile;
   const selectedLoop = ["seamless-unit-v1","seamless-unit-v2","seamless-unit-v3"].includes(selected?.snapshot.loop?.engine || "");
-  const modern = !current || ["seamless-unit-v2", "seamless-unit-v3"].includes(current.snapshot.layout_engine || "");
-  const roleLayout = !current || current.snapshot.layout_engine === "seamless-unit-v3";
+  // Settings and trials prepare a new work using the current engine/profile.
+  // Saved previews and version downloads keep their immutable old snapshots.
+  const modern = true;
+  const roleLayout = true;
   const sizeLabel =
     shownProfile?.width && shownProfile?.height && shownProfile?.dpi
       ? `${shownProfile.width}×${shownProfile.height}px · ${shownProfile.dpi} DPI · ` +
@@ -684,32 +589,8 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
   // explicitly marked test operations; employee services must never use them.
   const aiAvailable = testMode ? config?.auth_mode !== "hsd" : config?.ai_ready === true;
   const aiDraftAvailable = config?.provider === "deepseek_seedream" && config?.ai_ready === true && config?.ai_draft_available === true;
-  const isFirstDraft = !current && !design?.versions?.length;
-  const aiDraftEnabled = isFirstDraft && aiDraftAvailable && aiDraftChoice !== false;
+  const aiDraftEnabled = aiDraftAvailable && aiDraftChoice !== false;
   const draftReference = aiDraftEnabled && aiDraftReference?.mode === template?.mode ? aiDraftReference : null;
-  // A changed selection can be applied by the compositor without a model.
-  // Keep this path available when an administrator has disabled AI.
-  const selectionOnly = changed && (!prompt.trim() || ["应用所选配置", "应用新的素材与排版"].includes(prompt.trim()));
-  const savedEditing = current?.editing || config?.editing;
-  // Reselecting assets recreates independent layers, but retains this work's
-  // immutable output profile. The global profile may have changed meanwhile.
-  const editing = changed && savedEditing && ["test", "openai", "deepseek_seedream"].includes(config?.provider || "")
-    ? { ...savedEditing,
-        allowed_operations: ["parameters", "edit_asset", "edit_background", ...(savedEditing.composite_edit ? ["edit_composite"] : [])],
-        allowed_parameters: ["scale", "rotation", "offset_x", "offset_y", "background_color",
-          ...(modern || !["fullwidth", "ends_open"].includes(template?.mode || "") ? ["spacing"] : [])],
-      }
-    : savedEditing;
-  const aiRefinementUnavailable = !selectionOnly && (!aiAvailable || editing?.allowed_operations.length === 0);
-  const canPlanOperation = (kind: string) => !editing || editing.allowed_operations.includes(kind);
-  const spacingAvailable = (modern || (template?.mode !== "fullwidth" && template?.mode !== "ends_open")) &&
-    (!editing || editing.allowed_parameters.includes("spacing"));
-  const suggestions = editTarget !== "layout" ? (editTarget.startsWith("zone:") || editTarget === "background" ? ["添加细小波点"] : editTarget === "border" ? ["保留边饰图案，添加细小星光"] : ["缩小一点", "向右移动10像素"]) : [
-    ...(canPlanOperation("parameters") ? [spacingAvailable ? "图案缩小一些，间距拉开一点" : "图案缩小一些"] : []),
-    ...(canPlanOperation("edit_background") ? ["背景添加波点"] : []),
-    ...(canPlanOperation("edit_asset") ? ["给第一个图案添加星光"] : []),
-    ...(canPlanOperation("edit_composite") ? ["给画面添加星光"] : []),
-  ];
   function templateImage(t: Template) {
     return modern && t.id === t.mode && t.version===1 ? `/static/ribbon/${roleLayout ? "layout-v3" : "layout-v2"}/${t.mode}.webp` : t.thumbnail_url;
   }
@@ -748,7 +629,6 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
     const nextMode = templates.find(t => t.id === value.template_id)?.mode || "";
     if (roleLayout && patternRoleChoices[nextMode]) value.pattern_roles = normalizedPatternRoles(value.asset_ids, nextMode, value.pattern_roles);
     else delete value.pattern_roles;
-    if (editTarget !== "layout") setEditTarget("layout");
     setSelection(value);
     saveLocal(prefix + "selection", {
       design_id: designRef.current?.id || null,
@@ -764,7 +644,6 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
     saveLocal(prefix + "design", d.id);
     setDesigns((prev) => [d, ...prev.filter((p) => p.id !== d.id)]);
     if (force || changedVersion) {
-      setEditTarget("layout");
       const v = d.versions?.find((x) => x.id === d.current_version_id);
       // Show both ends on the first view of a work or newly saved version.
       // Same-version polling must preserve the employee's zoom choice.
@@ -775,6 +654,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
         value: Selection;
       } | null>(prefix + "selection", null);
       const next =
+        creationGate.current && creationDraft.current ? creationDraft.current.selection :
         force &&
         saved?.design_id === d.id &&
         saved.base_version_id === d.current_version_id
@@ -794,7 +674,6 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
       setSelection(restoreSelection(next, v));
       setSelectedVersionId(d.current_version_id);
       lastVersion.current = d.current_version_id;
-      if (changedVersion) setPrompt("");
     }
     if (d.active_job) setJob(d.active_job);
   }
@@ -847,7 +726,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
       for (const style of queue) {
         if (stale()) return;
         try {
-          const endpoint = design?.id ? `/designs/${encodeURIComponent(design.id)}/candidates/one` : "/candidates/one";
+          const endpoint = "/candidates/one";
           const row = await api<Candidate>(endpoint, {
             method: "POST", signal: controller.signal,
             body: JSON.stringify({ ...selection, pattern_roles: roleChoices ? roles : undefined, style }),
@@ -907,7 +786,8 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
         if (failure?.status==="rejected") throw failure.reason;
         const a=ar.status==="fulfilled"?ar.value:[], t=tr.status==="fulfilled"?tr.value:[], list=dr.status==="fulfilled"?dr.value:[];
         const savedId = loadLocal<string | null>(prefix + "design", null);
-        const id = list.find((x) => x.id === savedId)?.id || list[0]?.id;
+        // An unknown create cannot be claimed by taking the newest list row.
+        const id = list.find((x) => x.id === savedId)?.id || (!creationGate.current ? list[0]?.id : undefined);
         if (id) {
           const d = await api<Design>(`/designs/${id}`, {signal:controller.signal});
           if (!cancelled) {
@@ -923,7 +803,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
             prefix + "selection",
             null,
           );
-          setSelection(restoreSelection(saved?.value || recommendedSelection(a, t)));
+          setSelection(restoreSelection(creationGate.current && creationDraft.current ? creationDraft.current.selection : saved?.value || recommendedSelection(a, t)));
         }
         const bgId = loadLocal<string | null>(prefix + "backgroundJob", null);
         if (bgId) {
@@ -972,7 +852,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
               setNotice({
                 text:
                   updated.error ||
-                  "此次处理未完成，已保留原结果，不扣精修次数。",
+                  "此次处理未完成，已保存的版本仍可下载。",
                 type: "error",
               });
           }
@@ -1073,10 +953,25 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
   }, [backgroundJob?.id, backgroundJob?.status, offline]);
 
   async function executePending(operation: Pending) {
+    const legacyRead = /\/refinements$/.test(operation.path);
     setPending(operation);
     saveLocal(prefix + "pending", operation);
     try {
-      const result = await post<Job>(operation.path, operation.body);
+      if (!legacyRead && operation.path !== "/background-jobs" &&
+          !/^\/designs\/[^/]+\/generate$/.test(operation.path)) {
+        setPending(null); saveLocal(prefix + "pending", null);
+        throw new ApiError("这项旧提交无法继续，请刷新作品列表查看已保存结果。", 410);
+      }
+      // Compatibility is read-only: a stored old edit can recover an accepted
+      // job, but can never send a new or repeated editing request.
+      const key = operation.body.idempotency_key;
+      if (legacyRead && (typeof key !== "string" || !key || !operation.designId))
+        throw new ApiError("这项旧提交缺少恢复信息，请查看已保存作品。", 410);
+      const result = legacyRead
+        ? await api<Job>(`/jobs/by-request/${encodeURIComponent(String(key))}`)
+        : await post<Job>(operation.path, operation.body);
+      if (legacyRead && (result.kind !== "refine" || result.design_id !== operation.designId))
+        throw new ApiError("旧任务类型或作品不一致，请刷新作品列表查看。", 409);
       setPending(null);
       saveLocal(prefix + "pending", null);
       setNotice(null);
@@ -1106,10 +1001,15 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
         e instanceof ApiError &&
         e.status >= 400 &&
         e.status < 500 &&
-        e.status !== 408
+        e.status !== 408 &&
+        !(legacyRead && [401,403,429].includes(e.status))
       ) {
         setPending(null);
         saveLocal(prefix + "pending", null);
+      }
+      if (e instanceof ApiError && e.status === 401) {
+        onLogout();
+        return;
       }
       setNotice({
         text:
@@ -1117,8 +1017,12 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
           e.status >= 400 &&
           e.status < 500 &&
           e.status !== 408
-            ? message(e)
-            : "连接中断，提交结果尚未确认。请点击“恢复提交”，将使用原请求安全查询或继续。",
+            ? /\/refinements$/.test(operation.path) && [404,410].includes(e.status)
+              ? "旧任务不存在或已过期，请查看已保存作品；需要新结果可生成新作品。"
+              : message(e)
+            : /\/refinements$/.test(operation.path)
+              ? "暂时无法读取旧任务状态，请点击“重试读取任务”；不会重新发送图片处理。"
+              : "连接中断，提交结果尚未确认。请点击“恢复提交”，将使用原请求安全查询或继续。",
         type: "error",
       });
     }
@@ -1136,52 +1040,55 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
       setBusy(false);
     }
   }
+  function blockUncertainCreation() {
+    const value = {selection,backgroundPrompt,aiDraftChoice,aiDraftReference};
+    creationGate.current = true;
+    creationDraft.current = value;
+    setCreationUncertain(true);
+    saveLocal(prefix + "creationDraft",value);
+    saveLocal(prefix + "creationUncertain",true);
+  }
+  function clearCreationBlock() {
+    creationGate.current = false;
+    creationDraft.current = null;
+    setCreationUncertain(false);
+    saveLocal(prefix + "creationUncertain",null);
+    saveLocal(prefix + "creationDraft",null);
+  }
+  async function createWork(name:string) {
+    try {
+      return await post<Design>("/designs",{name});
+    } catch (e) {
+      if (!(e instanceof ApiError) || e.status === 408 || e.status >= 500) {
+        blockUncertainCreation();
+        throw new Error("作品建立结果尚未确认。请从“我的作品”刷新后选择要继续的作品，暂不重复创建。");
+      }
+      // Definite authentication or input rejection never claims acceptance.
+      throw e;
+    }
+  }
   async function generate() {
-    if (locked || !ready) return;
+    if (creationGate.current || locked || !ready) return;
+    // Capture choices before selecting the newly created, initially empty work.
+    // Never write a new first draft into a saved work or a historical version.
+    const chosen = structuredClone({...selection, pattern_roles: roleChoices ? roles : undefined});
+    const request: GenerateRequest = {idempotency_key: crypto.randomUUID(), ...chosen,
+      ai_assisted: aiDraftEnabled, reference_code: draftReference?.code || null};
     await action(async () => {
       let d = design;
-      if (!d) {
-        d = await post<Design>("/designs", {
-          name: `丝带设计 ${new Date().toLocaleDateString("zh-CN")}`,
-        });
-        applyDesign(d);
+      if (!d || d.current_version_id || d.versions?.length) {
+        d = await createWork(`丝带设计 ${new Date().toLocaleDateString("zh-CN")}`);
+        lastVersion.current = null;
+        applyDesign(d, true);
+        setSelection(chosen);
+        saveLocal(prefix + "selection", {design_id:d.id, base_version_id:null, value:chosen});
+        setJob(null);
       }
       await executePending({
-        path: `/designs/${d.id}/generate`,
-        body: { idempotency_key: crypto.randomUUID(), ...selection,
-          pattern_roles: roleChoices ? roles : undefined,
-          ai_assisted: aiDraftEnabled, reference_code: draftReference?.code || null,
-        } satisfies GenerateRequest,
-        kind: "design",
-        designId: d.id,
+        path: `/designs/${d.id}/generate`, body: request,
+        kind: "design", designId: d.id,
       });
     });
-  }
-  async function refine() {
-    if (
-      locked ||
-      !current ||
-      remaining === 0 ||
-      isHistory ||
-      !ready ||
-      aiRefinementUnavailable ||
-      (!prompt.trim() && !changed)
-    )
-      return;
-    await action(() =>
-      executePending({
-        path: `/designs/${design!.id}/refinements`,
-        body: {
-          idempotency_key: crypto.randomUUID(),
-          base_version_id: current.id,
-          ...(modern && editTarget !== "layout" ? {edit_target:editTarget} : {}),
-          prompt: prompt.trim() || (changed ? "应用所选配置" : ""),
-          ...(changed ? { selection: {...selection, pattern_roles: roleChoices ? roles : undefined} } : {}),
-        },
-        kind: "design",
-        designId: design!.id,
-      }),
-    );
   }
   async function rollback() {
     if (locked || !current?.parent_version_id) return;
@@ -1192,27 +1099,24 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
       applyDesign(d);
       setJob(null);
       setNotice({
-        text: "已回退到当前版本的父版本。累计精修次数保持不变。",
+        text: "已返回上一保存版本。",
         type: "success",
       });
     });
   }
   async function newDesign() {
-    if (busy || pending || backgroundProcessing || uploading) return;
+    if (creationGate.current || busy || pending || backgroundProcessing || uploading) return;
     cancelCandidatePreview();
     ++designLoadSequence.current;
     designAbort.current?.abort();
     setDesignTarget(null);
-    setAiDraftChoice(null);
-    setAiDraftReference(null);
     await action(async () => {
-      const d = await post<Design>("/designs", {
-        name: `丝带设计 ${designs.length + 1}`,
-      });
+      const d = await createWork(`丝带设计 ${designs.length + 1}`);
+      setAiDraftChoice(null);
+      setAiDraftReference(null);
       lastVersion.current = null;
       applyDesign(d, true);
       updateSelection(recommendedSelection(assets, templates));
-      setPrompt("");
       setJob(null);
       setNotice(null);
       setModal(null);
@@ -1220,6 +1124,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
   }
   async function switchDesign(id: string) {
     if (busy || pending || backgroundProcessing || uploading) return;
+    const uncertainDraft = creationGate.current ? creationDraft.current : null;
     cancelCandidatePreview();
     const sequence = ++designLoadSequence.current;
     designAbort.current?.abort();
@@ -1235,7 +1140,6 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
     setSelection(emptySelection);
     lastVersion.current = null;
     setJob(null);
-    setPrompt("");
     setAiDraftChoice(null);
     setAiDraftReference(null);
     setNotice(null);
@@ -1243,7 +1147,18 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
     try {
       const d = await api<Design>(`/designs/${id}`, { signal: controller.signal });
       if (!mounted.current || sequence !== designLoadSequence.current || controller.signal.aborted) return;
+      // Only an explicit, successfully loaded work resolves unknown creation.
+      // Keep the employee's choices when they select the new empty work.
+      if (creationGate.current) clearCreationBlock();
       applyDesign(d, true);
+      if (uncertainDraft && !d.current_version_id && !d.versions?.length) {
+        const chosen = restoreSelection(uncertainDraft.selection);
+        setSelection(chosen);
+        setBackgroundPrompt(uncertainDraft.backgroundPrompt);
+        setAiDraftChoice(uncertainDraft.aiDraftChoice);
+        setAiDraftReference(uncertainDraft.aiDraftReference);
+        saveLocal(prefix + "selection",{design_id:d.id,base_version_id:null,value:chosen});
+      }
       setDesignTarget(null);
       setJob(d.active_job || null);
       setOffline(false);
@@ -1299,15 +1214,14 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
         setSelectedVersionId(null);
         lastVersion.current = null;
         setJob(null);
-        setPrompt("");
-        setAiDraftChoice(null);
+          setAiDraftChoice(null);
         setAiDraftReference(null);
         setSelection(recommendedSelection(assets, templates));
         saveLocal(prefix + "design", null);
         saveLocal(prefix + "selection", null);
       }
       setDeleteTarget(null);
-      setNotice({ text: `作品已删除，可在“已删除作品”中恢复；保留 ${config?.retention_hours ?? 50} 小时，累计精修次数不变。`, type: "success" });
+      setNotice({ text: `作品已删除，可在“已删除作品”中恢复；保留 ${config?.retention_hours ?? 50} 小时。`, type: "success" });
     });
   }
   async function restoreDesign(d: Design) {
@@ -1318,7 +1232,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
       if (!mounted.current) return;
       setDesigns(previous => [restored, ...previous.filter(item => item.id !== d.id)]);
       setDeletedDesigns(previous => previous.filter(item => item.id !== d.id));
-      setNotice({ text: "作品已恢复，版本与累计精修次数保持不变。", type: "success" });
+      setNotice({ text: "作品已恢复，原有版本仍可查看和下载。", type: "success" });
     });
   }
   async function generateBackground() {
@@ -1443,9 +1357,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
       phaseNames[job?.status || ""] ||
       "正在处理"
     : current
-      ? remaining
-        ? "可继续精修"
-        : "精修已用完"
+      ? "已保存"
       : ready
         ? "可以生成首稿"
         : "等待选择素材";
@@ -1467,7 +1379,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
         <div className="header-actions">
           <button
             className="secondary"
-            disabled={busy || !!pending || backgroundProcessing || uploading}
+            disabled={creationUncertain || busy || !!pending || backgroundProcessing || uploading}
             onClick={() => void newDesign()}
           >
             <Icon name="plus" />
@@ -1511,15 +1423,19 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
             连接暂时中断，正在重连。后台任务和已保存版本不会因此重置。
           </div>
         )}
+        {creationUncertain && <div className="notice error" role="alert">
+          <span>作品可能已经建立，暂不重复创建。请打开“我的作品”，刷新后选择要继续的作品。</span>
+          <button className="secondary small" onClick={() => void openDesigns()}>查看作品</button>
+        </div>}
         {pending && (
           <div className="notice info">
-            <span>有一项提交尚未确认；恢复使用原幂等键，不会重复扣次。</span>
+            <span>{/\/refinements$/.test(pending.path) ? "有一项旧任务状态尚未读取，只会查询已受理的任务。" : "有一项提交尚未确认；恢复使用原幂等键，不会重复提交已受理的处理。"}</span>
             <button
               className="secondary small"
               disabled={busy}
               onClick={() => void action(() => executePending(pending))}
             >
-              恢复提交
+              {/\/refinements$/.test(pending.path) ? "重试读取任务" : "恢复提交"}
             </button>
           </div>
         )}
@@ -1530,12 +1446,12 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
             正在恢复作品和素材…
           </div>
         ) : (
-          <div className={`workspace-grid ${!current ? "draft-workspace" : ""}`}>
+          <div className="workspace-grid">
             <aside className="panel source-panel">
               <div className="panel-heading">
                 <div>
                   <h2>素材与排版</h2>
-                  <p className="panel-sub">按顺序完成三步，右侧会实时预览</p>
+                  <p className="panel-sub">选择完成后生成，试排可预览当前设置</p>
                 </div>
               </div>
               <section className="source-section">
@@ -1642,8 +1558,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                     <p>{roleLayout && roleHints[template.mode] || modern && advancedHints[template.mode] || layoutHints[template.mode]}</p>
                   </details>
                 )}
-                {layoutIssue && <p className="layout-selection-issue" id="ribbon-layout-issue" role="alert">{layoutIssue}</p>}
-                {(!current || ["design-rhythm-v1", "design-rhythm-v2", "seamless-unit-v1", "seamless-unit-v2", "seamless-unit-v3"].includes(current.snapshot.layout_engine || "")) && (
+
                   <label className="inline-field">画面密度
                     <select aria-label="画面密度" value={selection.design_density || "balanced"} disabled={locked}
                       onChange={(event) => updateSelection({ ...selection, design_density: event.target.value as Selection["design_density"] })}>
@@ -1652,7 +1567,6 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                       <option value="rich">饱满</option>
                     </select>
                   </label>
-                )}
                 {modern && <div className="style-control" role="group" aria-label="设计风格">
                   <span className="field-label">设计风格</span>
                   <div className="style-chips">
@@ -1673,7 +1587,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                 {modern && <details className="trial-box" open={!!candidates || candidateBusy}>
                   <summary>
                     <span>试排对比</span>
-                    <small>选 2–3 种风格，本地渲染，不消耗次数</small>
+                    <small>选 2–3 种风格，本地预览，不调用AI</small>
                   </summary>
                   <div className="trial-body">
                     <div className="trial-chips" role="group" aria-label="试排风格">
@@ -1815,7 +1729,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
               </section>
               {current && changed && (
                 <div className="selection-warning">
-                  素材或排版已更改，点击右侧“开始精修”应用。
+                  选择已更改，点击“生成新作品”保存结果。
                 </div>
               )}
             </aside>
@@ -1833,8 +1747,23 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                     </span>
                   )}
                 </div>
-                {selected ? (
-                    <div className="result-actions">
+                <div className="generate-area">
+                  <div className="workspace-actions">
+                    <button
+                      className="primary generation-button"
+                      disabled={creationUncertain || !ready || locked || backgroundProcessing}
+                      aria-describedby={layoutIssue ? "ribbon-layout-issue" : undefined}
+                      onClick={() => void generate()}
+                    >
+                      {processing ? (
+                        <span className="spinner tiny" />
+                      ) : (
+                        <Icon name="spark" />
+                      )}
+                      {busy ? "正在提交…" : processing ? "正在生成…" : current || design?.versions?.length ? "生成新作品" : "生成首稿"}
+                      <Icon name="arrow" size={16} />
+                    </button>
+                    {selected && (<div className="result-actions">
                       {!!current?.parent_version_id && (
                         <button
                           className="secondary"
@@ -1846,31 +1775,16 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                         </button>
                       )}
                       <a
-                        className="primary"
+                        className="secondary"
                         href={selected.download_url}
                         download
                       >
                         <Icon name="download" size={17} />
                         {isHistory ? "下载所选版本" : selectedLoop ? "下载循环单元" : "下载当前图"}
                       </a>
-                    </div>
-                ) : (
-                  <div className="generate-area">
-                    <button
-                      className="primary full"
-                      disabled={!ready || locked || backgroundProcessing}
-                      aria-describedby={layoutIssue ? "ribbon-layout-issue" : undefined}
-                      onClick={() => void generate()}
-                    >
-                      {processing ? (
-                        <span className="spinner tiny" />
-                      ) : (
-                        <Icon name="spark" />
-                      )}
-                      {busy && pending ? "正在提交…" : processing ? "正在生成首稿…" : "生成首稿"}
-                      <Icon name="arrow" size={16} />
-                    </button>
-                    {isFirstDraft && !designTarget && aiDraftAvailable && <div className="ai-draft-options">
+                    </div>)}
+                  </div>
+                    {!designTarget && aiDraftAvailable && <div className="ai-draft-options">
                       <label>
                         <input type="checkbox" checked={aiDraftEnabled} disabled={locked || backgroundProcessing}
                           onChange={event => { setAiDraftChoice(event.target.checked); if (!event.target.checked) setAiDraftReference(null); }} />
@@ -1880,7 +1794,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                         <p>按原图保留人物文字。选择的案例会发送给Seedream。</p>
                         {draftReference ? <div className="ai-draft-reference"><span>参考案例：<strong>{draftReference.code}</strong></span><button type="button" disabled={locked} onClick={() => setAiDraftReference(null)}>取消案例参考</button></div> :
                           <button type="button" className="ai-reference-picker" disabled={locked || !template} onClick={() => setExamplesView({ mode: template?.mode || null, name: template?.name || "全部排版案例" })}>选择案例参考</button>}
-                      </> : <p>按原素材直接排版，首稿不调用AI搭配。</p>}
+                      </> : <p>按原素材直接排版，不调用AI搭配。</p>}
                     </div>}
                     <small>
                       {!selection.asset_ids.length
@@ -1889,10 +1803,9 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                           ? "请选择一种排版模式"
                           : !selection.background_id
                             ? "请选择或生成底图"
-                            : layoutIssue || "首稿不占用精修次数"}
+                            : layoutIssue || (current ? "按当前选择生成独立作品。" : "按当前选择生成作品")}
                     </small>
                   </div>
-                )}
                 <div className={`preview-stage ${!selected ? "is-empty" : "is-filled"}`}>
                   <div className="stage-topline">
                     <span>
@@ -1913,7 +1826,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                       {designTarget.loading ? <><span className="spinner" /><h3>正在打开作品…</h3><p>正在读取所选作品的版本和素材。</p></> : <><h3>作品打开失败</h3><p>请重试，或从“我的作品”选择其他作品。</p><button className="secondary" onClick={() => void switchDesign(designTarget.id)}>重试打开作品</button></>}
                     </div>
                   ) : selected && selectedLoop ? (
-                    <LoopPreview key={`${design?.id}:${selected.id}`} version={selected} sizeLabel={sizeLabel} target={isHistory?"layout":editTarget} />
+                    <LoopPreview key={`${design?.id}:${selected.id}`} version={selected} sizeLabel={sizeLabel} />
                   ) : selected ? (
                     <>
                       <div className={`ribbon-display ${previewZoom}`}>
@@ -1982,7 +1895,6 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                 </div>
                 {selected ? (
                   <>
-                    <RefinementResult key={selected.id} version={selected} />
                     {(isHistory || selected.provider==="test") && <div className="preview-caption"><span>{isHistory ? "正在查看历史保存版本" : "测试模式结果"}</span></div>}
                     {isHistory && (
                       <div className="history-hint">
@@ -2030,7 +1942,6 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                           {v.parent_version_id
                             ? `基于 V${design.versions.find((p) => p.id === v.parent_version_id)?.sequence ?? "?"}`
                             : "初始版本"}
-                          {v.prompt ? ` · ${v.prompt}` : ""}
                         </small>
                       </button>
                     ))}
@@ -2044,123 +1955,6 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                 )}
               </details>}
             </section>
-            {!current && <aside className="panel refinement-panel is-placeholder">
-              <div className="panel-heading">
-                <div>
-                  <h2>文字精修</h2>
-                </div>
-                <Icon name="spark" />
-              </div>
-              <div className="refine-placeholder">
-                <p>生成首稿后，可以在这里用一句话调整图案大小、间距或底纹。</p>
-                <p className="refine-placeholder-note">首稿不占用精修次数，每个作品可成功精修两次。</p>
-              </div>
-            </aside>}
-            {current && <aside className="panel refinement-panel">
-              <div className="panel-heading">
-                <div>
-                  
-                  <h2>文字精修</h2>
-                </div>
-                <Icon name="spark" />
-              </div>
-              <p className="remaining-edits">本作品还可精修 <strong>{remaining}</strong> 次</p>
-              <div className="refinement-body">
-                <label htmlFor="refinement" className="sr-only">修改要求</label>
-
-
-                {modern && current && !isHistory && <label className="target-picker">精修范围
-                  <select aria-label="精修范围" disabled={locked || changed || remaining===0} value={editTarget} onChange={e=>setEditTarget(e.target.value)}>
-                    <option value="layout">整个布局</option><option value="background" disabled={!!zones.length && zones.every(zone=>current.snapshot.zone_background_refs?.[zone] || current.snapshot.zone_colors?.[zone])}>共用底纹</option>
-                    {(current.snapshot.pattern_slots || []).map((slot,i)=><option key={slot} value={slot}>{`图案 ${i+1} · ${assetIndex.get(current.snapshot.asset_refs[i])?.name || "已保存图案"}（全部副本）`}</option>)}
-                    {(zonesByMode[current.snapshot.template_mode] || []).map(zone=><option key={zone} value={`zone:${zone}`}>{zoneNames[zone]}底纹</option>)}
-                    {current.snapshot.border_ref && <option value="border">上下边饰</option>}
-                  </select></label>}
-                <textarea
-                  id="refinement"
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  maxLength={2000}
-                  disabled={!current || locked || remaining === 0 || isHistory}
-                  placeholder={!spacingAvailable
-                    ? "例如：把图案缩小一些，保留现在的底色。"
-                    : "例如：把图案缩小一些，间距拉开一点，保留现在的底色。"}
-                />
-                <div className="text-limit">{prompt.length} / 2000</div>
-                <button
-                  className="primary full refine-button"
-                  aria-describedby={layoutIssue ? "ribbon-layout-issue" : undefined}
-                  disabled={
-                    !current ||
-                    locked ||
-                    remaining === 0 ||
-                    isHistory ||
-                    !ready ||
-                    aiRefinementUnavailable ||
-                    (!prompt.trim() && !changed)
-                  }
-                  onClick={() => void refine()}
-                >
-                  {processing ? (
-                    <span className="spinner tiny" />
-                  ) : (
-                    <Icon name="spark" />
-                  )}
-                  {busy && pending ? "正在提交…" : processing
-                    ? "正在处理…"
-                    : remaining === 0
-                      ? "精修次数已用完"
-                      : "开始精修"}
-                </button>
-                <p className="refine-help">
-                  {!current
-                    ? "先生成首稿，再开始细化你的设计。"
-                    : isHistory
-                      ? "请返回当前版本后继续精修。"
-                      : remaining === 0
-                        ? "仍可查看历史、回退和下载。"
-                        : !aiAvailable
-                          ? changed ? "AI 尚未配置；清空文字可仅应用所选素材与排版，成功后计一次。" : "AI 尚未配置，仍可查看、下载或更换素材后应用所选配置。"
-                          : editing?.allowed_operations.length === 0 && !selectionOnly
-                            ? "当前版本不支持直接修改，请重新选择素材与排版后应用。"
-                        : changed
-                          ? "本次将同时应用左侧的素材与排版选择。"
-                          : "成功完成后计一次，系统失败不扣次。"}
-                </p>
-                <div className="suggestions">
-                  <span>
-                    {testMode ? "测试示例" : "可用示例"}
-                  </span>
-                  {suggestions.map((text) => (
-                    <button
-                      key={text}
-                      disabled={
-                        !current || locked || remaining === 0 || isHistory || !aiAvailable
-                      }
-                      onClick={() => setPrompt(text)}
-                    >
-                      {text}
-                      <Icon name="plus" size={13} />
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="refine-footer">
-                <details className="model-workflow-help">
-                  <summary>精修说明</summary>
-                  {editing && !editing.composite_edit && <p className="model-edit-boundary">{editing.composite_edit_reason}</p>}
-                  <p>DeepSeek 根据文字和所选图案的名称、顺序理解要求；当前不把图片发给它审图。对象不明确时请补充说明。</p>
-                  <p>Seedream 负责生成底图、修改图案或底图；程序负责原尺寸排版、版本与下载。首稿使用原素材，不由模型重画。</p>
-                  <p>每次成功精修计一次。回退到父版本保留累计次数。</p>
-                </details>
-                {testMode && (
-                  <p className="test-limit">
-                    测试替身仅支持已列明的参数与内容示例。其他要求会提示补充说明，真实
-                    AI 尚未接通。
-                  </p>
-                )}
-              </div>
-            </aside>}
           </div>
         )}
         <footer className="page-footer">
@@ -2349,8 +2143,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                 <div>
                   <strong>{d.name}</strong>
                   <small>
-                    {d.current_version_id ? "已有保存版本" : "尚未生成首稿"} ·
-                    已精修 {d.successful_refinement_count} / 2 次
+                    {d.current_version_id ? "已有保存版本" : "尚未生成首稿"}
                   </small>
                 </div>
                 {d.active_job_id && <span className="tiny-pill">处理中</span>}
@@ -2364,10 +2157,10 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
             </div>
           )}
           <div className="modal-footer">
-            <span>{showDeleted ? `删除后保留 ${config?.retention_hours ?? 50} 小时，可恢复` : "作品、额度和版本均保存在服务端"}</span>
+            <span>{showDeleted ? `删除后保留 ${config?.retention_hours ?? 50} 小时，可恢复` : "作品与版本会自动保存"}</span>
             <button
               className="primary"
-              disabled={busy || !!pending || backgroundProcessing || uploading}
+              disabled={creationUncertain || busy || !!pending || backgroundProcessing || uploading}
               onClick={() => void newDesign()}
             >
               <Icon name="plus" />
