@@ -3,6 +3,8 @@
 Only synthetic local images/providers are used; these tests do not measure
 visual design quality or call paid models.
 """
+
+from legacy_jobs import recover_legacy_refinement
 from copy import deepcopy
 import hashlib
 from pathlib import Path
@@ -136,8 +138,13 @@ def test_saved_v2_generation_refinement_download_remain_on_v2(workflow, monkeypa
     assert workflow.download(first) == saved
     body = {**workflow.selection, 'template_id': 'scene',
             'pattern_roles': {workflow.selection['asset_ids'][0]: 'main'}}
-    invalid = workflow.submit_refine(changed, selection=body, prompt='应用所选配置')
-    assert invalid.status_code == 422
+    from ribbon_backend.service import ServiceError
+    # The retained v2 recipe validator cannot be granted v3 role capabilities.
+    with workflow.service.db.connect() as db, pytest.raises(ServiceError) as invalid:
+        workflow.service.selection_snapshot(db, workflow.owner, body,
+            current(changed)['snapshot']['output_profile'], current(changed)['snapshot'])
+    assert invalid.value.status == 422
+    assert workflow.client.post(f'/api/designs/{changed["id"]}/refinements', json={}).status_code == 410
     assert workflow.get(changed)['successful_refinement_count'] == 1
 
 
@@ -224,7 +231,7 @@ def test_v3_ineffective_or_outside_target_does_not_charge_or_call_editor(workflo
             {'type': 'parameters', 'values': values},
             {'type': 'edit_asset', 'asset_id': snapshot['asset_refs'][0], 'prompt': 'Must not run'},
         ]
-        job = ok(workflow.client.post(f'/api/designs/{initial["id"]}/refinements', json={
+        job = ok(recover_legacy_refinement(workflow.client, workflow.service, f'/api/designs/{initial["id"]}/refinements', json={
             'base_version_id': base['id'], 'idempotency_key': str(uuid4()),
             'prompt': 'Synthetic invalid geometry before image edit', 'edit_target': target}))
         failed = workflow.work(job)

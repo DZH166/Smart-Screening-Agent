@@ -1,4 +1,6 @@
-"""Exercise employee-selected edit targets through HTTP, the worker and saved native PNGs."""
+"""Restore previously accepted target-edit recipes through read-only HTTP receipts, the worker and saved native PNGs."""
+
+from legacy_jobs import recover_legacy_refinement
 
 from io import BytesIO
 import json
@@ -13,7 +15,7 @@ from test_loop_workflow import workflow, current, ok, png
 def edit(workflow, design, target, operation):
     workflow.provider.operations = [operation]
     job = ok(
-        workflow.client.post(
+        recover_legacy_refinement(workflow.client, workflow.service,
             f'/api/designs/{design["id"]}/refinements',
             json={
                 'idempotency_key': str(uuid4()),
@@ -203,7 +205,7 @@ def test_native_copy_is_failed_result_with_usage_and_without_new_version(workflo
 
 def background_refine(workflow, design, prompt, operations, target='background'):
     workflow.provider.operations = operations
-    job = ok(workflow.client.post(f'/api/designs/{design["id"]}/refinements', json={
+    job = ok(recover_legacy_refinement(workflow.client, workflow.service, f'/api/designs/{design["id"]}/refinements', json={
         'idempotency_key': str(uuid4()), 'base_version_id': design['current_version_id'],
         'prompt': prompt, 'edit_target': target,
     }))

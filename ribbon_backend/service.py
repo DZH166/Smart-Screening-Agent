@@ -652,7 +652,10 @@ class Service:
         # Never take the database write lock while holding this allocation lock:
         # template generation and retention have their own transaction ordering.
         try:
-            with Image.open(io.BytesIO(data)) as original:
+            from hsd_tool.image_headers import image_header, AnimatedImageError, ImageDecodeMemoryError
+            from hsd_tool.image_budget import IMAGE_BUDGET
+            image_header(data, max_pixels=MAX_PIXELS, budget=IMAGE_BUDGET)
+            with Image.open(io.BytesIO(data), formats=['PNG', 'JPEG', 'WEBP']) as original:
                 if original.format not in ('PNG', 'JPEG', 'WEBP') or original.width * original.height > 40_000_000:
                     raise ValueError('Unsupported image')
                 if getattr(original, 'n_frames', 1) != 1:
@@ -666,6 +669,10 @@ class Service:
                         img = oriented.convert('RGBA')
                     finally:
                         oriented.close()
+        except AnimatedImageError:
+            raise ServiceError(422, '暂不支持动态图像，请上传单帧 PNG、JPEG 或 WebP') from None
+        except ImageDecodeMemoryError as error:
+            raise ServiceError(422, str(error)) from None
         except ServiceError:
             raise
         except Exception:

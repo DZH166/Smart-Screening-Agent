@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import struct
 import zipfile
+import io
 
 import pytest
 
@@ -41,6 +42,25 @@ def archive(path, *, entries, directory_bytes=0, zip64=False, comment=b""):
     return path
 
 
+def real_zip64(path, *, actual=5, declared=None, prefix=b'', extension=b'', sentinel=True, comment=b''):
+    data = io.BytesIO()
+    with zipfile.ZipFile(data, 'w') as source:
+        for n in range(actual):
+            source.writestr(f'{n}.ai', b'x')
+    raw = data.getvalue()
+    end = zipfile._EndRecData(io.BytesIO(raw))
+    position = end[zipfile._ECD_LOCATION]
+    count = actual if declared is None else declared
+    record = struct.pack('<4sQHHIIQQQQ', b'PK\x06\x06', 44 + len(extension), 45, 45,
+                         0, 0, count, count, end[zipfile._ECD_SIZE], end[zipfile._ECD_OFFSET]) + extension
+    tail = struct.pack('<4sHHHHIIH', b'PK\x05\x06', 0, 0,
+                       0xffff if sentinel else count, 0xffff if sentinel else count,
+                       0xffffffff if sentinel else end[zipfile._ECD_SIZE],
+                       0xffffffff if sentinel else end[zipfile._ECD_OFFSET], len(comment)) + comment
+    path.write_bytes(prefix + raw[:position] + record + zip64_locator(position) + tail)
+    return path
+
+
 def test_a_normal_archive_is_measured_once(tmp_path):
     path = tmp_path / "small.zip"
     with zipfile.ZipFile(path, "w") as archive_file:
@@ -58,9 +78,9 @@ def test_an_over_full_directory_is_rejected_before_zipfile_reads_it(tmp_path):
 
 def test_zip64_declared_counts_are_honoured(tmp_path):
     # A Zip64 archive is allowed only when its real count fits.
-    small = archive(tmp_path / "zip64-small.zip", entries=5, directory_bytes=400, zip64=True)
+    small = real_zip64(tmp_path / "zip64-small.zip")
     assert check_directory_size(small, max_entries=10)[0] == 5
-    big = archive(tmp_path / "zip64-big.zip", entries=200_000, directory_bytes=400, zip64=True)
+    big = real_zip64(tmp_path / "zip64-big.zip", declared=200_000)
     with pytest.raises(ValueError, match="过多"):
         check_directory_size(big, max_entries=10_000)
 

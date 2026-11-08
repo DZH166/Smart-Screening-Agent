@@ -1,7 +1,8 @@
-"""Actual HTTP/Pydantic quality controls with synthetic local images/providers."""
+"""Actual generate HTTP/Pydantic controls and restored historical recipes with synthetic images/providers."""
 import json
 from uuid import uuid4
 
+from legacy_jobs import recover_legacy_refinement
 from fastapi.testclient import TestClient
 import pytest
 
@@ -32,7 +33,9 @@ def new_design(client):
 
 
 def run(service, client, response):
-    assert response.status_code == 202, response.text
+    assert response.status_code == (200 if response.request.method == 'GET' else 202), response.text
+    if response.request.method == 'GET':
+        assert '/jobs/by-request/' in str(response.request.url)
     job = response.json()
     assert service.run_once()
     state = client.get('/api/jobs/' + job['id']).json()
@@ -53,7 +56,7 @@ def current(work):
     return next(row for row in work['versions'] if row['id'] == work['current_version_id'])
 
 
-def test_new_controls_pass_actual_http_schema_and_persist_through_refinement(api):
+def test_new_controls_pass_http_and_persist_in_previously_accepted_recipe(api):
     service, client, choice = api
     work, _ = generate(api, dict(choice, background_tone='original', design_density='rich'))
     original = current(work)
@@ -62,7 +65,7 @@ def test_new_controls_pass_actual_http_schema_and_persist_through_refinement(api
     assert original['snapshot']['loop']['width'] == original['snapshot']['output_profile']['width']
     assert original['snapshot']['background_tone'] == 'original'
     assert original['snapshot']['design_density'] == 'rich'
-    response = client.post('/api/designs/' + work['id'] + '/refinements', json={
+    response = recover_legacy_refinement(client, service, '/api/designs/' + work['id'] + '/refinements', json={
         'idempotency_key': str(uuid4()), 'base_version_id': work['current_version_id'], 'prompt': '应用所选配置',
         'selection': dict(choice, background_tone='soft', design_density='airy')})
     run(service, client, response)
@@ -82,7 +85,7 @@ def test_old_http_payload_omits_unset_nested_fields_and_keeps_saved_defaults(api
     with service.db.connect() as db:
         original_payload = json.loads(db.execute('SELECT payload_json FROM jobs WHERE id=?', (generate_id,)).fetchone()[0])
     assert 'background_tone' not in original_payload and 'design_density' not in original_payload
-    response = client.post('/api/designs/' + work['id'] + '/refinements', json={
+    response = recover_legacy_refinement(client, service, '/api/designs/' + work['id'] + '/refinements', json={
         'idempotency_key': str(uuid4()), 'base_version_id': work['current_version_id'], 'prompt': '应用所选配置',
         'selection': dict(choice, template_id='single')})
     job = run(service, client, response)
@@ -94,7 +97,7 @@ def test_old_http_payload_omits_unset_nested_fields_and_keeps_saved_defaults(api
     assert 'background_tone' not in payload['selection'] and 'design_density' not in payload['selection']
 
 
-def test_old_http_client_can_refine_legacy_work_without_softening_or_upgrading_it(api, monkeypatch):
+def test_previously_accepted_recipe_keeps_legacy_work_without_softening_or_upgrading_it(api, monkeypatch):
     service, client, choice = api
     original_selection = service.selection_snapshot
 
@@ -108,7 +111,7 @@ def test_old_http_client_can_refine_legacy_work_without_softening_or_upgrading_i
         patch.setattr(service, 'selection_snapshot', legacy)
         work, _ = generate(api)
     before = client.get('/api/versions/' + work['current_version_id'] + '/download').content
-    response = client.post('/api/designs/' + work['id'] + '/refinements', json={
+    response = recover_legacy_refinement(client, service, '/api/designs/' + work['id'] + '/refinements', json={
         'idempotency_key': str(uuid4()), 'base_version_id': work['current_version_id'], 'prompt': '应用所选配置',
         'selection': dict(choice, template_id='single')})
     run(service, client, response)
@@ -136,7 +139,7 @@ def test_invalid_enums_and_explicit_null_are_rejected_for_generate_and_nested_re
     response = client.post('/api/designs/' + work['id'] + '/refinements', json={
         'idempotency_key': str(uuid4()), 'base_version_id': work['current_version_id'], 'prompt': '应用所选配置',
         'selection': invalid})
-    assert response.status_code == 422
+    assert response.status_code == 410
     latest = client.get('/api/designs/' + work['id']).json()
     assert latest['current_version_id'] == work['current_version_id']
     assert latest['successful_refinement_count'] == 0

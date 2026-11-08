@@ -2,6 +2,8 @@
 
 No API credentials, paid network requests, business images or live identities.
 """
+
+from legacy_jobs import seed_accepted_refinement
 from dataclasses import replace
 from io import BytesIO
 import json
@@ -13,7 +15,7 @@ import pytest
 
 from ribbon_backend.app import create_app
 from ribbon_backend.config import Settings
-from ribbon_backend.providers import TestProvider as SyntheticProvider
+from ribbon_backend.providers import TestProvider as SyntheticProvider, workflow_editing
 from ribbon_backend.service import Service
 
 
@@ -66,7 +68,7 @@ def refine(service, identity, design, prompt='合成修改请求', choice=None):
     body = dict(idempotency_key=str(uuid4()), base_version_id=design['current_version_id'], prompt=prompt)
     if choice is not None:
         body['selection'] = choice
-    job = service.submit(identity, 'refine', body, design['id'])
+    job = seed_accepted_refinement(service, identity, design['id'], body)
     assert service.submit(identity, 'refine', body, design['id'])['id'] == job['id']
     assert service.run_once()
     return service.job(identity, job['id']), service.design(identity, design['id'])
@@ -100,10 +102,11 @@ def test_config_and_historical_version_project_current_provider_without_rewritin
     current = service.config()
     assert current['editing']['composite_edit'] is False
     assert current['editing']['planner_sees_images'] is False
-    assert set(current['editing']['allowed_operations']) == {'parameters', 'edit_asset', 'edit_background'}
+    assert current['editing']['allowed_operations'] == []
     projected = service.design(identity, design['id'])['versions'][0]
     # The old square version uses its own profile, not today's active long strip.
-    assert projected['editing']['composite_edit'] is True
+    assert projected['editing']['composite_edit'] is False
+    assert workflow_editing('deepseek_seedream', projected['snapshot'])['composite_edit'] is True
     assert projected['snapshot'] == json.loads(stored)
     assert service.version_file(identity, version['id']).read_bytes() == content
     with service.db.connect() as db:
@@ -124,7 +127,7 @@ def test_formal_deterministic_first_draft_never_acquires_provider_and_stores_tru
         assert db.execute('SELECT COUNT(*) FROM provider_calls').fetchone()[0] == 0
 
 
-def test_editing_is_exposed_by_authenticated_api_beside_immutable_snapshot(service):
+def test_editing_is_retired_by_authenticated_api_beside_immutable_snapshot(service):
     app = create_app(service.settings, service=service)
     with TestClient(app, base_url='http://localhost') as client:
         assert client.get('/api/config').status_code == 401
@@ -135,7 +138,8 @@ def test_editing_is_exposed_by_authenticated_api_beside_immutable_snapshot(servi
         result = client.get('/api/designs/' + design['id'])
         assert result.status_code == 200
         version = result.json()['versions'][0]
-        assert version['editing']['allowed_operations']
+        assert version['editing']['allowed_operations'] == []
+        assert workflow_editing('test', version['snapshot'])['allowed_operations']
         assert 'editing' not in version['snapshot']
         assert not any(key in repr(config) for key in ('api_key', 'credential', 'password'))
 

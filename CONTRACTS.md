@@ -1,5 +1,17 @@
 # Internal implementation contract
 
+## Phase-one quality hardening v1.28.1
+
+Ribbon refinement remains retired under the v1.28.0 contract. Historical worker/commit tests seed explicitly already-accepted records in tests only; no production test admission switch or new refinement route is introduced. Supported new submission concurrency/idempotency is exercised through generation.
+
+Read-only UI requests bind task/lifecycle/revision context before applying data or401 effects. Late reads cannot replace or expire a newer task. Material JSON GETs have a20-second deadline; an accepted upload whose first read fails retains its task ID and exposes read recovery without submitting again. Writes, uploads, SSE and downloads do not inherit that deadline. Admin restoration clears secret inputs and re-enables controls via validated fresh settings; malformed successful HTTP bodies do not imply saved settings.
+
+`image_budget` is a process-local FIFO estimated workspace admission shared by material and ribbon image operations, not a measured or hard RSS limit. Reservations precede state/database locks and encompass decode, conversion, save and thumbnail temporary lifetimes. Network/model waits do not hold reservations. Header probes reject unsupported/animated formats and excessive metadata before pixel allocation; WebP uses fixed headers before Pillow's full-file parser. The optional quality diagnostic computes equivalent differences in tiles without changing output pixels or automatic acceptance.
+
+Archive admission counts physical central-directory headers before constructing ZipInfo objects and bounds native LZMA dictionary allocation. Workbook XML readers all consume actual streamed EOF/CRC, check cancellation and bound retained structure/text; only real direct worksheet rows/shared-string records reset released-record budgets. Large worksheets are streamed rather than capped by their total uncompressed size. Numbering export patches target rows through private spools, validates the complete sheet and every copied member, and publishes exclusively. Untouched XML segments and archive member contents retain their bytes. Any cancellation, open/write/close/CRC failure removes only this operation's newly created output and temporary files; original and pre-existing output files remain protected.
+
+These resource and recovery changes do not change matching/qualification, numbering, pixel content, provider requests, task ownership,50-hour retention or credential policy. Evidence and actual release status are recorded in docs/phase1-quality-v1.28.1.md.
+
 ## Ribbon refinement retirement v1.28.0
 
 New ribbon refinement is retired. The authenticated, owner-checked legacy POST returns410 without planning, accepting work, writing a version or charging quota. `Service.submit` may replay a matching previously accepted idempotency record, but rejects new `refine` work before provider configuration or execution. Public current editing capabilities are empty and maximum new refinements is zero; immutable historical snapshots are not rewritten.

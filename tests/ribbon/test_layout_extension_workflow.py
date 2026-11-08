@@ -3,6 +3,8 @@
 Providers here are explicitly synthetic. No company preview is production input
 and no paid API, cloud identity or real administrator credential is used.
 """
+
+from legacy_jobs import seed_accepted_refinement
 from uuid import uuid4
 
 import pytest
@@ -43,7 +45,7 @@ def refine(service, owner, design, prompt='图案缩小一些', selection=None):
     payload = dict(idempotency_key=str(uuid4()), base_version_id=design['current_version_id'], prompt=prompt)
     if selection is not None:
         payload['selection'] = selection
-    job = service.submit(owner, 'refine', payload, design['id'])
+    job = seed_accepted_refinement(service, owner, design['id'], payload)
     assert service.submit(owner, 'refine', payload, design['id'])['id'] == job['id']
     assert service.run_once()
     return service.job(owner, job['id']), service.design(owner, design['id'])
@@ -87,8 +89,11 @@ def test_added_mode_real_generate_branch_refine_and_pinned_download(service, mod
     assert service.version_file(owner, two['current_version_id']).read_bytes() != bytes0
     with service.db.connect() as db:
         assert db.execute('SELECT COUNT(*) FROM quota_events WHERE design_id=?', (original['id'],)).fetchone()[0] == 2
-    with pytest.raises(ServiceError, match='两次精修已用完'):
-        refine(service, owner, two)
+    with pytest.raises(ServiceError) as retired:
+        service.submit(owner, 'refine', dict(idempotency_key=str(uuid4()),
+            base_version_id=two['current_version_id'], prompt='图案缩小一些'), two['id'])
+    assert retired.value.status == 410
+    assert service.design(owner, original['id'])['successful_refinement_count'] == 2
 
 
 def test_fullwidth_at_safe_box_limit_cannot_fake_enlargement_or_charge(service, monkeypatch):

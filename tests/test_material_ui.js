@@ -4,9 +4,9 @@
 const assert=require("node:assert/strict"),fs=require("node:fs"),path=require("node:path"),vm=require("node:vm");
 const source=fs.readFileSync(path.join(__dirname,"../hsd_tool/static/material.js"),"utf8");
 const flush=()=>new Promise(setImmediate);
-function deferred(){let resolve;const promise=new Promise(r=>resolve=r);return{promise,resolve};}
+function deferred(){let resolve,reject;const promise=new Promise((r,e)=>{resolve=r;reject=e;});return{promise,resolve,reject};}
 function harness(){
-  const nodes=new Map(),requests=[],xhrs=[],timers=new Map(),storage=new Map(),revoked=[];let serial=0,blobSerial=0;
+  const nodes=new Map(),requests=[],xhrs=[],timers=new Map(),timerDelays=new Map(),storage=new Map(),revoked=[];let serial=0,blobSerial=0;
   function node(id){if(!nodes.has(id)){const classes=new Set(),listeners={};let html="";const n={id,value:"",textContent:"",disabled:false,open:false,style:{},dataset:{},files:[],children:[],writes:0,type:"",complete:true,naturalWidth:1000,
     classList:{contains:v=>classes.has(v),add(...v){v.forEach(x=>classes.add(x));},remove(...v){v.forEach(x=>classes.delete(x));},toggle(v,force){const next=force===undefined?!classes.has(v):force;if(next)classes.add(v);else classes.delete(v);return next;}},
     querySelectorAll(){return[];},querySelector(selector){
@@ -17,7 +17,7 @@ function harness(){
       return null;
     },append(...children){children.forEach(child=>this.insertBefore(child,null));},insertBefore(child,reference){if(reference!==null&&!this.children.includes(reference))throw new Error("insertBefore anchor is not a child");if(child===reference)return child;if(child.parentNode){const previous=child.parentNode.children;previous.splice(previous.indexOf(child),1);}const index=reference===null?this.children.length:this.children.indexOf(reference);this.children.splice(index,0,child);child.parentNode=this;return child;},replaceChildren(){this.children.forEach(child=>{child.parentNode=null;});this.children=[];this.innerHTML="";},remove(){if(this.parentNode){const siblings=this.parentNode.children;siblings.splice(siblings.indexOf(this),1);this.parentNode=null;}this.removed=true;},setAttribute(k,v){this[k]=v;},getAttribute(k){return this[k]??null;},removeAttribute(k){delete this[k];},focus(){n.focused=true;},scrollIntoView(options){n.scrolled=options;},addEventListener(k,fn){listeners[k]=fn;},emit(k,event={}){listeners[k]?.({preventDefault(){},target:n,...event});},getBoundingClientRect(){return{left:10,top:20,width:500,height:250};},showModal(){n.open=true;},close(){n.open=false;},setPointerCapture(){}};Object.defineProperty(n,"innerHTML",{get:()=>{const content=nodes.get(id+"-content");return content?html.replace(/(<div data-material-content>)[\s\S]*<\/div>$/,(_,start)=>start+content.innerHTML+"</div>"):html;},set:value=>{html=String(value);n.writes++;const match=html.match(/<div data-material-content>([\s\S]*)<\/div>$/);if(match)node(id+"-content").innerHTML=match[1];const src=html.match(/class="material-item-preview"[\s\S]*?<img src="([^"]*)"/);if(src)node(id+"-image").src=src[1];}});nodes.set(id,n);}return nodes.get(id);}
   const nav=["numbering","material"].map(v=>{const n=node(`nav-${v}`);n.dataset.workspace=v;return n;});
-  const sandbox={document:{getElementById:node,querySelectorAll:q=>q==="[data-workspace]"?nav:[],createElement:tag=>node(`${tag}-${++serial}`),documentElement:{dataset:{}},body:node("body"),hidden:false},window:{HSD_TOKEN:"synthetic-token",crypto:{randomUUID:()=>"12345678-1234-4123-8123-123456789abc"},scrollY:30,scrollTo(){},addEventListener(){},setTimeout:fn=>{timers.set(++serial,fn);return serial;},clearTimeout:id=>timers.delete(id)},history:{replaceState(){}},location:{hash:""},URL:{createObjectURL:()=>`blob:synthetic-${++blobSerial}`,revokeObjectURL:v=>revoked.push(v)},sessionStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},setTimeout:fn=>{timers.set(++serial,fn);return serial;},clearTimeout:id=>timers.delete(id),fetch:(url,options)=>{const d=deferred();requests.push({url,options,...d});return d.promise;},FormData:class{constructor(){this.parts=[];}append(...args){this.parts.push(args);}},XMLHttpRequest:class{constructor(){this.listeners={};this.upload={addEventListener:(k,fn)=>this.progress=fn};this.headers={};xhrs.push(this);}open(method,url){this.method=method;this.url=url;}setRequestHeader(k,v){this.headers[k]=v;}addEventListener(k,fn){this.listeners[k]=fn;}send(data){this.data=data;}abort(){this.listeners.abort?.();}reply(status,data){this.status=status;this.responseText=JSON.stringify(data);this.listeners.load();}}};
+  const sandbox={AbortController,document:{getElementById:node,querySelectorAll:q=>q==="[data-workspace]"?nav:[],createElement:tag=>node(`${tag}-${++serial}`),documentElement:{dataset:{}},body:node("body"),hidden:false},window:{HSD_TOKEN:"synthetic-token",crypto:{randomUUID:()=>"12345678-1234-4123-8123-123456789abc"},scrollY:30,scrollTo(){},addEventListener(){},setTimeout:(fn,delay)=>{timers.set(++serial,fn);timerDelays.set(serial,delay);return serial;},clearTimeout:id=>timers.delete(id)},history:{replaceState(){}},location:{hash:""},URL:{createObjectURL:()=>`blob:synthetic-${++blobSerial}`,revokeObjectURL:v=>revoked.push(v)},sessionStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},setTimeout:(fn,delay)=>{timers.set(++serial,fn);timerDelays.set(serial,delay);return serial;},clearTimeout:id=>timers.delete(id),fetch:(url,options)=>{const d=deferred();requests.push({url,options,...d});options.signal?.addEventListener("abort",()=>{const e=new Error("aborted");e.name="AbortError";d.reject(e);});return d.promise;},FormData:class{constructor(){this.parts=[];}append(...args){this.parts.push(args);}},XMLHttpRequest:class{constructor(){this.listeners={};this.upload={addEventListener:(k,fn)=>this.progress=fn};this.headers={};xhrs.push(this);}open(method,url){this.method=method;this.url=url;}setRequestHeader(k,v){this.headers[k]=v;}addEventListener(k,fn){this.listeners[k]=fn;}send(data){this.data=data;}abort(){this.listeners.abort?.();}reply(status,data){this.status=status;this.responseText=JSON.stringify(data);this.listeners.load();}}};
   // Browser Image exists in production. Keep callbacks manually controlled so
   // tests exercise pending, failed and out-of-order full-image downloads.
   const images=[];
@@ -27,8 +27,8 @@ function harness(){
     fail(){this.naturalWidth=0;this.naturalHeight=0;this.onerror?.();}
   }
   sandbox.Image=sandbox.window.Image=ControlledImage;
-  vm.runInNewContext(source.replace("  boot();","  window.testMaterial={state,workspace,fileError,selectFiles,formatBytes,safeUrl,setJob,loadJob,render,renderCards,renderSources,mutate,start,recoverUpload,stop,reset,openDetail,imagePoint,selectionMove,redo,metrics,controls,itemAction,acknowledgeRefine,showBatchRecords,itemContent,itemWarnings,download,schedule,closeStream,updateClock,retrySource,refiningId,poll};"),sandbox);
-  return{ui:sandbox.window.testMaterial,node,requests,xhrs,timers,storage,revoked,sandbox,images,async reply(index,data,status=200){requests[index].resolve({ok:status>=200&&status<300,status,json:async()=>data});await flush();}};
+  vm.runInNewContext(source.replace("  boot();","  window.testMaterial={loadConfig,state,workspace,fileError,selectFiles,formatBytes,safeUrl,setJob,loadJob,render,renderCards,renderSources,mutate,start,recoverUpload,stop,reset,openDetail,imagePoint,selectionMove,redo,metrics,controls,itemAction,acknowledgeRefine,showBatchRecords,itemContent,itemWarnings,download,schedule,closeStream,updateClock,retrySource,refiningId,poll};"),sandbox);
+  return{ui:sandbox.window.testMaterial,node,requests,xhrs,timers,timerDelays,storage,revoked,sandbox,images,async reply(index,data,status=200){requests[index].resolve({ok:status>=200&&status<300,status,json:async()=>data});await flush();}};
 }
 function job(overrides={}){return{id:"a".repeat(32),revision:3,status:"ready",progress:{phase:"完成",current:1,total:1},sources:[{id:"s1",name:"原图.png",width:1000,height:500,image_url:`/api/material/jobs/${"a".repeat(32)}/source/s1`}],items:[{id:"i1",source_id:"s1",name:"完整设计",status:"generated",downloadable:true,refined:false,warnings:["请核对文字与颜色"],image_url:`/api/material/jobs/${"a".repeat(32)}/item/i1`,download_url:`/api/material/jobs/${"a".repeat(32)}/download/i1`,width:4096,height:2048}],stats:{total:1,ready:0,downloadable:1,needs_review:0,skipped:0,failed:0},download_url:null,...overrides};}
 function actionEvent(action,id="i1") {return {target:{closest:()=>({dataset:{materialAction:action,itemId:id}})}};}
@@ -351,5 +351,65 @@ test("routine notes alone never become default warnings or replace the fixed sho
   assert.ok(!h.ui.state.items.get("i1").node.innerHTML.includes('class="material-item-warning"'));
   h.ui.openDetail("s1",{...items[0],refine_error:notes[0]});
   assert.equal(h.node("material-detail-warning").textContent,notes[0],"a server error stays visible even if its text equals a known processing note");
+});
+test("late task recovery cannot replace a newly accepted upload",async()=>{
+  const h=harness(),old="a".repeat(32),next="b".repeat(32);
+  const restoring=h.ui.loadConfig();await h.reply(0,{available:true,active_job_id:old});
+  h.ui.state.files=[{name:"new.png",size:3}];const creating=h.ui.start();
+  h.xhrs[0].reply(200,{id:next});await flush();await h.reply(2,job({id:next}));await creating;
+  await h.reply(1,job({id:old}));await restoring;
+  assert.equal(h.ui.state.job.id,next);assert.equal(h.storage.get("hsd-material-job"),next);
+});
+test("an obsolete restored-task 401 cannot lock a newly uploaded batch",async()=>{
+  const h=harness(),old="a".repeat(32),next="b".repeat(32);
+  const restoring=h.ui.loadConfig();await h.reply(0,{available:true,active_job_id:old});
+  h.ui.state.files=[{name:"new.png",size:3}];const creating=h.ui.start();
+  h.xhrs[0].reply(200,{id:next});await flush();await h.reply(2,job({id:next}));await creating;
+  await h.reply(1,{error:"old request rejected"},401);await restoring;
+  assert.equal(h.ui.state.job.id,next);assert.equal(h.ui.state.authLost,false);
+});
+test("a superseded same-task read cannot expire newer accepted state",async()=>{
+  const h=harness();h.ui.setJob(job());const reading=h.ui.loadJob().catch(error=>error);
+  h.ui.setJob(job({revision:4}));await h.reply(0,{error:"obsolete auth result"},401);await reading;
+  assert.equal(h.ui.state.authLost,false);assert.equal(h.ui.state.job.revision,4);
+});
+test("overlapping configuration reads retain the latest task and ignore old auth",async()=>{
+  const h=harness(),next="b".repeat(32),old=h.ui.loadConfig(),latest=h.ui.loadConfig();
+  await h.reply(1,{available:true,active_job_id:next});await h.reply(2,job({id:next}));await latest;
+  await h.reply(0,{error:"older config auth rejection"},401);await old;
+  assert.equal(h.ui.state.authLost,false);assert.equal(h.ui.state.job.id,next);
+});
+function expireRead(h){const entry=[...h.timers].find(([id])=>h.timerDelays.get(id)===20000);assert.ok(entry,"JSON reads have a 20-second deadline");entry[1]();}
+test("a never-returning configuration read can be retried without losing chosen files",async()=>{
+  const h=harness();h.ui.state.files=[{name:"kept.png",size:3}];const loading=h.ui.loadConfig();
+  assert.ok(h.requests[0].options.signal);expireRead(h);await loading;
+  assert.match(h.node("material-notice").textContent,/超时/);assert.equal(h.node("material-start").textContent,"重新读取设置");assert.equal(h.node("material-start").disabled,false);
+  const retry=h.ui.start();assert.equal(h.requests[1].options.method,"GET");assert.equal(h.xhrs.length,0);
+  await h.reply(1,{available:true});await retry;assert.equal(h.ui.state.files[0].name,"kept.png");assert.equal(h.node("material-start").textContent,"开始提取");
+});
+test("a timed-out accepted-task read exposes its existing retry control",async()=>{
+  const h=harness();h.ui.state.config={available:true};h.ui.state.pendingJobId="a".repeat(32);const reading=h.ui.poll();expireRead(h);await reading;
+  assert.equal(h.ui.state.polling,false);assert.equal(h.node("material-upload-check").disabled,false);assert.equal(h.node("material-upload-check").classList.contains("hidden"),false);assert.equal(h.node("material-upload-check").textContent,"重新查询");
+  assert.equal(h.ui.state.pendingJobId,"a".repeat(32));assert.match(h.node("material-notice").textContent,/超时/);
+});
+test("a recovered completed upload keeps a visible read retry and blocks duplicate submission",async()=>{
+  const h=harness(),id="a".repeat(32);h.ui.state.config={available:true};h.ui.state.files=[{name:"kept.png",size:3}];h.ui.state.uploadId="12345678-1234-4123-8123-123456789abc";h.ui.state.uncertain=true;
+  const recovering=h.ui.recoverUpload();await h.reply(0,{state:"completed",job_id:id});expireRead(h);await recovering;
+  assert.equal(h.node("material-upload-check").classList.contains("hidden"),false);assert.equal(h.node("material-upload-check").disabled,false);assert.equal(h.node("material-upload-check").textContent,"重新查询");
+  assert.equal(h.storage.get("hsd-material-job"),id);assert.equal(h.ui.state.pendingJobId,id);assert.equal(h.node("material-start").disabled,true);
+  await h.ui.start();await h.ui.start();assert.equal(h.xhrs.length,0,"an accepted batch cannot be submitted again while its snapshot is missing");
+  const retry=h.ui.poll();assert.equal(h.requests[2].url,"/api/material/jobs/"+id);await h.reply(2,job({id}));await retry;
+  assert.equal(h.ui.state.job.id,id);assert.equal(h.ui.state.files[0].name,"kept.png");assert.equal(h.ui.state.pendingJobId,null);assert.equal(h.node("material-new").disabled,false);
+});
+test("current read timeout retains results and releases polling and refresh",async()=>{
+  const h=harness();h.ui.setJob(job());const before=h.ui.state.job,reading=h.ui.poll();expireRead(h);await reading;
+  assert.equal(h.ui.state.job,before);assert.equal(h.ui.state.polling,false);assert.equal(h.node("material-recheck").disabled,false);assert.match(h.node("material-notice").textContent,/超时/);
+});
+test("obsolete epoch read timeout never changes the new task notice",async()=>{
+  const h=harness();h.ui.setJob(job());const old=h.ui.loadJob();h.ui.state.epoch++;h.ui.setJob(job({id:"b".repeat(32)}));expireRead(h);await old;
+  assert.equal(h.ui.state.job.id,"b".repeat(32));assert.equal(h.node("material-notice").textContent,"");assert.equal(h.ui.state.authLost,false);
+});
+test("mutations keep their existing unknown-result flow and have no read deadline",async()=>{
+  const h=harness();h.ui.setJob(job());const changing=h.ui.mutate("resolve",{item_id:"i1",action:"skip"});assert.equal(h.requests[0].options.signal,undefined);assert.equal([...h.timers].some(([id])=>h.timerDelays.get(id)===20000),false);await h.reply(0,job({revision:4}));await changing;
 });
 async function main(){let failed=0;for(const t of tests){try{await t.run();console.log(`PASS ${t.name}`);}catch(e){failed++;console.error(`FAIL ${t.name}\n${e.stack}`);}}console.log(`${tests.length-failed} passed, ${failed} failed (synthetic material employee UI)`);if(failed)process.exitCode=1;}main();

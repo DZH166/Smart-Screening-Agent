@@ -292,6 +292,13 @@ async function main(){
 
   // Expired download authentication keeps the task ID for re-login recovery.
   ui.state.job={id:'auth-job',status:'done',download_ready:true,rows:[]};storage.set('hsd-active-job','auth-job');
+  ui.state.authExpired=false;ui.state.downloading=false;
+  ui.state.job={...ui.state.job,id:'same-download-task',status:'done',revision:1,download_ready:true};
+  let finishOldDownload;fetchHandler=()=>new Promise(resolve=>{finishOldDownload=resolve;});
+  const outdatedDownload=ui.openOutput();await flush();
+  ui.state.job={...ui.state.job,revision:2};finishOldDownload(reply({error:'obsolete download authentication'},401));await outdatedDownload;
+  assert.equal(ui.state.authExpired,false);assert.equal(ui.state.downloading,false,'superseded download reads release their own lock');
+  assert.equal(ui.state.job.revision,2);
   fetchHandler=async()=>reply({error:'请先输入员工访问码。'},401);await ui.openOutput();
   assert.equal(ui.state.authExpired,true);assert.equal(storage.get('hsd-active-job'),'auth-job');
   assert.equal(location.assigned,undefined);assert.equal(element('notice-action').textContent,'重新登录');

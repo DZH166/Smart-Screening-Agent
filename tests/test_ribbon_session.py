@@ -1,4 +1,4 @@
-"""Host-session regressions for asynchronous ribbon refinements; no AI calls."""
+"""Host-session regressions for asynchronous ribbon generation; no AI calls."""
 import threading
 import hashlib
 from types import SimpleNamespace
@@ -22,7 +22,7 @@ def _draft(client):
     return design['id'], selected, settled['result_version_id']
 
 
-def test_refinement_wait_and_reads_preserve_employee_session(employee_app, monkeypatch):
+def test_generation_wait_and_reads_preserve_employee_session(employee_app, monkeypatch):
     client = employee_app.test_client()
     login(client)
     owner = read(call(client, '/auth/me'))['id']
@@ -32,18 +32,19 @@ def test_refinement_wait_and_reads_preserve_employee_session(employee_app, monke
     original = service.build_artifact
 
     def wait_for_result(job, directory):
-        if job['kind'] == 'refine':
+        if job['kind'] == 'generate':
             entered.set()
-            assert release.wait(15), 'test did not release refinement'
+            assert release.wait(15), 'test did not release generation'
         return original(job, directory)
 
     monkeypatch.setattr(service, 'build_artifact', wait_for_result)
     modified = {**selected, 'template_id': next(
         row['id'] for row in read(call(client, '/templates'))
         if row['mode'] in ('grid', 'single') and row['id'] != selected['template_id'])}
-    job = read(call(client, f'/designs/{design_id}/refinements', {
-        'base_version_id': version_id, 'idempotency_key': 'session-wait-refine',
-        'prompt': '应用所选配置', 'selection': modified}))
+    source_design_id = design_id
+    design_id = read(call(client, '/designs', {'name': 'Session waiting first draft'}))['id']
+    job = read(call(client, f'/designs/{design_id}/generate', {
+        **modified, 'idempotency_key': 'session-wait-generate'}))
     try:
         assert entered.wait(10)
         for _ in range(3):
@@ -52,8 +53,9 @@ def test_refinement_wait_and_reads_preserve_employee_session(employee_app, monke
             assert read(response)['status'] == 'RUNNING'
             assert read(call(client, '/auth/me'))['id'] == owner
             current = read(call(client, '/designs/' + design_id))
-            assert current['current_version_id'] == version_id
+            assert current['current_version_id'] is None
             assert current['successful_refinement_count'] == 0
+            assert read(call(client, '/designs/' + source_design_id))['current_version_id'] == version_id
         anonymous = employee_app.test_client()
         assert call(anonymous, '/jobs/' + job['id']).status_code == 401
         other = employee_app.test_client()
@@ -64,7 +66,8 @@ def test_refinement_wait_and_reads_preserve_employee_session(employee_app, monke
     settled = wait_job(client, job)
     assert settled['status'] == 'SUCCEEDED', settled
     assert read(call(client, '/auth/me'))['id'] == owner
-    assert read(call(client, '/designs/' + design_id))['successful_refinement_count'] == 1
+    assert read(call(client, '/designs/' + design_id))['successful_refinement_count'] == 0
+    assert read(call(client, '/designs/' + design_id))['current_version_id'] == settled['result_version_id']
 
 
 def test_provider_auth_failure_does_not_expire_employee_login(employee_app, monkeypatch):
@@ -80,12 +83,13 @@ def test_provider_auth_failure_does_not_expire_employee_login(employee_app, monk
                                      'http_status': 401})
 
     monkeypatch.setattr(service, 'build_artifact', provider_denied)
-    job = read(call(client, f'/designs/{design_id}/refinements', {
-        'base_version_id': version_id, 'idempotency_key': 'provider-denied-refine',
-        'prompt': '改善图案细节', 'selection': selected}))
+    failed_design_id = read(call(client, '/designs', {'name': 'Provider failure first draft'}))['id']
+    job = read(call(client, f'/designs/{failed_design_id}/generate', {
+        **selected, 'idempotency_key': 'provider-denied-generate'}))
     settled = wait_job(client, job)
     assert settled['status'] == 'FAILED'
     assert '认证失败' in settled['error']
+    assert read(call(client, '/designs/' + failed_design_id))['versions'] == []
     assert read(call(client, '/auth/me'))['id'] == owner
     current = read(call(client, '/designs/' + design_id))
     assert current['current_version_id'] == version_id
@@ -112,6 +116,7 @@ def test_normal_restart_preserves_owner_versions_and_safe_stale_token_recovery(e
         old_sha = hashlib.sha256(previous_download.data).hexdigest()
     finally:
         previous_download.close()
+    new_design_id = read(call(client, '/designs', {'name': 'Post-restart generation'}))['id']
     cookie_name = configuration['SESSION_COOKIE_NAME']
     cookie = client.get_cookie(cookie_name, domain='hsd.example.test')
     assert cookie is not None
@@ -139,9 +144,8 @@ def test_normal_restart_preserves_owner_versions_and_safe_stale_token_recovery(e
         modified = {**selected, 'template_id': next(
             row['id'] for row in read(call(resumed, '/templates'))
             if row['mode'] in ('grid', 'single') and row['id'] != selected['template_id'])}
-        payload = {'base_version_id': version_id, 'idempotency_key': 'post-restart-same-request',
-                   'prompt': '应用所选配置', 'selection': modified}
-        rejected = call(resumed, f'/designs/{design_id}/refinements', payload)
+        payload = {**modified, 'idempotency_key': 'post-restart-same-request'}
+        rejected = call(resumed, f'/designs/{new_design_id}/generate', payload)
         try:
             assert rejected.status_code == 403
             assert rejected.get_json()['code'] == 'page_token_expired'
@@ -150,13 +154,15 @@ def test_normal_restart_preserves_owner_versions_and_safe_stale_token_recovery(e
         assert read(call(resumed, '/designs/' + design_id))['active_job_id'] is None
         token = read(call(resumed, '/session'))['token']
         assert token == TOKEN + '-after-restart'
-        job = read(call(resumed, f'/designs/{design_id}/refinements', payload, token=token))
-        repeated = read(call(resumed, f'/designs/{design_id}/refinements', payload, token=token))
+        job = read(call(resumed, f'/designs/{new_design_id}/generate', payload, token=token))
+        repeated = read(call(resumed, f'/designs/{new_design_id}/generate', payload, token=token))
         assert repeated['id'] == job['id']
         settled = wait_job(resumed, job)
         assert settled['status'] == 'SUCCEEDED', settled
         assert read(call(resumed, '/auth/me'))['id'] == owner
-        assert read(call(resumed, '/designs/' + design_id))['successful_refinement_count'] == 1
+        assert read(call(resumed, '/designs/' + new_design_id))['successful_refinement_count'] == 0
+        assert read(call(resumed, '/designs/' + new_design_id))['current_version_id'] == settled['result_version_id']
+        assert read(call(resumed, '/designs/' + design_id))['current_version_id'] == version_id
         with restarted.config['HSD_RIBBON'].service.db.connect() as db:
             assert db.execute('SELECT COUNT(*) FROM provider_calls').fetchone()[0] == 0
         anonymous = restarted.test_client()

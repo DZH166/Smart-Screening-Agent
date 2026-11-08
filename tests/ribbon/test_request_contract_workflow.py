@@ -3,6 +3,8 @@
 These tests prove request routing, arithmetic and transaction behaviour, never
 the visual meaning of a generated picture. No external models are called.
 """
+
+from legacy_jobs import recover_legacy_refinement
 from copy import deepcopy
 from io import BytesIO
 import json
@@ -53,7 +55,7 @@ def submit_plan(workflow, design, prompt, plan, *, target='layout', key=None):
     workflow.provider.plan = controlled_plan
     body = dict(idempotency_key=key or str(uuid4()), base_version_id=design['current_version_id'],
                 prompt=prompt, edit_target=target)
-    response = workflow.client.post(f'/api/designs/{design["id"]}/refinements', json=body)
+    response = recover_legacy_refinement(workflow.client, workflow.service, f'/api/designs/{design["id"]}/refinements', json=body)
     job = ok(response)
     return workflow.work(job), workflow.get(design), body
 
@@ -311,7 +313,7 @@ def test_original_asset_content_and_preservation_reach_editor_without_planner_st
     assert newer['asset_refs'][1] != asset
     assert after['successful_refinement_count'] == 1
     assert workflow.download(current(before)) != workflow.download(current(after))
-    duplicate = ok(workflow.client.post(f'/api/designs/{before["id"]}/refinements', json=body))
+    duplicate = ok(recover_legacy_refinement(workflow.client, workflow.service, f'/api/designs/{before["id"]}/refinements', json=body))
     assert duplicate['id'] == job['id'] and duplicate['status'] == 'SUCCEEDED'
     assert len(seen) == 1
     assert workflow.get(after)['successful_refinement_count'] == 1

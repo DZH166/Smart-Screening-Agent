@@ -2,8 +2,13 @@
 
 All image providers in this suite are explicitly test providers. These tests are
 engineering evidence, not evidence for real AI quality or production output.
+
+Editing helpers restore previously accepted historical jobs with legacy_jobs;
+new public admission is tested through generate and the explicit410 contract.
 """
 from __future__ import annotations
+
+from legacy_jobs import recover_legacy_refinement, seed_accepted_refinement
 
 import hashlib
 import io
@@ -81,7 +86,8 @@ class Harness:
         return self.get(design)
 
     def refine(self, design, prompt="图案缩小一些，间距拉大一点", **extra):
-        return self.client.post(f"/api/designs/{design['id']}/refinements", json={
+        """Restore an accepted historical recipe; this never POSTs an edit."""
+        return recover_legacy_refinement(self.client, self.service, f"/api/designs/{design['id']}/refinements", json={
             "idempotency_key": key(), "base_version_id": design["current_version_id"],
             "prompt": prompt, **extra,
         })
@@ -191,8 +197,8 @@ def test_a04_a05_a07_a11_branch_rollback_monotonic_quota_and_pinned_downloads(en
     back_again = env.rollback(two)
     assert back_again["current_version_id"] == v0
     assert back_again["successful_refinement_count"] == 2
-    third = env.refine(back_again)
-    assert third.status_code == 409, third.text
+    third = env.client.post(f"/api/designs/{back_again['id']}/refinements", json={})
+    assert third.status_code == 410, third.text
     assert env.get(original)["successful_refinement_count"] == 2
     assert env.download(v0) == bytes0
     assert env.download(v1) == bytes1
@@ -202,50 +208,38 @@ def test_a04_a05_a07_a11_branch_rollback_monotonic_quota_and_pinned_downloads(en
 
 
 def test_a08_a13_a14_idempotency_and_busy_slot(env):
-    design = env.generate()
-    payload = {"idempotency_key": key(), "base_version_id": design["current_version_id"],
-               "prompt": "图案缩小一些"}
-    url = f"/api/designs/{design['id']}/refinements"
+    design = env.create()
+    payload = {"idempotency_key": key(), **env.selection()}
+    url = f"/api/designs/{design['id']}/generate"
     first = ok(env.client.post(url, json=payload))
     again = ok(env.client.post(url, json=payload))
-    assert first["id"] == again["id"]
-    mismatch = env.client.post(url, json={**payload, "prompt": "图案放大一些"})
+    assert first['id'] == again['id']
+    mismatch = env.client.post(url, json={**payload, 'asset_ids': payload['asset_ids'][:1]})
     assert mismatch.status_code == 409
-    competing = env.client.post(url, json={**payload, "idempotency_key": key()})
-    assert competing.status_code == 409
-    rollback = env.client.post(f"/api/designs/{design['id']}/rollback", json={
-        "expected_version_id": design["current_version_id"],
-    })
-    assert rollback.status_code == 409
-    assert env.work(first)["status"] == "SUCCEEDED"
+    assert env.client.post(url, json={**payload, 'idempotency_key': key()}).status_code == 409
+    assert env.client.post(f"/api/designs/{design['id']}/rollback", json={'expected_version_id': 'not-saved-yet'}).status_code == 409
+    assert env.work(first)['status'] == 'SUCCEEDED'
     final_repeat = ok(env.client.post(url, json=payload))
-    assert final_repeat["id"] == first["id"] and final_repeat["status"] == "SUCCEEDED"
-    for _ in range(3):
-        env.service.run_once()
+    assert final_repeat['id'] == first['id'] and final_repeat['status'] == 'SUCCEEDED'
+    for _ in range(3): env.service.run_once()
     saved = env.get(design)
-    assert len(saved["versions"]) == 2 and saved["successful_refinement_count"] == 1
+    assert len(saved['versions']) == 1 and saved['successful_refinement_count'] == 0
 
 
 def test_a13_actual_concurrent_distinct_requests_admit_one_job(env):
-    # Race for the final remaining refinement, not just an empty quota.
-    design = env.refined(env.generate())
-    url = f"/api/designs/{design['id']}/refinements"
-
-    def submit(_):
-        return env.client.post(url, json={
-            "idempotency_key": key(), "base_version_id": design["current_version_id"],
-            "prompt": "图案缩小一些",
-        })
-
+    # Admission remains a real public API test; retired editing is not seeded.
+    design = env.create()
+    url = f"/api/designs/{design['id']}/generate"
+    choice = env.selection()
     with ThreadPoolExecutor(max_workers=2) as pool:
-        responses = list(pool.map(submit, range(2)))
-    successes = [r for r in responses if r.is_success]
+        responses = list(pool.map(lambda _: env.client.post(url, json={'idempotency_key': key(), **choice}), range(2)))
+    successes = [response for response in responses if response.is_success]
     assert len(successes) == 1, [(r.status_code, r.text) for r in responses]
     assert [r.status_code for r in responses if not r.is_success] == [409]
-    assert env.work(successes[0].json())["status"] == "SUCCEEDED"
+    assert env.work(successes[0].json())['status'] == 'SUCCEEDED'
     saved = env.get(design)
-    assert len(saved["versions"]) == 3 and saved["successful_refinement_count"] == 2
-    assert env.refine(saved).status_code == 409
+    assert len(saved['versions']) == 1 and saved['successful_refinement_count'] == 0
+    assert env.client.post(url, json={'idempotency_key': key(), **choice}).status_code == 409
 
 
 def test_a06_clarification_keeps_original_and_does_not_charge(env):
@@ -265,7 +259,7 @@ def test_a09_a15_reconnect_uses_persisted_result_and_quota(env):
     design = env.generate()
     payload = {"idempotency_key": key(), "base_version_id": design["current_version_id"],
                "prompt": "图案缩小一些"}
-    job = ok(env.client.post(f"/api/designs/{design['id']}/refinements", json=payload))
+    job = ok(recover_legacy_refinement(env.client, env.service, f"/api/designs/{design['id']}/refinements", json=payload))
     assert env.get(design)["active_job_id"] == job["id"]
     # Worker finishes independently of any browser polling or response receipt.
     env.service.run_once()
@@ -273,7 +267,7 @@ def test_a09_a15_reconnect_uses_persisted_result_and_quota(env):
         env.login(client=reconnected)
         state = ok(reconnected.get(f"/api/designs/{design['id']}"))
         result = ok(reconnected.get(f"/api/jobs/{job['id']}"))
-        replay = ok(reconnected.post(f"/api/designs/{design['id']}/refinements", json=payload))
+        replay = ok(reconnected.get("/api/jobs/by-request/" + payload["idempotency_key"]))
         assert result["status"] == replay["status"] == "SUCCEEDED"
         assert result["id"] == replay["id"] == job["id"]
         assert state["current_version_id"] == result["result_version_id"]
@@ -441,7 +435,7 @@ def test_hiding_asset_removes_library_entry_but_preserves_saved_recipe(env):
 def test_stale_base_and_stale_rollback_are_rejected(env):
     old = env.generate()
     new = env.refined(old)
-    assert env.refine(old).status_code == 409
+    assert env.client.post(f"/api/designs/{old['id']}/refinements", json={}).status_code == 410
     stale = env.client.post(f"/api/designs/{old['id']}/rollback", json={
         "expected_version_id": old["current_version_id"],
     })
@@ -789,3 +783,24 @@ def test_editing_demo_template_preserves_marker_and_old_thumbnail(env):
     assert env.client.get(old['thumbnail_url']).content == first
     response = env.client.get(new['thumbnail_url'])
     assert response.status_code == 200 and response.content != first
+
+
+def test_previously_accepted_job_rechecks_historical_quota_at_commit(env):
+    design = env.generate()
+    owner = env.login()['id']
+    original = env.download(design['current_version_id'])
+    body = dict(idempotency_key=key(), base_version_id=design['current_version_id'],
+        prompt='应用所选配置', selection={**env.selection(), 'template_id': 'single'})
+    queued = seed_accepted_refinement(env.service, owner, design['id'], body)
+    # Restore a stale queued record whose durable counter is already exhausted.
+    # No fixture admission guard may stand in for the production commit guard.
+    with env.service.db.transaction() as db:
+        db.execute('UPDATE designs SET successful_refinement_count=2 WHERE id=?', (design['id'],))
+    failed = env.work(queued)
+    assert failed['status'] == 'FAILED' and '次数已用完' in failed['error']
+    saved = env.get(design)
+    assert saved['successful_refinement_count'] == 2 and len(saved['versions']) == 1
+    assert saved['active_job_id'] is None and env.download(design['current_version_id']) == original
+    with env.service.db.connect() as db:
+        assert db.execute('SELECT COUNT(*) FROM quota_events').fetchone()[0] == 0
+        assert db.execute('SELECT COUNT(*) FROM provider_calls').fetchone()[0] == 0

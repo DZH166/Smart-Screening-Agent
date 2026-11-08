@@ -1,4 +1,6 @@
 """Deterministic quality workflow checks; no business images or model calls."""
+
+from legacy_jobs import seed_accepted_refinement
 import json
 import sqlite3
 from uuid import uuid4
@@ -39,7 +41,7 @@ def refine(env, design, *, choice=None, prompt='合成修改'):
     body = dict(idempotency_key=str(uuid4()), base_version_id=design['current_version_id'], prompt=prompt)
     if choice is not None:
         body['selection'] = choice
-    submitted = service.submit(owner, 'refine', body, design['id'])
+    submitted = seed_accepted_refinement(service, owner, design['id'], body)
     assert service.submit(owner, 'refine', body, design['id'])['id'] == submitted['id']
     assert service.run_once()
     return service.job(owner, submitted['id']), service.design(owner, design['id'])
@@ -271,8 +273,8 @@ def test_recovered_checkpoint_rechecks_pixel_noop_without_repeating_the_planner(
         raise sqlite3.OperationalError('synthetic temporary commit failure')
 
     monkeypatch.setattr(service, 'complete_job', unavailable_commit)
-    submitted = service.submit(owner, 'refine', dict(idempotency_key=str(uuid4()),
-                               base_version_id=initial['current_version_id'], prompt='合成量化'), initial['id'])
+    submitted = seed_accepted_refinement(service, owner, initial['id'], dict(idempotency_key=str(uuid4()),
+                               base_version_id=initial['current_version_id'], prompt='合成量化'))
     assert service.run_once()
     assert service.job(owner, submitted['id'])['status'] == 'RECONCILING'
     monkeypatch.setattr(service, 'complete_job', original_complete)

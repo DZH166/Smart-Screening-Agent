@@ -2,6 +2,8 @@
 
 All images and provider responses here are explicitly synthetic test evidence.
 """
+
+from legacy_jobs import seed_accepted_refinement
 import io
 import time
 import threading
@@ -110,8 +112,8 @@ def test_successful_edit_refreshes_retention_without_resetting_quota(service):
     design = generate(service, owner)
     expire(service, owner)
     changed = {**selection(service, owner), 'template_id': 'single'}
-    job = service.submit(owner, 'refine', dict(idempotency_key=str(uuid4()), base_version_id=design['current_version_id'],
-        prompt='应用所选配置', selection=changed), design['id'])
+    job = seed_accepted_refinement(service, owner, design['id'], dict(idempotency_key=str(uuid4()), base_version_id=design['current_version_id'],
+        prompt='应用所选配置', selection=changed))
     service.run_once()
     assert service.job(owner, job['id'])['status'] == 'SUCCEEDED'
     assert service.cleanup_expired()['designs'] == 0
@@ -130,8 +132,8 @@ def test_successful_rollback_renews_retention_without_refunding_quota(service):
     design = generate(service, owner)
     v0 = design['current_version_id']
     changed = {**selection(service, owner), 'template_id': 'single'}
-    job = service.submit(owner, 'refine', dict(idempotency_key=str(uuid4()), base_version_id=v0,
-        prompt='应用所选配置', selection=changed), design['id'])
+    job = seed_accepted_refinement(service, owner, design['id'], dict(idempotency_key=str(uuid4()), base_version_id=v0,
+        prompt='应用所选配置', selection=changed))
     service.run_once()
     assert service.job(owner, job['id'])['status'] == 'SUCCEEDED'
     v1 = service.design(owner, design['id'])['current_version_id']
@@ -307,7 +309,7 @@ def test_cleanup_refuses_unexpected_private_asset_path(service, tmp_path):
 def test_cleanup_preserves_generated_asset_provenance_used_by_newer_work(service):
     owner = user(service)['id']
     old = generate(service, owner)
-    job = service.submit(owner, 'refine', dict(idempotency_key=str(uuid4()), base_version_id=old['current_version_id'], prompt='给第一个图案添加笑脸'), old['id'])
+    job = seed_accepted_refinement(service, owner, old['id'], dict(idempotency_key=str(uuid4()), base_version_id=old['current_version_id'], prompt='给第一个图案添加笑脸'))
     service.run_once()
     assert service.job(owner, job['id'])['status'] == 'SUCCEEDED'
     updated = service.design(owner, old['id'])
@@ -481,7 +483,7 @@ def test_insufficient_space_before_model_call_preserves_version_and_quota(servic
             raise OSError(28, 'synthetic insufficient model space')
 
     service.settings.space_reserver = metadata_only
-    job = service.submit(owner, 'refine', dict(idempotency_key=str(uuid4()), base_version_id=design['current_version_id'], prompt='图案缩小一些'), design['id'])
+    job = seed_accepted_refinement(service, owner, design['id'], dict(idempotency_key=str(uuid4()), base_version_id=design['current_version_id'], prompt='图案缩小一些'))
     assert service.run_once()
     result = service.job(owner, job['id'])
     assert result['status'] == 'FAILED' and '空间' in result['error']
@@ -513,7 +515,7 @@ def test_model_result_save_rechecks_space_and_keeps_previous_version(service, mo
 
     service.settings.space_reserver = reserve
     monkeypatch.setattr(TestProvider, 'edit_image', result_arrives)
-    job = service.submit(owner, 'refine', dict(idempotency_key=str(uuid4()), base_version_id=design['current_version_id'], prompt='背景添加波点'), design['id'])
+    job = seed_accepted_refinement(service, owner, design['id'], dict(idempotency_key=str(uuid4()), base_version_id=design['current_version_id'], prompt='背景添加波点'))
     assert service.run_once()
     result = service.job(owner, job['id'])
     assert result['status'] == 'FAILED' and '空间' in result['error']

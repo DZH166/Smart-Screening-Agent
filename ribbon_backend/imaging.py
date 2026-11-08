@@ -16,6 +16,8 @@ from functools import wraps
 from typing import Callable
 
 from PIL import Image, ImageColor, ImageDraw, ImageOps
+from hsd_tool.image_budget import IMAGE_BUDGET
+from hsd_tool.image_headers import image_header
 
 MODES = ("grid", "stagger", "scatter", "single", "ends", "panels", "bordered", "scene", "fullwidth",
          "alternating", "ends_open", "split", "stacked", "opposed")
@@ -66,8 +68,9 @@ def memory_bounded_operation(function):
     """
     @wraps(function)
     def wrapped(*args, **kwargs):
-        with _IMAGE_MEMORY_LOCK:
-            return function(*args, **kwargs)
+        with IMAGE_BUDGET.reserve():
+            with _IMAGE_MEMORY_LOCK:
+                return function(*args, **kwargs)
     return wrapped
 
 
@@ -86,7 +89,8 @@ def _save_png(image: Image.Image, path: Path, dpi: int | None = 144, *, compress
 
 def read_image(path: Path) -> Image.Image:
     """Decode fully and reject animated/oversized inputs before processing."""
-    with Image.open(path) as source:
+    header = image_header(path, max_pixels=MAX_PIXELS, budget=IMAGE_BUDGET)
+    with IMAGE_BUDGET.reserve(header.workspace()), Image.open(path, formats=["PNG", "JPEG", "WEBP"]) as source:
         if source.width * source.height > MAX_PIXELS or source.width < 1 or source.height < 1:
             raise ValueError("图像像素数量超出允许范围")
         if getattr(source, "n_frames", 1) != 1:

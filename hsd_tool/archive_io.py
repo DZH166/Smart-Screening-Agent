@@ -14,12 +14,12 @@ import zlib
 from .cancellation import check
 
 CHUNK_BYTES = 1024 * 1024
+# Limit the decoder's dictionary, not the upload or expanded file length.
+# The default ZIP-LZMA dictionary is 8 MiB; unusually large dictionaries can
+# allocate gigabytes before max_length has a chance to bound any output.
+MAX_LZMA_DICTIONARY_BYTES = 64 * 1024 * 1024
 
-_EOCD = b"PK\x05\x06"
-_ZIP64_EOCD = b"PK\x06\x06"
-_ZIP64_LOCATOR = b"PK\x06\x07"
 _EOCD_BYTES = 22
-_TAIL_BYTES = 66_000
 
 
 def check_directory_size(path, *, max_entries, too_many="压缩包内文件过多，请分批上传。",
@@ -37,40 +37,83 @@ def check_directory_size(path, *, max_entries, too_many="压缩包内文件过�
         size = stream.tell()
         if size < _EOCD_BYTES:
             raise zipfile.BadZipFile(invalid)
-        tail_start = max(0, size - _TAIL_BYTES)
-        stream.seek(tail_start)
-        tail = stream.read(size - tail_start)
-        entries, directory_bytes = _directory_facts(stream, tail, tail_start, invalid)
-    if entries > max_entries:
-        raise ValueError(too_many)
-    if directory_bytes > max_entries * 2048:
-        raise zipfile.BadZipFile(invalid)
+        # Use the same bounded end-record parser as ZipFile, including ZIP64
+        # extensible records and self-extracting prefixes. It creates no
+        # ZipInfo objects. Never trust the declared count as the actual count.
+        try:
+            end = zipfile._EndRecData(stream)
+        except (OSError, OverflowError, struct.error) as exc:
+            raise zipfile.BadZipFile(invalid) from exc
+        if not end:
+            raise zipfile.BadZipFile(invalid)
+        entries = end[zipfile._ECD_ENTRIES_TOTAL]
+        directory_bytes = end[zipfile._ECD_SIZE]
+        directory_end = _central_directory_end(stream, end, invalid)
+        if (end[zipfile._ECD_DISK_NUMBER] or end[zipfile._ECD_DISK_START]
+                or entries != end[zipfile._ECD_ENTRIES_THIS_DISK]):
+            raise ValueError("暂不支持分卷压缩包，请重新打包后上传。")
+        if entries > max_entries:
+            raise ValueError(too_many)
+        if directory_bytes > max_entries * 2048 or directory_bytes > directory_end:
+            raise zipfile.BadZipFile(invalid)
+        position, actual = directory_end - directory_bytes, 0
+        stream.seek(position)
+        while position < directory_end:
+            check()
+            header = stream.read(zipfile.sizeCentralDir)
+            if len(header) != zipfile.sizeCentralDir or header[:4] != zipfile.stringCentralDir:
+                raise zipfile.BadZipFile(invalid)
+            filename, extra, comment = struct.unpack_from('<HHH', header, 28)
+            length = zipfile.sizeCentralDir + filename + extra + comment
+            if position + length > directory_end:
+                raise zipfile.BadZipFile(invalid)
+            actual += 1
+            if actual > max_entries:
+                raise ValueError(too_many)
+            position += length
+            stream.seek(position)
+        if actual != entries:
+            raise zipfile.BadZipFile(invalid)
     return entries, directory_bytes
 
 
-def _directory_facts(stream, tail, tail_start, invalid):
-    index = tail.rfind(_EOCD)
-    if index < 0 or index + _EOCD_BYTES > len(tail):
-        raise zipfile.BadZipFile(invalid)
-    (disk, directory_disk, entries_disk, entries,
-     directory_bytes, directory_offset, comment) = struct.unpack("<HHHHIIH", tail[index + 4:index + 22])
-    if index + _EOCD_BYTES + comment > len(tail):
-        raise zipfile.BadZipFile(invalid)
-    if disk or directory_disk or entries != entries_disk:
-        raise ValueError("暂不支持分卷压缩包，请重新打包后上传。")
-    if 0xFFFF not in (entries, entries_disk) and directory_bytes != 0xFFFFFFFF:
-        return entries, directory_bytes
-    locator = tail.rfind(_ZIP64_LOCATOR, 0, index)
-    if locator < 0 or locator + 20 > len(tail):
-        raise zipfile.BadZipFile(invalid)
-    (offset,) = struct.unpack("<Q", tail[locator + 8:locator + 16])
-    stream.seek(offset)
-    record = stream.read(56)
-    if len(record) != 56 or record[:4] != _ZIP64_EOCD:
-        raise zipfile.BadZipFile(invalid)
-    entries, directory_bytes = struct.unpack("<QQ", record[32:48])
-    return entries, directory_bytes
+def _central_directory_end(stream, end, invalid):
+    """Observe physical records, not a version-specific private tuple meaning.
 
+    Older supported Python ZIP64 parsers leave LOCATION at the normal EOCD;
+    newer patched parsers normalize it to the ZIP64 record. Verify bytes and
+    lengths so both work, including the same SFX fallback as ZipFile itself.
+    """
+    location = end[zipfile._ECD_LOCATION]
+    stream.seek(location)
+    signature = stream.read(4)
+    if end[zipfile._ECD_SIGNATURE] != zipfile.stringEndArchive64:
+        if signature != zipfile.stringEndArchive:
+            raise zipfile.BadZipFile(invalid)
+        return location
+    if signature == zipfile.stringEndArchive64:
+        return location
+    locator_position = location - zipfile.sizeEndCentDir64Locator
+    if signature != zipfile.stringEndArchive or locator_position < 0:
+        raise zipfile.BadZipFile(invalid)
+    stream.seek(locator_position)
+    locator = stream.read(zipfile.sizeEndCentDir64Locator)
+    if len(locator) != zipfile.sizeEndCentDir64Locator:
+        raise zipfile.BadZipFile(invalid)
+    marker, disk, relative, disks = struct.unpack(zipfile.structEndArchive64Locator, locator)
+    if marker != zipfile.stringEndArchive64Locator or disk or disks != 1:
+        raise zipfile.BadZipFile(invalid)
+    for position in dict.fromkeys((relative, locator_position - zipfile.sizeEndCentDir64)):
+        if not 0 <= position <= locator_position - zipfile.sizeEndCentDir64:
+            continue
+        stream.seek(position)
+        record = stream.read(zipfile.sizeEndCentDir64)
+        if record[:4] != zipfile.stringEndArchive64 or len(record) != zipfile.sizeEndCentDir64:
+            continue
+        length = struct.unpack_from('<Q', record, 4)[0] + 12
+        if position + length == locator_position:
+            return position
+    raise zipfile.BadZipFile(invalid)
 
 
 class _MeasuredInflater:
@@ -108,7 +151,10 @@ def _bounded_native_blocks(stream, info, chunk_size):
             if not stream._compress_left:
                 raise zipfile.BadZipFile('压缩包 LZMA 参数不完整。')
             pending += stream._read2(chunk_size)
-        filters = [lzma._decode_filter_properties(lzma.FILTER_LZMA1, pending[4:4 + property_size])]
+        properties = lzma._decode_filter_properties(lzma.FILTER_LZMA1, pending[4:4 + property_size])
+        if properties.get('dict_size', 0) > MAX_LZMA_DICTIONARY_BYTES:
+            raise ValueError('压缩包的 LZMA 字典占用内存过高，请改用标准 ZIP 压缩后上传。')
+        filters = [properties]
         inflater = lzma.LZMADecompressor(lzma.FORMAT_RAW, filters=filters)
         pending = pending[4 + property_size:]
     count, crc = 0, 0

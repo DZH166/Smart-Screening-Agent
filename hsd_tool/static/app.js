@@ -7,7 +7,7 @@
   const uploadLimits = {workbook:null,source:null,total:null};
   const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]));
   const state = {
-    job: null, sourceType: 'zip', filter: 'awaiting', search: '',
+    job: null, taskEpoch:0, sourceType: 'zip', filter: 'awaiting', search: '',
     selectedRowId: null, selectedFileId: null, manualOpen: false, manualQuery: '',
     resolving: false, starting: false, uploading: false, picking: false, pollTimer: null, pollFailures: 0,
     showDone: true, stopped: false, lastJobError: null,
@@ -43,6 +43,8 @@
   const numberFor = (row) => String(row.number || row.planned_number || '');
 
   async function api(path, {method='GET',body,timeout=30000} = {}) {
+    const task=state.job,revision=task?.revision,status=task?.status,epoch=state.taskEpoch;
+    const current=()=>method!=='GET'||(epoch===state.taskEpoch&&state.job===task&&task?.revision===revision&&task?.status===status);
     const controller = new AbortController();
     const timer = window.setTimeout(() => controller.abort(), timeout);
     try {
@@ -52,14 +54,16 @@
       if (!response.ok) {
         const error = new Error(data.error || `操作未完成（${response.status}），请重试。`);
         error.status = response.status;
+        if(!current())error.obsolete=true;
         if (loginRequired(error)) requireLogin(error);
         throw error;
       }
       return data;
     } catch (error) {
-      if (error.name === 'AbortError') throw new Error('等待超时，请稍后重试。');
-      if (error instanceof TypeError) throw new Error('暂时无法连接服务，请检查网络后重试。');
-      throw error;
+      const failure=error.name==='AbortError'?new Error('等待超时，请稍后重试。'):
+        error instanceof TypeError?new Error('暂时无法连接服务，请检查网络后重试。'):error;
+      if(!current())failure.obsolete=true;
+      throw failure;
     } finally { window.clearTimeout(timer); }
   }
 
@@ -67,8 +71,9 @@
   function notice(message) { $('notice-text').textContent = message; $('notice').classList.remove('hidden');$('notice-action')?.classList.add('hidden');noticeAction=null;if(state.authExpired){noticeAction=()=>window.location.assign('/');$('notice-action').textContent='重新登录';$('notice-action').classList.remove('hidden');} }
   function actionableNotice(message,label,action) {notice(message);noticeAction=action;$('notice-action').textContent=label;$('notice-action').classList.remove('hidden');}
   function clearNotice() { $('notice').classList.add('hidden'); }
-  function loginRequired(error) {return error.status===401||(error.status===403&&/会话.*失效/.test(error.message));}
+  function loginRequired(error) {return !error.obsolete&&(error.status===401||(error.status===403&&/会话.*失效/.test(error.message)));}
   function requireLogin(error) {
+    if(error?.obsolete)return;
     state.authExpired=true;clearTimeout(state.pollTimer);clearTimeout(state.uploadRecoveryTimer);
     setFormBusy(false);['summary-export-button','open-output-button','stop-job-button','confirm-row-button','skip-row-button','undo-button','summary-undo-button','next-task-button','cancelled-next-button'].forEach((id)=>{if($(id))$(id).disabled=true;});
     actionableNotice(error?.message||'登录已失效。请重新登录后继续本批任务。','重新登录',()=>window.location.assign('/'));
@@ -198,7 +203,7 @@
     try {
       const data=await api('/api/pick',{method:'POST',body:{kind:button.dataset.pick},timeout:600000});
       if (data.path) $(button.dataset.target).value=data.path;
-    } catch(error) {notice(error.message);} finally {state.picking=false;button.textContent=label;setFormBusy(false);}
+    } catch(error) {if(error.obsolete)return;notice(error.message);} finally {state.picking=false;button.textContent=label;setFormBusy(false);}
   }
   async function startJob(event) {
     event.preventDefault();
@@ -215,17 +220,18 @@
     }
     const start=Number($('start-number').value);
     if (!Number.isInteger(start)||start<1||start>9999) {fieldError('start-number','请输入 1 到 9999 的整数。');$('start-number').focus();return;}
-    if(isLan()&&!state.uploadRequest){try{rememberUpload({id:newUploadId(),stopRequested:false});}catch(error){notice(error.message);return;}}
+    if(isLan()&&!state.uploadRequest){try{rememberUpload({id:newUploadId(),stopRequested:false});}catch(error){if(error.obsolete)return;notice(error.message);return;}}
     state.starting=true;state.uploading=isLan();setFormBusy(true);
     try {
       const data=isLan()?await uploadFiles(workbook,source,start):await api('/api/jobs',{method:'POST',body:{workbook_path:$('workbook-path').value.trim(),source_path:$('source-path').value.trim(),output_root:$('output-path').value.trim(),start_number:start}});
       await activateUploadedJob(data.id,state.uploadRequest?.stopRequested===true);
-    } catch(error) {
+    } catch(error) {if(error.obsolete)return;
       if(isLan()&&state.uploadRequest){state.uploadUncertain=true;state.uploading=false;state.uploadXhr=null;if(loginRequired(error)){requireLogin(error);}else await recoverUpload(error.message);}
       else notice(error.message);
     } finally {state.starting=false;state.uploading=false;state.uploadXhr=null;if(!state.uploadUncertain)$('upload-progress').classList.add('hidden');setFormBusy(false);$('shutdown-button').disabled=isBusy();}
   }
   async function activateUploadedJob(id,stopRequested=false) {
+    state.taskEpoch++;
     state.job={id,status:isLan()?'queued':'importing',progress:{message:'文件已接收，正在读取本批状态',current:0,total:0},rows:[],files:[]};
     state.filter='awaiting';state.search='';state.selectedRowId=null;state.selectedFileId=null;state.showDone=true;state.pollFailures=0;state.lastJobError=null;
     state.forceReview=false;state.showSummary=false;state.candidatesOpen=false;state.history=[];
@@ -266,7 +272,7 @@
         showUploadRecovery(state.uploadRetryAllowed?'当前未发现已受理任务，可重试本次上传，或停止后重新选文件。':'当前未发现已受理任务。请先停止本次上传，再重新选择文件。');
         if(originalError)notice(originalError);
       }
-    } catch(error) {
+    } catch(error) {if(error.obsolete)return;
       state.uploadUncertain=true;
       if(loginRequired(error))requireLogin(error);
       else {showUploadRecovery('网络尚未恢复，无法确认是否已受理。请查询状态，避免重复上传。');actionableNotice(error.message,'查询上传状态',()=>recoverUpload());}
@@ -283,7 +289,7 @@
     try {
       await api(`/api/jobs/upload-status/${encodeURIComponent(requestId)}/cancel`,{method:'POST',body:{}});
       if(state.uploadRequest?.id===requestId)await recoverUpload();
-    } catch(error) {
+    } catch(error) {if(error.obsolete)return;
       if(loginRequired(error))requireLogin(error);
       else actionableNotice('停止结果尚未确认。'+error.message,'重试停止',()=>retryUploadStop());
     }
@@ -292,7 +298,7 @@
     if(!state.uploadRequest||state.authExpired)return;
     const requestId=state.uploadRequest.id;
     try {await api(`/api/jobs/upload-status/${encodeURIComponent(requestId)}/cancel`,{method:'POST',body:{}});if(state.uploadRequest?.id===requestId)await recoverUpload();}
-    catch(error){if(loginRequired(error))requireLogin(error);else actionableNotice('停止结果尚未确认。'+error.message,'重试停止',()=>retryUploadStop());}
+    catch(error){if(error.obsolete)return;if(loginRequired(error))requireLogin(error);else actionableNotice('停止结果尚未确认。'+error.message,'重试停止',()=>retryUploadStop());}
   }
   async function stopJob() {
     if(!state.job||state.cancelling||state.job.status==='cancelled'||state.authExpired)return;
@@ -304,7 +310,7 @@
       if(!busyStatuses.includes(state.job.status)){notice('本批处理已经结束，无需停止。可查看当前结果或处理下一批。');return;}
       const job=await api(`/api/jobs/${encodeURIComponent(id)}/cancel`,{method:'POST',body:{expected_revision:state.job.revision}});if(state.job?.id===id)acceptJob(job);
     }
-    catch(error) {
+    catch(error) {if(error.obsolete)return;
       if(loginRequired(error))requireLogin(error);
       else {
         let reconciled=false;try{const job=await api(`/api/jobs/${encodeURIComponent(id)}`);if(state.job?.id===id){acceptJob(job);reconciled=true;}}catch(_){}
@@ -325,7 +331,7 @@
       if (state.pollFailures) clearNotice();
       state.pollFailures=0;acceptJob(job);renderJob();
       if (isBusy()) schedulePoll();
-    } catch(error) {
+    } catch(error) {if(error.obsolete)return;
       if (state.stopped || state.job?.id !== id) return;
       state.pollFailures++;
       notice(`${error.message} ${error.status===404?'请重新导入文件。':'工具会自动重试。'}`);
@@ -442,7 +448,7 @@
     if(state.authExpired||state.resolving||isBusy()||state.job?.status!=='ready'||state.job.ai_review?.can_retry!==true)return;
     clearNotice();state.job.status='ai_review';state.job.progress={message:'正在准备符合条件的图片复核',current:0,total:0};state.forceReview=false;state.showSummary=false;renderJob();
     try{await api(`/api/jobs/${encodeURIComponent(state.job.id)}/ai-review`,{method:'POST',body:{}});schedulePoll(100);}
-    catch(error){state.job.status='ready';try{acceptJob(await api(`/api/jobs/${encodeURIComponent(state.job.id)}`));}catch(_){}notice(error.message);renderJob();if(isBusy())schedulePoll();}
+    catch(error){if(error.obsolete)return;state.job.status='ready';try{acceptJob(await api(`/api/jobs/${encodeURIComponent(state.job.id)}`));}catch(_){}notice(error.message);renderJob();if(isBusy())schedulePoll();}
   }
   function renderStats() {
     const c=counts();
@@ -700,7 +706,7 @@
       state.forceReview=false;state.showSummary=counts().review===0;
       toast(fileId?'已确认对应文件，可随时撤销':'已跳过，该行保持原状');
       preloadNeighbours(rowById(state.selectedRowId));
-    } catch(error){updated=await refreshConflict(error);notice(error.message);} finally {state.resolving=false;if(updated){renderJob();if(!$('review-view').classList.contains('hidden'))$('confirm-row-button')?.focus({preventScroll:true});}else setReviewBusy();}
+    } catch(error){if(error.obsolete)return;updated=await refreshConflict(error);notice(error.message);} finally {state.resolving=false;if(updated){renderJob();if(!$('review-view').classList.contains('hidden'))$('confirm-row-button')?.focus({preventScroll:true});}else setReviewBusy();}
   }
   function bulkCandidates() {
     const proposed=filteredRows().filter(row=>row.status==='review'&&row.bulk_confirm_eligible===true).map(row=>{
@@ -739,7 +745,7 @@
       acceptJob(job);updated=true;state.history.push(items[0].row_id);state.bulk=null;$('batch-review-dialog').close();
       selectRow(job.rows.find(awaiting)?.id||items[0].row_id,null,false);state.forceReview=false;state.showSummary=counts().review===0;
       toast(`已人工确认 ${items.length} 项，可撤销本次批量操作`);
-    }catch(error){updated=await refreshConflict(error);$('batch-review-error').textContent=error.status===409?'本批已被其他页面修改，已刷新。请关闭后重新选择。':error.message;$('batch-review-error').classList.remove('hidden');}
+    }catch(error){if(error.obsolete)return;updated=await refreshConflict(error);$('batch-review-error').textContent=error.status===409?'本批已被其他页面修改，已刷新。请关闭后重新选择。':error.message;$('batch-review-error').classList.remove('hidden');}
     finally{state.resolving=false;if(updated)renderJob();else setReviewBusy();updateBulkControls();}
   }
   async function undoLast() {
@@ -754,7 +760,7 @@
       const restored=job.last_undone_row_id||rowId;
       selectRow(restored,null,false);state.filter=awaiting(rowById(restored)||{})?'awaiting':'all';
       toast('已撤销上一步操作');
-    }catch(error){updated=await refreshConflict(error);notice(error.message);}finally{state.resolving=false;if(updated)renderJob();else setReviewBusy();}
+    }catch(error){if(error.obsolete)return;updated=await refreshConflict(error);notice(error.message);}finally{state.resolving=false;if(updated)renderJob();else setReviewBusy();}
   }
   async function refreshConflict(error) {
     if (!state.authExpired && state.job && (error.status===409||!error.status||error.status>=500)) {
@@ -777,7 +783,7 @@
     const revision=state.job.revision;
     clearNotice();state.job.status='exporting';state.job.progress={message:'正在生成编号表格与 AI 文件',current:0,total:0};state.showDone=true;renderJob();
     try{await api(`/api/jobs/${encodeURIComponent(state.job.id)}/export`,{method:'POST',body:revision===undefined?{}:{expected_revision:revision}});schedulePoll(100);}
-    catch(error){state.job.status='ready';try{acceptJob(await api(`/api/jobs/${encodeURIComponent(state.job.id)}`));}catch(_){}state.showSummary=true;notice(error.message);renderJob();if(isBusy())schedulePoll();}
+    catch(error){if(error.obsolete)return;state.job.status='ready';try{acceptJob(await api(`/api/jobs/${encodeURIComponent(state.job.id)}`));}catch(_){}state.showSummary=true;notice(error.message);renderJob();if(isBusy())schedulePoll();}
   }
   function renderDone() {
     showView('done-view',3);
@@ -819,16 +825,16 @@
         frame.src=`/api/jobs/${encodeURIComponent(id)}/download?frame=1`;
         toast('已发起下载，请在浏览器下载列表中查看。');
         clearTimeout(downloadFeedbackTimer);downloadFeedbackTimer=setTimeout(()=>{state.downloading=false;if(state.job?.id===id){$('open-output-button').disabled=false;$('open-output-button').textContent='再次下载结果 ZIP ↓';}},2000);
-      } catch(error) {if(state.job?.id!==id)return;state.downloading=false;if(loginRequired(error))requireLogin(error);else notice(error.message);$('open-output-button').disabled=state.authExpired;$('open-output-button').textContent='重试下载结果 ZIP ↓';}
+      } catch(error) {if(error.obsolete){if(state.job?.id===id){state.downloading=false;if(state.job.status==='done')$('open-output-button').disabled=state.authExpired||!state.job.download_ready;}return;}if(state.job?.id!==id)return;state.downloading=false;if(loginRequired(error))requireLogin(error);else notice(error.message);$('open-output-button').disabled=state.authExpired;$('open-output-button').textContent='重试下载结果 ZIP ↓';}
       return;
     }
     $('open-output-button').disabled=true;
-    try {await api(`/api/jobs/${encodeURIComponent(state.job.id)}/open-output`,{method:'POST',body:{}});toast('已打开结果文件夹');} catch(error){notice(error.message);} finally {$('open-output-button').disabled=false;}
+    try {await api(`/api/jobs/${encodeURIComponent(state.job.id)}/open-output`,{method:'POST',body:{}});toast('已打开结果文件夹');} catch(error){if(error.obsolete)return;notice(error.message);} finally {$('open-output-button').disabled=false;}
   }
   async function resetTask() {
     if(state.authExpired||state.resolving||isBusy()||state.uploadUncertain)return;
     if(state.job?.status==='ready'&&!await askConfirmation({title:'重新导入一批文件？',description:'当前匹配结果尚未导出。重新导入后需要重新检查匹配。原始文件保持不变。',confirm:'重新导入',cancel:'继续检查'}))return;
-    clearTimeout(state.pollTimer);clearTimeout(rowSearchTimer);clearTimeout(manualSearchTimer);state.job=null;indexedJob=null;indexedJobId=null;countedJob=null;preloaded.clear();imageAspects.clear();rowViewState.clear();state.selectedRowId=null;state.selectedFileId=null;state.showDone=true;state.lastJobError=null;
+    state.taskEpoch++;clearTimeout(state.pollTimer);clearTimeout(rowSearchTimer);clearTimeout(manualSearchTimer);state.job=null;indexedJob=null;indexedJobId=null;countedJob=null;preloaded.clear();imageAspects.clear();rowViewState.clear();state.selectedRowId=null;state.selectedFileId=null;state.showDone=true;state.lastJobError=null;
     state.forceReview=false;state.showSummary=false;state.candidatesOpen=false;state.history=[];state.filter='awaiting';state.search='';$('row-search').value='';
     state.downloading=false;clearTimeout(downloadFeedbackTimer);rememberUpload(null);rememberJob(null);clearNotice();showView('import-view',1);window.scrollTo({top:0,behavior:'smooth'});
     try{sessionStorage.setItem('hsd-new-batch','true');}catch(_){}
@@ -845,7 +851,7 @@
       document.querySelector('.processing-symbol').innerHTML='<span style="color:var(--teal);font-size:28px">✓</span>';
       $('processing-eyebrow').textContent='本次使用已结束';$('processing-title').textContent='工具已退出';$('processing-message').textContent='可以关闭此页面。下次使用时，请重新打开图号助手。';
       $('processing-view').querySelector('.progress-track').classList.add('hidden');document.querySelector('.progress-caption').classList.add('hidden');document.querySelector('.processing-footnote').classList.add('hidden');
-    } catch(error){notice(error.message);$('shutdown-button').disabled=false;}
+    } catch(error){if(error.obsolete)return;notice(error.message);$('shutdown-button').disabled=false;}
   }
   async function init() {
     configureAccess(window.HSD_ACCESS);
@@ -888,7 +894,7 @@
         // Retry availability is computed by the server from current settings.
         // A settings refresh alone must not rebuild the open image comparison.
         if(job.revision===revision)renderAiOverview();else renderJob();
-      }catch(error){notice(`未能更新本批复核状态：${error.message} 可在主机管理中重新读取设置。`);}
+      }catch(error){if(error.obsolete)return;notice(`未能更新本批复核状态：${error.message} 可在主机管理中重新读取设置。`);}
     });
     document.addEventListener('error',(event)=>{if(event.target instanceof HTMLImageElement)event.target.classList.add('image-broken');},true);
     let config=null;
@@ -899,14 +905,14 @@
       $('start-number').value=config.last_start||1;$('app-version').textContent=config.version||'1.0.0';
       if (config.last_source) setSourceType(/\.zip$/i.test(config.last_source)?'zip':'folder');
       updateNumberExample();
-    } catch(error){if(loginRequired(error))requireLogin(error);else{state.configUnavailable=true;actionableNotice(error.message,'重新连接',()=>window.location.reload());}}
+    } catch(error){if(error.obsolete)return;if(loginRequired(error))requireLogin(error);else{state.configUnavailable=true;actionableNotice(error.message,'重新连接',()=>window.location.reload());}}
     if(state.authExpired){setFormBusy(false);return;}
     if(isLan()&&!state.authExpired){const pending=storedUpload();if(pending){rememberUpload(pending);state.uploadUncertain=true;await recoverUpload();if(state.uploadUncertain||state.job){setFormBusy(false);return;}}}
     let newBatch=false;try{newBatch=sessionStorage.getItem('hsd-new-batch')==='true';}catch(_){}
     const jobId=isLan()?(storedJob()||(newBatch?null:config?.active_job_id)||null):storedJob();
     if(jobId) {
       try {const job=await api(`/api/jobs/${encodeURIComponent(jobId)}`);acceptJob(job);renderJob();if(isBusy())schedulePoll();}
-      catch(error){if(loginRequired(error))requireLogin(error);else{rememberJob(null);if(error.status!==404)notice(error.message);}}
+      catch(error){if(error.obsolete)return;if(loginRequired(error))requireLogin(error);else{rememberJob(null);if(error.status!==404)notice(error.message);}}
     }
     setFormBusy(false);
   }

@@ -22,7 +22,11 @@ from xml.sax.saxutils import escape
 from zipfile import BadZipFile, ZipFile, ZIP64_LIMIT
 
 from PIL import Image
-from .archive_io import member_blocks
+from .archive_io import member_blocks, check_directory_size
+from .cancellation import check
+from .xml_stream import parse_blocks
+from .image_budget import IMAGE_BUDGET
+from .image_headers import image_header
 
 MAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -33,6 +37,10 @@ MAX_IMAGE_BYTES = None
 MAX_IMAGE_PIXELS = 40_000_000
 IO_CHUNK_BYTES = 1024 * 1024
 SPOOL_MEMORY_BYTES = 8 * 1024 * 1024
+MAX_CAPTURED_CELLS = 500_000
+MAX_CAPTURED_TEXT_BYTES = 32 * 1024 * 1024
+MAX_PICTURE_REFERENCES = 10_000
+WORKBOOK_IMAGE_FORMATS = ("PNG", "JPEG", "WEBP", "BMP", "GIF", "TIFF")
 DISPIMG = re.compile(r'(?:_xlfn\.)?DISPIMG\s*\(\s*"([^"\r\n]+)"', re.I)
 CELL_REF = re.compile(r"^([A-Z]+)([1-9][0-9]*)$")
 XML_NAME = rb"(?:[A-Za-z_][\w.-]*:)?"
@@ -76,18 +84,7 @@ def _validate_archive(archive: ZipFile) -> None:
 
 
 def _xml(archive: ZipFile, part: str) -> ET.Element:
-    parser, tail, read = ET.XMLParser(), b"", 0
-    info = archive.getinfo(part)
-    for block in member_blocks(archive, info):
-        read += len(block)
-        upper = (tail + block).upper()
-        if b"<!DOCTYPE" in upper or b"<!ENTITY" in upper:
-            raise ValueError("表格包含不支持的 XML 声明。")
-        tail = upper[-16:]
-        parser.feed(block)
-    if read != info.file_size:
-        raise ValueError("表格内部文件未完整读取。")
-    return parser.close()
+    return next(parse_blocks(member_blocks(archive, archive.getinfo(part))))
 
 
 def _copy_member(archive: ZipFile, info, destination) -> None:
@@ -146,38 +143,53 @@ def _select_sheet(sheets: list[dict], sheet_name: str | None) -> dict:
 
 
 def _iter_rows(archive: ZipFile, part: str):
-    with archive.open(part) as stream:
-        parent = None
-        for event, node in ET.iterparse(stream, events=("start", "end")):
-            name = _local(node.tag)
-            if event == "start" and name == "sheetData":
+    parent = None
+    ancestors = []
+    for event, node in parse_blocks(member_blocks(archive, archive.getinfo(part)), record='row', events=True):
+        name = _local(node.tag)
+        if event == 'start':
+            ancestors.append(node)
+            if name == 'sheetData' and len(ancestors) == 2 and _local(ancestors[0].tag) == 'worksheet':
                 parent = node
-            elif event == "end" and name == "row":
+        else:
+            if name == "row" and len(ancestors) >= 2 and ancestors[-2] is parent:
+                check()
                 yield node
                 node.clear()
-                if parent is not None:
-                    parent.clear()
+                parent.clear()
+            ancestors.pop()
 
 
 def _strings(archive: ZipFile, wanted: set[int]) -> tuple[dict[int, str], dict[int, str]]:
     selected, pictures = {}, {}
     if "xl/sharedStrings.xml" not in archive.namelist():
         return selected, pictures
-    with archive.open("xl/sharedStrings.xml") as stream:
-        index = 0
-        root = None
-        for event, node in ET.iterparse(stream, events=("start", "end")):
-            if root is None:
-                root = node
-            if event == "end" and _local(node.tag) == "si":
-                value = _rich_text(node)
+    index, captured = 0, 0
+    root = None
+    ancestors = []
+    for event, node in parse_blocks(member_blocks(archive, archive.getinfo("xl/sharedStrings.xml")), record='si', events=True):
+        if root is None:
+            root = node
+        if event == 'start':
+            ancestors.append(node)
+            continue
+        if _local(node.tag) == "si" and len(ancestors) == 2 and ancestors[0] is root:
+            check()
+            value = _rich_text(node)
+            if index in wanted or "DISPIMG" in value.upper():
+                captured += len(value.encode('utf-8'))
+                if captured > MAX_CAPTURED_TEXT_BYTES or len(selected) + len(pictures) >= MAX_CAPTURED_CELLS:
+                    raise ValueError("表格编号或图片引用过多，无法安全读取，请整理模板后重试。")
                 if index in wanted:
                     selected[index] = value
                 if "DISPIMG" in value.upper():
+                    if len(pictures) >= MAX_PICTURE_REFERENCES:
+                        raise ValueError("表格图片引用过多，请整理模板后分批处理。")
                     pictures[index] = value
-                node.clear()
-                root.clear()
-                index += 1
+            node.clear()
+            root.clear()
+            index += 1
+        ancestors.pop()
     return selected, pictures
 
 
@@ -236,6 +248,7 @@ def _cell_value(cell: ET.Element | None, strings: dict[int, str], styles: list[s
 
 def _number_cells(archive: ZipFile, part: str) -> tuple[dict[int, ET.Element], set[int]]:
     numbers, wanted = {}, set()
+    captured = 0
     for row in _iter_rows(archive, part):
         for cell in row:
             ref = CELL_REF.fullmatch(cell.get("r", ""))
@@ -243,7 +256,11 @@ def _number_cells(archive: ZipFile, part: str) -> tuple[dict[int, ET.Element], s
                 coordinate = int(ref[2])
                 if coordinate in numbers:
                     raise ValueError(f"A{coordinate} 在表格中重复出现，无法安全读取。")
-                numbers[coordinate] = ET.fromstring(ET.tostring(cell))
+                encoded = ET.tostring(cell)
+                captured += len(encoded)
+                if len(numbers) >= MAX_CAPTURED_CELLS or captured > MAX_CAPTURED_TEXT_BYTES:
+                    raise ValueError("表格编号数据过多，无法安全读取，请整理模板后重试。")
+                numbers[coordinate] = ET.fromstring(encoded)
                 value = _text(_child(cell, "v"))
                 if cell.get("t") == "s" and value:
                     try:
@@ -268,6 +285,8 @@ def _cell_images(archive: ZipFile) -> dict[str, str | None]:
             rid = next((value for node in picture.iter() if _local(node.tag) == "blip"
                         for key, value in node.attrib.items() if _local(key) == "embed"), None)
             if name:
+                if name not in result and len(result) >= MAX_PICTURE_REFERENCES:
+                    raise ValueError("表格图片引用过多，请整理模板后分批处理。")
                 target = rels.get(rid, {}).get("part")
                 # Conflicting image IDs must never pick an arbitrary source.
                 result[name] = None if name in result and result[name] != target else target
@@ -276,6 +295,7 @@ def _cell_images(archive: ZipFile) -> dict[str, str | None]:
 
 def _floating_images(archive: ZipFile, sheet_part: str) -> dict[int, list[str | None]]:
     rows = defaultdict(list)
+    count = 0
     for relation in _relationships(archive, sheet_part).values():
         if not relation["type"].endswith("/drawing"):
             continue
@@ -298,6 +318,9 @@ def _floating_images(archive: ZipFile, sheet_part: str) -> dict[int, list[str | 
                     continue
                 rid = next((value for node in picture.iter() if _local(node.tag) == "blip"
                             for key, value in node.attrib.items() if _local(key) == "embed"), None)
+                count += 1
+                if count > MAX_PICTURE_REFERENCES:
+                    raise ValueError("表格图片引用过多，请整理模板后分批处理。")
                 rows[row].append(rels.get(rid, {}).get("part"))
     return rows
 
@@ -314,15 +337,19 @@ def _extract_image(archive: ZipFile, part: str | None, destination: Path) -> tup
         with tempfile.SpooledTemporaryFile(max_size=SPOOL_MEMORY_BYTES, dir=destination.parent) as staged:
             _copy_member(archive, info, staged)
             staged.seek(0)
-            with Image.open(staged) as preview:
-                if preview.width * preview.height > MAX_IMAGE_PIXELS:
-                    return None, "表格图片像素过大，需人工处理。"
-                preview.load()
-                # Normalize the preview only; the original XLSX bytes stay intact.
-                rgba = preview.convert("RGBA")
-                background = Image.new("RGBA", rgba.size, "white")
-                background.alpha_composite(rgba)
-                background.convert("RGB").save(destination, "PNG")
+            # Reserve before opening a legacy decoder too: the input spool
+            # may contain WebP (whose plugin reads all encoded bytes) or TIFF
+            # metadata. No state/database lock is held while waiting.
+            with IMAGE_BUDGET.reserve(check_cancel=check):
+                image_header(staged, max_pixels=MAX_IMAGE_PIXELS, formats=WORKBOOK_IMAGE_FORMATS, check_cancel=check)
+                with Image.open(staged, formats=list(WORKBOOK_IMAGE_FORMATS)) as preview:
+                    preview.load()
+                    # Normalize only the preview. Source workbook bytes and
+                    # design colours/alpha in its original image stay intact.
+                    with preview.convert("RGBA") as rgba, Image.new("RGBA", preview.size, "white") as background:
+                        background.alpha_composite(rgba)
+                        with background.convert("RGB") as rgb:
+                            rgb.save(destination, "PNG")
         return str(destination.resolve()), None
     except (OSError, ValueError, Image.DecompressionBombError, BadZipFile):
         return None, "表格图片无法解码，需人工处理。"
@@ -333,6 +360,7 @@ def inspect_workbook(path: str, work_dir: str, sheet_name: str | None = None) ->
     destination = Path(work_dir).resolve() / "workbook_images"
     destination.mkdir(parents=True, exist_ok=True)
     try:
+        check_directory_size(path, max_entries=20_000, too_many="表格内部文件过多，无法安全读取。")
         with ZipFile(path) as archive:
             _validate_archive(archive)
             sheets = _sheets(archive)
@@ -344,6 +372,7 @@ def inspect_workbook(path: str, work_dir: str, sheet_name: str | None = None) ->
             image_ids = _cell_images(archive)
             pictures = _floating_images(archive, sheet["part"])
             issues = {}
+            reference_count = sum(len(values) for values in pictures.values())
             for row in _iter_rows(archive, sheet["part"]):
                 for cell in row:
                     ref = CELL_REF.fullmatch(cell.get("r", ""))
@@ -363,6 +392,9 @@ def inspect_workbook(path: str, work_dir: str, sheet_name: str | None = None) ->
                         continue
                     row_number = int(ref[2])
                     match = DISPIMG.search(formula)
+                    reference_count += 1
+                    if reference_count > MAX_PICTURE_REFERENCES:
+                        raise ValueError("表格图片引用过多，请整理模板后分批处理。")
                     pictures[row_number].append(image_ids.get(match[1]) if match else None)
                     if not match:
                         issues[row_number] = "无法解析此行的 DISPIMG 图片引用。"
@@ -403,48 +435,246 @@ def _new_cell(name: bytes, attributes: bytes, value: str) -> bytes:
             + b"t></" + prefix + b"is></" + name + b">")
 
 
-def _patch_sheet(xml: bytes, assignments: dict[int, str]) -> bytes:
-    pending = dict(assignments)
-    changes = []
-    prefix_match = re.search(rb"<(" + XML_NAME + rb")worksheet\b", xml)
-    prefix = prefix_match[1] if prefix_match else b""
-    for row_match in ROW_XML.finditer(xml):
-        reference = _attribute_r(row_match["attrs"])
-        if reference is None or not reference.isdigit():
-            continue
-        row_number = int(reference)
-        if row_number not in pending:
-            continue
-        value = pending.pop(row_number)
-        row_xml = row_match[0]
-        cell_ref = f"A{row_number}".encode("ascii")
-        found = None
-        for cell in CELL_XML.finditer(row_xml):
-            if _attribute_r(cell["attrs"]) == cell_ref:
-                if found is not None:
-                    raise ValueError(f"A{row_number} 在表格中重复出现，无法安全回填。")
-                found = cell
-        if found is not None:
-            new_cell = _new_cell(found["name"], found["attrs"], value)
-            updated = row_xml[:found.start()] + new_cell + row_xml[found.end():]
+def _tag_end(raw: bytes, start: int) -> int:
+    """End of one real XML tag, including quoted > characters."""
+    quote = None
+    for index in range(start, len(raw)):
+        value = raw[index]
+        if quote is not None:
+            if value == quote:
+                quote = None
+        elif value in (34, 39):
+            quote = value
+        elif value == 62:
+            return index + 1
+    raise ValueError("表格行标签不完整，无法安全回填。")
+
+
+def _patch_row(raw: bytes, row_number: int, value: str) -> bytes:
+    """Change only A in one bounded UTF-8 row; comments/CDATA are not cells."""
+    from xml.parsers import expat
+    parser = expat.ParserCreate()
+    depth, row_name, found, current = 0, None, None, None
+
+    def start(name, attrs):
+        nonlocal depth, row_name, current
+        depth += 1
+        if depth == 1:
+            row_name = name.encode("utf-8")
+        elif depth == 2 and name.rsplit(":", 1)[-1] == "c" and attrs.get("r") == f"A{row_number}":
+            if found is not None or current is not None:
+                raise ValueError(f"A{row_number} 在表格中重复出现，无法安全回填。")
+            offset = parser.CurrentByteIndex
+            end = _tag_end(raw, offset)
+            encoded_name = name.encode("utf-8")
+            current = (offset, encoded_name, raw[offset + 1 + len(encoded_name):end - 1],
+                       raw[offset:end].rstrip().endswith(b"/>"))
+
+    def end(name):
+        nonlocal depth, current, found
+        if depth == 2 and current is not None and current[1] == name.encode("utf-8"):
+            stop = parser.CurrentByteIndex if current[3] else _tag_end(raw, parser.CurrentByteIndex)
+            found = (*current[:3], stop)
+            current = None
+        depth -= 1
+
+    parser.StartElementHandler, parser.EndElementHandler = start, end
+    try:
+        parser.Parse(raw, True)
+    except expat.ExpatError as exc:
+        raise ValueError("表格编号行无法安全回填。") from exc
+    if found is not None:
+        offset, name, attrs, stop = found
+        return raw[:offset] + _new_cell(name, attrs, value) + raw[stop:]
+    if row_name is None:
+        raise ValueError("目标编号行无法读取。")
+    cell = _new_cell(row_name[:-3] + b"c", b' r="' + f"A{row_number}".encode() + b'"', value)
+    start_end = _tag_end(raw, 0)
+    if raw[:start_end].rstrip().endswith(b"/>"):
+        return raw[:start_end - 2].rstrip() + b">" + cell + b"</" + row_name + b">"
+    return raw[:start_end] + cell + raw[start_end:]
+
+
+def _patch_sheet_blocks(blocks, destination, assignments: dict[int, str]) -> None:
+    """Copy arbitrary-length XML through disk; hold only a target row in RAM."""
+    import codecs
+    from xml.parsers import expat
+    from . import xml_stream
+
+    parser = expat.ParserCreate()
+    stack, pending = [], set(assignments)
+    active, cursor, serial, unfinished = None, 0, 0, 0
+    declared_encoding = None
+    # This is a single-record workspace bound, not an XML/file byte cap.
+    row_workspace = 8 * xml_stream.MAX_XML_TEXT + 64 * xml_stream.MAX_XML_NODES
+
+    with tempfile.TemporaryFile(mode="w+b") as source:
+        def read_range(start, stop):
+            source.seek(start)
+            while start < stop:
+                check()
+                block = source.read(min(IO_CHUNK_BYTES, stop - start))
+                if not block:
+                    raise ValueError("表格内部文件未完整读取。")
+                yield block
+                start += len(block)
+
+        def codec():
+            source.seek(0)
+            prefix = source.read(4)
+            if prefix.startswith(b"\xff\xfe") or prefix[:4] in (b"<\0?\0", b"<\0w\0"):
+                return "utf-16-le"
+            if prefix.startswith(b"\xfe\xff") or prefix[:4] in (b"\0<\0?", b"\0<\0w"):
+                return "utf-16-be"
+            encoding = declared_encoding or "utf-8"
+            if codecs.lookup(encoding).name == "utf-16":
+                raise ValueError("表格 XML 编码无法确认，请重新另存 XLSX。")
+            return encoding
+
+        def tag_stop(start):
+            # Closing tags have no quoted attributes. The parser has already
+            # consumed the complete tag before invoking its end callback.
+            source.seek(start)
+            encoding = codec()
+            source.seek(start)
+            marker = ">".encode(encoding)
+            tail, offset = b"", start
+            while True:
+                block = source.read(min(65536, row_workspace))
+                if not block:
+                    raise ValueError("表格行结尾不完整。")
+                sample = tail + block
+                index = sample.find(marker)
+                if index >= 0:
+                    return offset - len(tail) + index + len(marker)
+                offset += len(block)
+                if offset - start > row_workspace:
+                    raise ValueError("单行表格数据过于复杂，无法安全回填。")
+                tail = sample[-len(marker):]
+
+        def empty_row(begin):
+            # Expat's end offset for <row/> may already point to </sheetData>.
+            # Inspect the actual opening tag rather than consuming that parent.
+            encoding = codec()
+            decoder = codecs.getincrementaldecoder(encoding)()
+            source.seek(begin)
+            sample, read = b"", 0
+            while read <= xml_stream.MAX_XML_TOKEN_BYTES:
+                check()
+                block = source.read(65536)
+                if not block:
+                    raise ValueError("表格行标签不完整，无法安全回填。")
+                read += len(block)
+                sample += decoder.decode(block, final=False).encode("utf-8")
+                try:
+                    stop = _tag_end(sample, 0)
+                except ValueError:
+                    continue
+                return sample[:stop].rstrip().endswith(b"/>")
+            raise ValueError("表格行标签过于复杂，无法安全回填。")
+
+        def start(name, attrs):
+            nonlocal active, serial
+            serial += 1
+            stack.append(name)
+            if len(stack) > xml_stream.MAX_XML_DEPTH:
+                raise ValueError("表格内部结构过于复杂，无法安全回填。")
+            if (len(stack) == 3 and stack[0].rsplit(":", 1)[-1] == "worksheet"
+                    and stack[-2].rsplit(":", 1)[-1] == "sheetData"
+                    and name.rsplit(":", 1)[-1] == "row"):
+                reference = attrs.get("r", "")
+                if reference.isdigit() and int(reference) in assignments:
+                    number = int(reference)
+                    if number not in pending:
+                        raise ValueError(f"A{number} 对应行重复，无法安全回填。")
+                    active = (number, parser.CurrentByteIndex, len(stack))
+
+        def end(name):
+            nonlocal active, cursor, serial
+            serial += 1
+            if active is not None and len(stack) == active[2]:
+                number, begin, _ = active
+                stop = parser.CurrentByteIndex
+                # For <row/>, Expat points just after />; for a normal end it
+                # points to the start of </row>. Inspect only the nearby bytes.
+                encoding = codec()
+                if not empty_row(begin):
+                    stop = tag_stop(stop)
+                if stop - begin > row_workspace:
+                    raise ValueError("单行表格数据过于复杂，无法安全回填。")
+                for block in read_range(cursor, begin):
+                    destination.write(block)
+                source.seek(begin)
+                raw = source.read(stop - begin)
+                patched = _patch_row(raw.decode(encoding).encode("utf-8"), number, assignments[number])
+                destination.write(patched.decode("utf-8").encode(encoding, errors="xmlcharrefreplace"))
+                pending.remove(number)
+                cursor, active = stop, None
+            stack.pop()
+
+        def data(value):
+            nonlocal serial
+            serial += 1
+
+        def declaration(version, encoding, standalone):
+            nonlocal declared_encoding
+            declared_encoding = encoding
+
+        def doctype(*args):
+            raise ValueError("表格包含不支持的 XML 声明。")
+
+        parser.StartElementHandler, parser.EndElementHandler = start, end
+        parser.CharacterDataHandler, parser.XmlDeclHandler = data, declaration
+        parser.StartDoctypeDeclHandler = doctype
+        for block in blocks:
+            check()
+            source.seek(0, 2)
+            source.write(block)
+            unfinished += len(block)
+            if unfinished > xml_stream.MAX_XML_TOKEN_BYTES:
+                raise ValueError("表格 XML 标签过于复杂，无法安全回填。")
+            previous = serial
+            try:
+                parser.Parse(block, False)
+            except expat.ExpatError as exc:
+                raise ValueError("表格内部结构无法安全回填。") from exc
+            if serial != previous:
+                unfinished = 0
+        try:
+            parser.Parse(b"", True)
+        except expat.ExpatError as exc:
+            raise ValueError("表格内部结构无法安全回填。") from exc
+        if pending:
+            raise ValueError("目标编号行不存在：" + "、".join(f"A{row}" for row in sorted(pending)))
+        source.seek(0, 2)
+        for block in read_range(cursor, source.tell()):
+            destination.write(block)
+
+
+def _validate_sheet_stream(stream) -> None:
+    """Validate the actual complete patched XML without retaining its DOM."""
+    def blocks():
+        stream.seek(0)
+        while block := stream.read(IO_CHUNK_BYTES):
+            check()
+            yield block
+    stack = []
+    for event, node in parse_blocks(blocks(), record="row", events=True):
+        if event == "start":
+            stack.append(node)
         else:
-            new_cell = _new_cell(prefix + b"c", b' r="' + cell_ref + b'"', value)
-            start_end = row_xml.find(b">") + 1
-            if row_xml[:start_end].rstrip().endswith(b"/>"):
-                updated = row_xml[:start_end - 2].rstrip() + b">" + new_cell + b"</" + row_match["name"] + b">"
-            else:
-                updated = row_xml[:start_end] + new_cell + row_xml[start_end:]
-        changes.append((row_match.start(), row_match.end(), updated))
-    if pending:
-        # Fixed-template rows must already exist; do not change dimensions or
-        # invent layout for a floating image anchored outside the used range.
-        raise ValueError("目标编号行不存在：" + "、".join(f"A{row}" for row in sorted(pending)))
-    fragments, cursor = [], 0
-    for start, end, replacement in changes:
-        fragments.extend((xml[cursor:start], replacement))
-        cursor = end
-    fragments.append(xml[cursor:])
-    return b"".join(fragments)
+            stack.pop()
+            node.clear()
+            if stack:
+                stack[-1].remove(node)
+
+
+def _patch_sheet(xml: bytes, assignments: dict[int, str]) -> bytes:
+    """Compatibility helper for small byte fixtures; exports use disk streams."""
+    from io import BytesIO
+    output = BytesIO()
+    _patch_sheet_blocks([xml], output, assignments)
+    return output.getvalue()
 
 
 def write_numbered_workbook(source: str, destination: str, sheet_name: str, assignments: dict[int, str]) -> None:
@@ -471,31 +701,46 @@ def write_numbered_workbook(source: str, destination: str, sheet_name: str, assi
                 cell = cells.get(row)
                 if cell is not None and (_child(cell, "f") is not None or _cell_value(cell, strings, styles) != ""):
                     raise ValueError(f"A{row} 已有编号或公式，拒绝覆盖原有内容。")
-            patched = _patch_sheet(archive.read(sheet["part"]), assignments)
-            # Validate before creating any destination; byte patch errors must
-            # not produce an apparently successful corrupt workbook.
-            ET.fromstring(patched)
-            destination_path.parent.mkdir(parents=True, exist_ok=True)
-            fd, temporary = tempfile.mkstemp(prefix=".hsd-workbook-", suffix=".tmp", dir=destination_path.parent)
-            os.close(fd)
-            with ZipFile(temporary, "w") as output:
-                output.comment = archive.comment
-                for info in archive.infolist():
-                    member = copy.copy(info)
-                    if info.filename == sheet["part"]:
-                        output.writestr(member, patched)
-                    else:
-                        with output.open(member, "w", force_zip64=info.file_size >= ZIP64_LIMIT) as stream:
-                            _copy_member(archive, info, stream)
+            with tempfile.TemporaryFile(mode="w+b") as patched:
+                _patch_sheet_blocks(member_blocks(archive, archive.getinfo(sheet["part"])), patched, assignments)
+                # Validate the complete patched stream before any destination
+                # is visible. No whole-sheet bytes or ElementTree is retained.
+                _validate_sheet_stream(patched)
+                patched.seek(0, 2)
+                patched_size = patched.tell()
+                destination_path.parent.mkdir(parents=True, exist_ok=True)
+                fd, temporary = tempfile.mkstemp(prefix=".hsd-workbook-", suffix=".tmp", dir=destination_path.parent)
+                os.close(fd)
+                with ZipFile(temporary, "w") as output:
+                    output.comment = archive.comment
+                    for info in archive.infolist():
+                        check()
+                        member = copy.copy(info)
+                        if info.filename == sheet["part"]:
+                            member.file_size = patched_size
+                            patched.seek(0)
+                            with output.open(member, "w", force_zip64=patched_size >= ZIP64_LIMIT) as stream:
+                                while block := patched.read(IO_CHUNK_BYTES):
+                                    check()
+                                    stream.write(block)
+                        else:
+                            with output.open(member, "w", force_zip64=info.file_size >= ZIP64_LIMIT) as stream:
+                                _copy_member(archive, info, stream)
         # Opening exclusively prevents a race from overwriting another export.
-        with open(destination_path, "xb") as output, open(temporary, "rb") as prepared:
-            try:
-                while chunk := prepared.read(1024 * 1024):
-                    output.write(chunk)
-            except BaseException:
-                output.close()
+        created_destination = False
+        try:
+            with open(destination_path, "xb") as output:
+                created_destination = True
+                with open(temporary, "rb") as prepared:
+                    while chunk := prepared.read(1024 * 1024):
+                        check()
+                        output.write(chunk)
+        except BaseException:
+            # Include source-open and final buffered flush/close failures. An
+            # already-existing destination never belongs to this operation.
+            if created_destination:
                 destination_path.unlink(missing_ok=True)
-                raise
+            raise
     except OSError as exc:
         if exc.errno in {errno.ENOSPC, getattr(errno, 'EDQUOT', errno.ENOSPC)}:
             raise ValueError("主机磁盘空间不足，无法导出表格，请清理后重试。") from exc

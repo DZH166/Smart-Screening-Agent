@@ -1,4 +1,6 @@
 """Exact upload identity and recoverable work deletion; synthetic local images only."""
+
+from legacy_jobs import seed_accepted_refinement
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import io
@@ -250,8 +252,8 @@ def test_delete_restore_preserves_branches_quota_requests_and_exact_download(ser
     asset = upload(service)
     work = generated(service, owner, asset['id'])
     initial = work['current_version_id']
-    job = service.submit(owner, 'refine', dict(idempotency_key=str(uuid4()), base_version_id=initial,
-        prompt='应用所选配置', selection={**choices(service, owner, asset['id']), 'template_id': 'single'}), work['id'])
+    job = seed_accepted_refinement(service, owner, work['id'], dict(idempotency_key=str(uuid4()), base_version_id=initial,
+        prompt='应用所选配置', selection={**choices(service, owner, asset['id']), 'template_id': 'single'}))
     assert service.run_once() and service.job(owner, job['id'])['status'] == 'SUCCEEDED'
     edited = service.design(owner, work['id'])
     work = service.rollback(owner, work['id'], edited['current_version_id'])
@@ -269,7 +271,7 @@ def test_delete_restore_preserves_branches_quota_requests_and_exact_download(ser
         service.rollback(owner, work['id'], initial)
     assert blocked.value.status == 404
     with pytest.raises(ServiceError) as blocked:
-        service.submit(owner, 'refine', dict(idempotency_key=str(uuid4()), base_version_id=initial, prompt='旋转'), work['id'])
+        seed_accepted_refinement(service, owner, work['id'], dict(idempotency_key=str(uuid4()), base_version_id=initial, prompt='旋转'))
     assert blocked.value.status == 404
     for version_id, content in payloads.items():
         assert service.version_file(owner, version_id).read_bytes() == content

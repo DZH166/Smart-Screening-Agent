@@ -8,7 +8,7 @@ an employee review or a quality qualification.
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from copy import deepcopy
 import hashlib
 import hmac
@@ -33,6 +33,8 @@ from .cancellation import TaskCancelled
 from .material_ark import normalise_rgba
 from .retention_window import RETENTION_SECONDS
 from .uploads import DiskBudget, UploadFile, checked_path
+from .image_budget import IMAGE_BUDGET, image_workspace_bytes
+from .image_headers import image_header
 
 _ID = re.compile(r"[a-f0-9]{32}")
 _BUSY = {"queued", "processing", "cancelling"}
@@ -100,7 +102,7 @@ def _decode(raw):
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
-            with Image.open(raw if hasattr(raw, "read") else BytesIO(raw)) as check:
+            with Image.open(raw if hasattr(raw, "read") else BytesIO(raw), formats=["PNG", "JPEG", "WEBP"]) as check:
                 if check.format not in {"PNG", "JPEG", "WEBP"}:
                     raise ValueError("图片格式不支持，请使用 PNG、JPG 或 WebP。")
                 if getattr(check, "n_frames", 1) != 1:
@@ -116,21 +118,31 @@ def _decode(raw):
         raise ValueError("图片无法读取或已损坏，请重新选择。") from None
 
 
+@contextmanager
+def _image_workspace(raw, *, check_cancel=None, output_pixels=0, exclusive=False):
+    """Read only the header before reserving decoded/conversion workspace."""
+    header = image_header(raw, max_pixels=_MAX_PIXELS, budget=IMAGE_BUDGET, check_cancel=check_cancel)
+    encoded_workspace = 2 * header.encoded_bytes if header.format == "WEBP" else 0
+    estimate = None if exclusive else image_workspace_bytes(max(header.pixels, output_pixels)) + encoded_workspace
+    with IMAGE_BUDGET.reserve(estimate, check_cancel=check_cancel):
+        yield
+
+
 def _png(image):
     result = BytesIO()
     # Keep the color profile, never camera/GPS/text metadata or a source path.
-    clean = image.copy()
-    profile = clean.info.get("icc_profile")
-    clean.info.clear()
-    clean.save(result, "PNG", **({"icc_profile": profile} if profile else {}))
+    with image.copy() as clean:
+        profile = clean.info.get("icc_profile")
+        clean.info.clear()
+        clean.save(result, "PNG", **({"icc_profile": profile} if profile else {}))
     return result.getvalue()
 
 
 def _thumbnail(image):
     """Display-only derivative; never resize or overwrite a downloadable PNG."""
-    preview = image.copy()
-    preview.thumbnail((_THUMBNAIL_EDGE, _THUMBNAIL_EDGE), Image.Resampling.LANCZOS)
-    return _png(preview)
+    with image.copy() as preview:
+        preview.thumbnail((_THUMBNAIL_EDGE, _THUMBNAIL_EDGE), Image.Resampling.LANCZOS)
+        return _png(preview)
 
 
 class MaterialManager:
@@ -386,15 +398,18 @@ class MaterialManager:
                 stream = value.stream
                 # Multipart bytes have already streamed to the disk budget.
                 stream.seek(0)
-                image = _decode(stream)
-                raw = _png(image)
-                self._write(directory / (source_id + ".png"), raw)
-                thumbnail = _thumbnail(image)
-                self._write(directory / (source_id + ".thumb.png"), thumbnail)
-                sources.append({"id": source_id, "name": name, "width": image.width,
-                                "height": image.height, "sha256": hashlib.sha256(raw).hexdigest(),
-                                "thumbnail_sha256": hashlib.sha256(thumbnail).hexdigest(),
-                                "status": "queued", "error": ""})
+                with _image_workspace(stream, check_cancel=ensure_active), closing(_decode(stream)) as image:
+                    raw = _png(image)
+                    self._write(directory / (source_id + ".png"), raw)
+                    source_sha = hashlib.sha256(raw).hexdigest()
+                    del raw
+                    thumbnail = _thumbnail(image)
+                    self._write(directory / (source_id + ".thumb.png"), thumbnail)
+                    sources.append({"id": source_id, "name": name, "width": image.width,
+                                    "height": image.height, "sha256": source_sha,
+                                    "thumbnail_sha256": hashlib.sha256(thumbnail).hexdigest(),
+                                    "status": "queued", "error": ""})
+                    del thumbnail
             if ensure_active:
                 ensure_active()
             with self.lock:
@@ -651,9 +666,11 @@ class MaterialManager:
                             edit_bounds["height"] = min(edit_bounds["height"], old_item["height"] - edit_bounds["y"])
                     elif redo and redo.get("box"):
                         box = redo["box"]
-                        image = _decode(original)
-                        raw = _png(image.crop((box["x"], box["y"], box["x"] + box["width"],
-                                               box["y"] + box["height"])))
+                        with _image_workspace(original, check_cancel=lambda: self._check(job)):
+                            with closing(_decode(original)) as image:
+                                with image.crop((box["x"], box["y"], box["x"] + box["width"],
+                                                 box["y"] + box["height"])) as cropped:
+                                    raw = _png(cropped)
                         offset = (box["x"], box["y"])
                     if refining:
                         with self.lock:
@@ -809,51 +826,61 @@ class MaterialManager:
         items = []
         for layer in layers:
             self._check(job)
-            image = _decode(layer.png)
-            alpha = image.getchannel("A")
-            if (not rectangular and alpha.getextrema()[0] == 255) or not alpha.getbbox():
-                raise ValueError("素材没有有效透明背景，未生成可下载结果。")
-            bounds = dict(getattr(layer, "bounds", {}) or {})
-            quality = {"auto_ready": False, "warnings": ["请核对文字、配色和设计是否完整；修补细节可能与原图不同。"], "evidence": {}}
-            if self.quality_hook and not rectangular:
-                quality = self.quality_hook(raw, layer.png, bounds, corrected=corrected)
-            # Rectangular image proposals have no validated automatic quality
-            # qualification. Neither model certainty nor a pixel check replaces
-            # the employee's explicit single/batch decision.
-            if rectangular:
-                quality["auto_ready"] = False
-                quality["evidence"] = {"version": ("material-preserved-canvas-1" if getattr(result, "no_upscale", False)
-                                                   else "material-rectangular-crop-1"),
-                                       "scope": "unverified_generated_content"}
-            notices = list(dict.fromkeys(list(getattr(layer, "warnings", ()) or ()) +
-                                        list(quality.get("warnings", ()))))
-            original_size = image.size
-            if getattr(result, "no_upscale", False):
-                # One design already received the whole generation budget; a
-                # synthetic 4096 stretch would only inflate files and time.
-                size = image.size
-            else:
-                scale = 4096 / max(image.size)
-                size = tuple(max(1, round(value * scale)) for value in image.size)
-            if size != image.size:
-                image = image.resize(size, Image.Resampling.LANCZOS)
-                notices.append("已按比例输出长边 4096 像素；放大不等于恢复原图细节。")
-            identifier = secrets.token_hex(16)
-            content = _png(image)
-            self._write(self._directory(job["id"]) / (identifier + ".png"), content)
-            thumbnail = _thumbnail(image)
-            self._write(self._directory(job["id"]) / (identifier + ".thumb.png"), thumbnail)
-            if set(bounds) == {"x", "y", "width", "height"}:
-                bounds = {**bounds, "x": bounds["x"] + offset[0], "y": bounds["y"] + offset[1]}
-            label = str(getattr(layer, "label", "素材"))[:80]
-            items.append({"id": identifier, "source_id": source["id"], "name": label or "素材",
-                          "status": "generated",
-                          "warnings": notices, "width": image.width, "height": image.height,
-                          "native_width": original_size[0], "native_height": original_size[1],
-                          "bounds": bounds, "sha256": hashlib.sha256(content).hexdigest(),
-                          "thumbnail_sha256": hashlib.sha256(thumbnail).hexdigest(),
-                          "rectangular_crop": rectangular,
-                          "evidence": quality.get("evidence", {})})
+            target_pixels = 0 if getattr(result, "no_upscale", False) else 4096 * 4096
+            with _image_workspace(layer.png, check_cancel=lambda: self._check(job),
+                                  output_pixels=target_pixels,
+                                  exclusive=bool(self.quality_hook and not rectangular)):
+                with closing(_decode(layer.png)) as native:
+                    image = native
+                    try:
+                        with image.getchannel("A") as alpha:
+                            if (not rectangular and alpha.getextrema()[0] == 255) or not alpha.getbbox():
+                                raise ValueError("素材没有有效透明背景，未生成可下载结果。")
+                        bounds = dict(getattr(layer, "bounds", {}) or {})
+                        quality = {"auto_ready": False, "warnings": ["请核对文字、配色和设计是否完整；修补细节可能与原图不同。"], "evidence": {}}
+                        if self.quality_hook and not rectangular:
+                            quality = self.quality_hook(raw, layer.png, bounds, corrected=corrected)
+                        # Rectangular image proposals have no validated automatic quality
+                        # qualification. Neither model certainty nor a pixel check replaces
+                        # the employee's explicit single/batch decision.
+                        if rectangular:
+                            quality["auto_ready"] = False
+                            quality["evidence"] = {"version": ("material-preserved-canvas-1" if getattr(result, "no_upscale", False)
+                                                               else "material-rectangular-crop-1"),
+                                                   "scope": "unverified_generated_content"}
+                        notices = list(dict.fromkeys(list(getattr(layer, "warnings", ()) or ()) +
+                                                    list(quality.get("warnings", ()))))
+                        original_size = image.size
+                        if getattr(result, "no_upscale", False):
+                            # One design already received the whole generation budget; a
+                            # synthetic 4096 stretch would only inflate files and time.
+                            size = image.size
+                        else:
+                            scale = 4096 / max(image.size)
+                            size = tuple(max(1, round(value * scale)) for value in image.size)
+                        if size != image.size:
+                            image = image.resize(size, Image.Resampling.LANCZOS)
+                            notices.append("已按比例输出长边 4096 像素；放大不等于恢复原图细节。")
+                        identifier = secrets.token_hex(16)
+                        content = _png(image)
+                        self._write(self._directory(job["id"]) / (identifier + ".png"), content)
+                        thumbnail = _thumbnail(image)
+                        self._write(self._directory(job["id"]) / (identifier + ".thumb.png"), thumbnail)
+                        if set(bounds) == {"x", "y", "width", "height"}:
+                            bounds = {**bounds, "x": bounds["x"] + offset[0], "y": bounds["y"] + offset[1]}
+                        label = str(getattr(layer, "label", "素材"))[:80]
+                        items.append({"id": identifier, "source_id": source["id"], "name": label or "素材",
+                                      "status": "generated",
+                                      "warnings": notices, "width": image.width, "height": image.height,
+                                      "native_width": original_size[0], "native_height": original_size[1],
+                                      "bounds": bounds, "sha256": hashlib.sha256(content).hexdigest(),
+                                      "thumbnail_sha256": hashlib.sha256(thumbnail).hexdigest(),
+                                      "rectangular_crop": rectangular,
+                                      "evidence": quality.get("evidence", {})})
+                        del content, thumbnail
+                    finally:
+                        if image is not native:
+                            image.close()
         return items
 
     def _get(self, identifier, owner):

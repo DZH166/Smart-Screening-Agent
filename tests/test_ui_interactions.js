@@ -310,6 +310,18 @@ async function main(){
   settings.setFetch(()=>new Promise(resolve=>{finishStale=resolve;}));const previousTaskReply=onSettings();await flush();
   const another=job();another.id='another-settings-task';settings.ui.acceptJob(another);finishStale(response(saved));await previousTaskReply;
   assert.equal(settings.ui.state.job.id,'another-settings-task','late settings reply cannot replace a newer task');
+  // Authentication rejection belongs to the read's task/version context.
+  for(const change of ["task","version"]){
+    const h=harness(),first=job();h.ui.acceptJob(first);let finish;
+    h.setFetch(()=>new Promise(resolve=>{finish=resolve;}));const pending=h.ui.pollJob();await flush();
+    const newer=job();if(change==="task")newer.id="newer-auth-context";else newer.revision=2;
+    h.ui.acceptJob(newer);finish(response({error:"obsolete authentication rejection"},401));await pending;
+    assert.equal(h.ui.state.authExpired,false,`${change}: stale auth cannot lock accepted state`);
+    assert.equal(h.ui.state.job.id,newer.id);assert.equal(h.ui.state.job.revision,newer.revision);
+    assert.equal(h.node('notice').classList.contains('hidden'),true,'obsolete read errors stay out of the new task');
+  }
+  const currentAuth=harness();currentAuth.ui.acceptJob(job());currentAuth.setFetch(async()=>response({error:"current session expired"},401));await currentAuth.ui.pollJob();
+  assert.equal(currentAuth.ui.state.authExpired,true,'a current-context 401 must still lock controls');
   console.log('UI interaction invariants passed (synthetic DOM; no browser timing or AI validation)');
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});

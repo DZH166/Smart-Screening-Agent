@@ -14,6 +14,18 @@ import warnings
 import cv2
 import numpy as np
 from PIL import Image
+from .image_budget import IMAGE_BUDGET, image_workspace_bytes
+from .cancellation import check
+
+
+# Keep the existing source-pixel range. Differences are calculated in fixed
+# tiles; only the uint8 foreground and native connectivity map span the canvas.
+MAX_DIAGNOSTIC_PIXELS = 36_000_000
+DIAGNOSTIC_TILE = (1024, 128)
+
+
+class _DiagnosticWorkspaceLimit(ValueError):
+    pass
 
 
 def _read(data):
@@ -21,21 +33,30 @@ def _read(data):
         raise ValueError("invalid pixels")
     with warnings.catch_warnings():
         warnings.simplefilter("error", Image.DecompressionBombWarning)
-        with Image.open(io.BytesIO(data)) as image:
+        with Image.open(io.BytesIO(data), formats=["PNG", "JPEG", "WEBP"]) as image:
             if (image.format not in {"PNG", "JPEG", "WEBP"}
                     or getattr(image, "n_frames", 1) != 1
                     or image.width * image.height > 36_000_000):
                 raise ValueError("invalid pixels")
+            if image.width * image.height > MAX_DIAGNOSTIC_PIXELS:
+                raise _DiagnosticWorkspaceLimit()
             image.load()
             return image.convert("RGBA")
 
 
 def quality_hook(source_png: bytes, layer_png: bytes, bounds: dict, *, corrected=False) -> dict:
+    with IMAGE_BUDGET.reserve(check_cancel=check):
+        return _quality_hook(source_png, layer_png, bounds, corrected=corrected)
+
+
+def _quality_hook(source_png: bytes, layer_png: bytes, bounds: dict, *, corrected=False) -> dict:
     result = {"auto_ready": False, "warnings": [], "evidence": {
         "version": "material-pixel-fidelity-1", "scope": "pixel_fidelity_only"}}
     notes, evidence = result["warnings"], result["evidence"]
+    source = layer = None
     try:
-        source, layer = _read(source_png), _read(layer_png)
+        source = _read(source_png)
+        layer = _read(layer_png)
         width, height = source.size
         if (not isinstance(bounds, dict) or set(bounds) != {"x", "y", "width", "height"}
                 or any(type(v) not in (int, float) or not math.isfinite(v) for v in bounds.values())
@@ -49,7 +70,9 @@ def quality_hook(source_png: bytes, layer_png: bytes, bounds: dict, *, corrected
                 "x": 0, "y": 0, "width": width, "height": height}.items()):
             notes.append("局部设计的完整范围尚需人工确认。")
             return result
-        if source.getchannel("A").getextrema()[0] == 255:
+        with source.getchannel("A") as alpha:
+            opaque_source = alpha.getextrema()[0] == 255
+        if opaque_source:
             notes.append("原图没有透明底，文字、去背景和修补效果需要确认。")
             return result
         # Limit automatic proof to original pixels. Re-sampling may hide a
@@ -57,23 +80,33 @@ def quality_hook(source_png: bytes, layer_png: bytes, bounds: dict, *, corrected
         if source.size != layer.size:
             notes.append("模型改变了图片尺寸，细节保真仍需确认。")
             return result
-        a, b = np.asarray(source, dtype=np.int16), np.asarray(layer, dtype=np.int16)
-        foreground = a[:, :, 3] > 8
+        foreground = np.empty((height, width), dtype=np.uint8)
+        alpha_error = color_error = 0
+        tile_width, tile_height = DIAGNOSTIC_TILE
+        for y in range(0, height, tile_height):
+            for x in range(0, width, tile_width):
+                check()
+                box = (x, y, min(width, x + tile_width), min(height, y + tile_height))
+                with source.crop(box) as source_tile, layer.crop(box) as layer_tile:
+                    a, b = np.asarray(source_tile), np.asarray(layer_tile)
+                    foreground[y:box[3], x:box[2]] = a[:, :, 3] > 8
+                    alpha_error = max(alpha_error, int(np.abs(a[:, :, 3].astype(np.int16) - b[:, :, 3].astype(np.int16)).max()))
+                    visible = (a[:, :, 3] > 0) | (b[:, :, 3] > 0)
+                    if visible.any():
+                        difference = np.abs(a[:, :, :3].astype(np.int16) - b[:, :, :3].astype(np.int16))
+                        color_error = max(color_error, int(difference[visible].max()))
         if not foreground.any():
             notes.append("原图没有可验证的有效图案。")
             return result
-        visible = (a[:, :, 3] > 0) | (b[:, :, 3] > 0)
-        alpha_error = int(np.abs(a[:, :, 3] - b[:, :, 3]).max())
-        color_error = int(np.abs(a[:, :, :3][visible] - b[:, :, :3][visible]).max())
-        count, _, stats, _ = cv2.connectedComponentsWithStats(foreground.astype(np.uint8), connectivity=8)
-        areas = sorted((int(v) for v in stats[1:, cv2.CC_STAT_AREA]), reverse=True)
+        count, labels, stats, centres = cv2.connectedComponentsWithStats(foreground, connectivity=8)
+        del labels, centres
         # A detached letter or ornament is meaningful: even small separate
         # islands prevent claiming locally verified design grouping.
-        significant = [v for v in areas if v >= 4]
+        significant = int(np.count_nonzero(stats[1:, cv2.CC_STAT_AREA] >= 4))
         evidence.update(alpha_max_error=alpha_error, color_max_error=color_error,
-                        visible_components=len(significant), source_size=list(source.size),
+                        visible_components=significant, source_size=list(source.size),
                         output_size=list(layer.size), full_canvas=True)
-        if len(significant) != 1:
+        if significant != 1:
             notes.append("图案包含分离的文字或装饰，完整分组需要确认。")
         if alpha_error or color_error:
             notes.append("模型输出与原始可见像素有变化，需要确认颜色和细节。")
@@ -82,10 +115,20 @@ def quality_hook(source_png: bytes, layer_png: bytes, bounds: dict, *, corrected
             evidence["basis"] = "unchanged_single_transparent_design"
             notes.append("像素保留一致，但完整设计分组尚未独立验证，需要确认。")
         return result
+    except _DiagnosticWorkspaceLimit:
+        evidence.update(pixel_fidelity_verified=False, diagnostic_complete=False,
+                        diagnostic_limit="component_workspace")
+        notes.append("图片较大，未执行完整像素核对，请自行检查文字、颜色和完整性。")
+        return result
     except (OSError, ValueError, TypeError, SyntaxError, Image.DecompressionBombError,
             Image.DecompressionBombWarning, cv2.error):
         notes.append("图片或位置数据无法完整核验，需要人工确认。")
         return result
+    finally:
+        if source is not None:
+            source.close()
+        if layer is not None:
+            layer.close()
 
 
 def native_edge_diagnostics(layer_png: bytes) -> dict:
@@ -97,16 +140,25 @@ def native_edge_diagnostics(layer_png: bytes) -> dict:
     """
     result = {"white_edge_ratio": None, "opaque_ratio": None, "warnings": []}
     try:
-        with Image.open(io.BytesIO(layer_png)) as image:
-            if image.format != "PNG" or getattr(image, "n_frames", 1) != 1:
+        with Image.open(io.BytesIO(layer_png), formats=["PNG"]) as image:
+            if (image.format != "PNG" or getattr(image, "n_frames", 1) != 1
+                    or image.width * image.height > 36_000_000):
                 return result
-            rgba = image.convert("RGBA")
+            with IMAGE_BUDGET.reserve(image_workspace_bytes(image.width * image.height)):
+                with image.convert("RGBA") as rgba:
+                    work = rgba.copy()
+                    try:
+                        work.thumbnail((512, 512), Image.Resampling.LANCZOS)
+                    except BaseException:
+                        work.close()
+                        raise
     except (OSError, ValueError, Image.DecompressionBombError):
         return result
-    work = rgba.copy()
-    work.thumbnail((512, 512), Image.Resampling.LANCZOS)
-    alpha = np.asarray(work.getchannel("A"))
-    rgb = np.asarray(work.convert("RGB"), dtype=np.int16)
+    with work:
+        with work.getchannel("A") as channel:
+            alpha = np.asarray(channel)
+        with work.convert("RGB") as colors:
+            rgb = np.asarray(colors, dtype=np.int16)
     foreground = alpha > 8
     if not foreground.any():
         return result
