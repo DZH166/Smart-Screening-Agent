@@ -13,6 +13,7 @@ from legacy_jobs import recover_legacy_refinement, seed_accepted_refinement
 import hashlib
 import io
 import json
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from uuid import uuid4
@@ -298,6 +299,57 @@ def test_a12_private_assets_designs_jobs_and_files_are_isolated(env):
             "file": ("share.png", png_bytes(), "image/png"),
         }, data={"kind": "pattern", "name": "非法共享", "shared": "true"})
         assert forbidden_share.status_code == 403
+
+
+def test_unavailable_selection_has_stable_code_and_can_be_corrected(env):
+    def upload(client, color, kind):
+        return ok(client.post('/api/assets', files={
+            'file': ('private.png', png_bytes(color), 'image/png'),
+        }, data={'kind': kind}))
+
+    expired = upload(env.client, 'red', 'pattern')
+    cutoff = time.time() + env.service.settings.retention_seconds + 1
+    assert env.service.cleanup_expired(now=cutoff)['assets'] == 1
+    disabled = upload(env.client, 'blue', 'background')
+    ok(env.client.delete(f"/api/assets/{disabled['id']}"))
+    with TestClient(env.app, base_url='http://localhost') as other:
+        env.login('client', client=other)
+        foreign = upload(other, 'green', 'pattern')
+
+    design = env.create()
+    selection = env.selection()
+    unavailable = [
+        {**selection, 'asset_ids': [*selection['asset_ids'], expired['id']]},
+        {**selection, 'background_id': disabled['id']},
+        {**selection, 'template_id': 'bordered', 'border_ref': selection['background_id']},
+        {**selection, 'asset_ids': [foreign['id']]},
+    ]
+    expected = {'detail': '素材不存在、类型不符或无权使用', 'code': 'asset_selection_unavailable'}
+    for invalid in unavailable:
+        generated = env.client.post(f"/api/designs/{design['id']}/generate", json={
+            **invalid, 'idempotency_key': key(),
+        })
+        trial = env.client.post(f"/api/designs/{design['id']}/candidates/one", json={
+            **invalid, 'style': 'classic',
+        })
+        assert generated.status_code == trial.status_code == 404
+        assert generated.json() == trial.json() == expected
+
+    for asset in (expired, foreign):
+        response = env.client.get(asset['url'])
+        assert response.status_code == 404
+        assert response.json() == {'detail': expected['detail']}
+    with env.service.db.connect() as db:
+        for table in ('jobs', 'provider_calls', 'versions'):
+            assert db.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0] == 0
+    assert env.get(design)['active_job'] is None
+
+    trial = ok(env.client.post(f"/api/designs/{design['id']}/candidates/one", json={
+        **selection, 'style': 'classic',
+    }))
+    assert trial['style'] == 'classic' and trial['width'] > 0
+    generated = env.generate(design=design, selection=selection)
+    assert generated['versions'][0]['snapshot']['asset_refs'] == selection['asset_ids']
 
 
 def test_selection_changes_after_first_draft_are_refinements(env):

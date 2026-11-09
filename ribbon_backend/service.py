@@ -129,8 +129,9 @@ def password_hash(password, salt=None):
 
 
 class ServiceError(Exception):
-    def __init__(self, status: int, message: str):
+    def __init__(self, status: int, message: str, *, code: str | None = None):
         self.status, self.message = status, message
+        self.code = code
         super().__init__(message)
 
 
@@ -484,7 +485,8 @@ class Service:
     def accessible_asset(self, db, asset_id, owner, kind=None, require_enabled=False):
         row = db.execute('SELECT * FROM assets WHERE id=? AND (owner_id=? OR shared=1)', (asset_id, owner)).fetchone()
         if not row or (kind and row['kind'] != kind) or (require_enabled and not row['enabled']):
-            raise ServiceError(404, '素材不存在、类型不符或无权使用')
+            raise ServiceError(404, '素材不存在、类型不符或无权使用',
+                               code='asset_selection_unavailable' if require_enabled else None)
         return dict(row)
 
     def verified_file(self, path, expected, description='保存文件'):

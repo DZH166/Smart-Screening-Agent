@@ -256,6 +256,18 @@ small {
   color: #945d41;
   border-color: #eddbc9;
 }
+.asset-selection-notice,
+.asset-selection-actions {
+  flex-wrap: wrap;
+}
+.asset-selection-notice strong {
+  display: block;
+  margin-bottom: 3px;
+}
+.asset-selection-actions {
+  display: flex;
+  gap: 8px;
+}
 .notice.success {
   background: #edf5e9;
   color: #477047;
@@ -501,6 +513,10 @@ small {
   height: 46px;
   width: 46px;
   object-fit: contain;
+}
+.unavailable-pattern {
+  font-size: 11px;
+  color: #945d41;
 }
 .pattern-tile > span {
   display: block;

@@ -18,7 +18,15 @@ const work=(id,versions)=>({id,name:'合成作品 '+id,current_version_id:versio
 const original=work('old',[version('old-0','old'),version('old-1','old',1,'old-0')]);
 const other=work('other',[version('other-0','other')]);
 const works=[original,other],jobs=new Map(),writes=[],reads=[],keys=new Map(),errors=[];
-let next=0,legacyMode='ok';
+let next=0,legacyMode='ok', removeOnGenerate=false;
+const starterAssets=[
+ {id:'pattern',name:'合成图案',kind:'pattern',is_demo:true,shared:true,url:image},
+ {id:'background',name:'合成底纹',kind:'background',is_demo:true,shared:true,url:image},
+ {id:'demo-flower',name:'合成默认图案',kind:'pattern',is_demo:true,shared:true,url:image},
+ {id:'demo-bg-sage',name:'合成默认底纹',kind:'background',is_demo:true,shared:true,url:image},
+];
+let assetCatalog=starterAssets;
+const assetError='素材不存在、类型不符或无权使用';
 const server=createServer(async(req,res)=>{
  const p=new URL(req.url,'http://localhost').pathname;
  const json=(v,status=200)=>{if(!res.destroyed){res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(v));}};
@@ -31,7 +39,7 @@ const server=createServer(async(req,res)=>{
   if(p==='/api/ribbon/auth/me')return json({id:'synthetic-no-refine',username:'合成员工',role:'employee'});
   // Deliberately expose legacy capabilities: the frontend must never show edits.
   if(p==='/api/ribbon/config')return json({provider:'deepseek_seedream',ai_ready:true,ai_draft_available:true,output_profile:profile,max_refinements:2,editing:{allowed_operations:['parameters','edit_background']}});
-  if(p==='/api/ribbon/assets')return json([{id:'pattern',name:'合成图案',kind:'pattern',is_demo:true,shared:true,url:image},{id:'background',name:'合成底纹',kind:'background',is_demo:true,shared:true,url:image},{id:'demo-flower',name:'合成默认图案',kind:'pattern',is_demo:true,shared:true,url:image},{id:'demo-bg-sage',name:'合成默认底纹',kind:'background',is_demo:true,shared:true,url:image}]);
+  if(p==='/api/ribbon/assets')return json(assetCatalog);
   if(p==='/api/ribbon/templates')return json([{id:'grid',name:'整齐平铺',mode:'grid',version:1,enabled:true,thumbnail_url:image,rules:{}}]);
   if(p==='/api/ribbon/design-styles')return json(styles);
   if(p==='/api/ribbon/designs'){
@@ -50,6 +58,15 @@ const server=createServer(async(req,res)=>{
    if(match[2]==='refinements')throw new Error('FORBIDDEN: ribbon refinement requested');
    if(match[2]==='rollback'){assert.equal(body.expected_version_id,d.current_version_id);d.current_version_id=d.versions.find(v=>v.id===d.current_version_id).parent_version_id;return json(d);}
    if(match[2]==='generate'){
+    if(removeOnGenerate){
+     removeOnGenerate=false;
+     assetCatalog=assetCatalog.filter(asset=>asset.id!=='draft-5');
+    }
+    const references=[...body.asset_ids.map(id=>[id,'pattern']),[body.background_id,'background'],
+      ...Object.values(body.zone_background_refs||{}).map(id=>[id,'background']),
+      ...(body.border_ref?[[body.border_ref,'pattern']]:[])];
+    if(references.some(([id,kind])=>!assetCatalog.some(asset=>asset.id===id&&asset.kind===kind)))
+     return json({detail:assetError,code:'asset_selection_unavailable'},404);
     let job=keys.get(body.idempotency_key);
     if(!job){assert.equal(d.current_version_id,null,'generate only targets a separate empty work');const v=version(d.id+'-v0',d.id);v.snapshot.design_style=body.design_style;d.versions.push(v);d.current_version_id=v.id;job={id:'job-'+d.id,design_id:d.id,kind:'generate',status:'SUCCEEDED',phase:'completed',result_version_id:v.id};keys.set(body.idempotency_key,job);jobs.set(job.id,job);}
     return json(job);
@@ -63,6 +80,94 @@ const server=createServer(async(req,res)=>{
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 const browser=await chromium.launch({channel:process.env.HSD_BROWSER_CHANNEL||'chrome',headless:true});
 const url='http://127.0.0.1:'+server.address().port+'/#ribbon';
+async function checkAssetRecovery(){
+ const patterns=Array.from({length:5},(_,index)=>({id:'draft-'+(index+1),name:'合成草稿图案 '+(index+1),
+  kind:'pattern',is_demo:true,shared:true,url:image}));
+ const valid=patterns.slice(0,4).map(asset=>asset.id), chosen=patterns.map(asset=>asset.id);
+ const assetReads=()=>reads.filter(r=>r.method==='GET'&&r.path==='/api/ribbon/assets').length;
+ const generations=()=>writes.filter(w=>w.path.endsWith('/generate'));
+ const recoveryChecks=[];
+ for(const scenario of ['stale-saved-selection','removed-after-catalog-read']){
+  const staleSaved=scenario==='stale-saved-selection';
+  const draft=work(scenario,[]);
+  works.push(draft);
+  assetCatalog=[...starterAssets,...(staleSaved?patterns.slice(0,4):patterns)];
+  const page=await browser.newPage({viewport:{width:1366,height:768}});
+  page.setDefaultTimeout(5000);
+  page.on('pageerror',error=>errors.push(String(error)));
+  try{
+   const initialWrites=generations().length;
+   let backgroundReads=0;
+   await page.route('**/api/ribbon/jobs/asset-recovery-background',route=>{
+    backgroundReads++;
+    return staleSaved
+     ? route.fulfill({status:404,json:{detail:'合成底图任务已过期'}})
+     : route.fulfill({json:{id:'asset-recovery-background',kind:'background',status:'SUCCEEDED',result_asset_id:'expired-background-asset'}});
+   });
+   await page.addInitScript(({id,chosen})=>{
+    localStorage.setItem('ribbon:synthetic-no-refine:design',JSON.stringify(id));
+    localStorage.setItem('ribbon:synthetic-no-refine:backgroundJob',JSON.stringify('asset-recovery-background'));
+    localStorage.setItem('ribbon:synthetic-no-refine:backgroundTarget',JSON.stringify({design_id:id}));
+    localStorage.setItem('ribbon:synthetic-no-refine:selection',JSON.stringify({design_id:id,base_version_id:null,value:{
+     asset_ids:chosen,background_id:'background',template_id:'grid',design_style:'hierarchy',background_tone:'soft',design_density:'balanced',
+    }}));
+   },{id:draft.id,chosen});
+   await page.goto(url);
+   await page.getByRole('heading',{name:draft.name,exact:true}).waitFor();
+   const generate=page.getByRole('button',{name:'生成首稿',exact:true});
+   await generate.waitFor();
+   await page.getByText(staleSaved?/上次的底图任务已不可用/:/上次生成的底图已不可用/).waitFor();
+   assert.equal(backgroundReads,1,'restore the prior background task only once');
+   assert.deepEqual(await page.evaluate(()=>{
+    const prefix='ribbon:synthetic-no-refine:';
+    return [JSON.parse(localStorage.getItem(prefix+'backgroundJob')),
+      JSON.parse(localStorage.getItem(prefix+'backgroundTarget')),
+      JSON.parse(localStorage.getItem(prefix+'selection')).value.background_id];
+   }),[null,null,'background'],'expired task/result cleanup preserves the currently selected valid background');
+   assert.equal(generations().length,initialWrites,'startup recovery never submits a first draft');
+   const initialReads=assetReads();
+   if(!staleSaved){
+    assert.equal(await page.locator('.selected-patterns .pattern-tile').count(),5);
+    assert.equal(await generate.isEnabled(),true);
+    // The catalog was valid when rendered. Invalidate only when the next
+    // generate request reaches the server so this exercises the race/404.
+    removeOnGenerate=true;
+    await generate.click();
+   }
+   const notice=page.getByText(/所选素材有变动/).first();
+   await notice.waitFor();
+   const remove=page.getByRole('button',{name:'移除不可用素材',exact:true});
+   const refresh=page.getByRole('button',{name:'刷新素材库',exact:true});
+   await remove.waitFor();await refresh.waitFor();
+   assert.equal(await generate.isEnabled(),false,'unavailable selections block generate until the employee changes them');
+   await page.locator('.selected-patterns').getByText(/不可用/).first().waitFor();
+   const beforeRecovery=initialWrites+(staleSaved?0:1);
+   assert.equal(generations().length,beforeRecovery,'catalog recovery cannot silently replay generation');
+   if(!staleSaved)assert.ok(assetReads()>initialReads,'the typed 404 refreshes the current catalog');
+   const beforeRefresh=assetReads();
+   await Promise.all([page.waitForResponse(r=>r.request().method()==='GET' && new URL(r.url()).pathname==='/api/ribbon/assets'),refresh.click()]);
+   assert.ok(assetReads()>beforeRefresh,'manual refresh reads the catalog again');
+   assert.equal(generations().length,beforeRecovery,'manual catalog refresh cannot generate');
+   await remove.click();
+   assert.equal(await page.locator('.selected-patterns .pattern-tile').count(),4);
+   await generate.click();
+   await page.getByRole('link',{name:'下载循环单元',exact:true}).waitFor();
+   const accepted=generations().at(-1).body;
+   assert.equal(generations().length,beforeRecovery+1);
+   assert.deepEqual(accepted.asset_ids,valid,'preserve the other four selected patterns in order');
+   assert.equal(accepted.background_id,'background');
+   assert.equal(accepted.template_id,'grid');
+   assert.equal(accepted.design_style,'hierarchy');
+   assert.equal(accepted.background_tone,'soft');
+   recoveryChecks.push({scenario,background_recovery:staleSaved?'expired_job_cleared':'unavailable_result_not_selected',valid_choices_preserved:true,no_automatic_resubmit:true});
+  }finally{
+   removeOnGenerate=false;
+   await page.close();
+  }
+ }
+ assert.deepEqual(errors,[]);
+ console.log(JSON.stringify({source:'synthetic_asset_recovery',checks:recoveryChecks,real_model_calls:0}));
+}
 async function assertNoRefinement(page){
  assert.equal(await page.locator('.refinement-panel,#refinement,.refinement-result,.target-overlay,.remaining-edits').count(),0);
  const text=await page.locator('#ribbon-mount').evaluate(el=>el.shadowRoot.textContent);
@@ -74,7 +179,10 @@ try{
  const page=await browser.newPage({viewport:{width:1366,height:768}});page.on('pageerror',e=>errors.push(String(e)));
  await page.goto(url);await page.getByRole('heading',{name:'合成作品 old',exact:true}).waitFor();
  await assertNoRefinement(page);
- if(process.argv.includes('--creation-fence-only')){
+ if(process.argv.includes('--asset-recovery-only')){
+  await page.close();
+  await checkAssetRecovery();
+ }else if(process.argv.includes('--creation-fence-only')){
   await page.close();
   for(const trigger of ['generate','newDesign']){
    const p=await browser.newPage({viewport:{width:1366,height:768}});await p.goto(url);

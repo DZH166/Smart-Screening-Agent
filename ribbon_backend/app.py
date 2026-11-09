@@ -104,7 +104,10 @@ def create_app(settings: Settings | None = None, *, service: Service | None = No
 
     @app.exception_handler(ServiceError)
     async def service_error(request, error):
-        return JSONResponse(status_code=error.status, content={'detail': error.message})
+        body = {'detail': error.message}
+        if error.code:
+            body['code'] = error.code
+        return JSONResponse(status_code=error.status, content=body)
 
     @app.middleware('http')
     async def boundaries(request, call_next):

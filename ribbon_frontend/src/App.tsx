@@ -425,6 +425,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
   const [initError,setInitError] = useState("");
   const [listLoading,setListLoading] = useState(false);
   const [listError,setListError] = useState("");
+  const [assetRefreshRequired, setAssetRefreshRequired] = useState(false);
   const listAbort = useRef<AbortController|null>(null);
   const [config, setConfig] = useState<Config | null>(null),
     [assets, setAssets] = useState<Asset[]>([]),
@@ -551,10 +552,26 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
   const roles = roleChoices ? normalizedPatternRoles(selection.asset_ids, template?.mode || "", selection.pattern_roles) : {};
   const layoutIssue = layoutSelectionIssue(template?.mode, selection.asset_ids.length, modern) ||
     (roleChoices && selection.asset_ids.length > 0 && !Object.values(roles).includes("main") ? "至少保留一个主图，再安排配角、点缀或边饰。" : "");
+  const background = assetIndex.get(selection.background_id);
+  const unavailablePatterns = selection.asset_ids.map((id, index) => ({ id, index }))
+    .filter(({ id }) => assetIndex.get(id)?.kind !== "pattern");
+  const unavailableBackground = !!selection.background_id && background?.kind !== "background";
+  const unavailableZones = Object.entries(selection.zone_background_refs || {})
+    .filter(([, id]) => assetIndex.get(id)?.kind !== "background").map(([zone]) => zone);
+  const unavailableBorder = !!selection.border_ref && assetIndex.get(selection.border_ref)?.kind !== "pattern";
+  const unavailableLabels = [
+    unavailablePatterns.length ? `图案第 ${unavailablePatterns.map(({ index }) => index + 1).join("、")} 项` : "",
+    unavailableBackground ? "底图" : "",
+    ...unavailableZones.map(zone => zoneNames[zone] ? `${zoneNames[zone]}底纹` : "分区底纹"),
+    unavailableBorder ? "边饰" : "",
+  ].filter(Boolean);
+  const selectionUnavailable = unavailableLabels.length > 0;
   const ready =
     selection.asset_ids.length > 0 &&
     !!selection.background_id &&
     !!template &&
+    !selectionUnavailable &&
+    !assetRefreshRequired &&
     !layoutIssue;
   const changed =
     !!current &&
@@ -577,10 +594,6 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
       candidateAbort.current?.abort();
     };
   }, [candidateScope]);
-  const selectedPatterns = selection.asset_ids
-    .map((id) => assetIndex.get(id))
-    .filter(Boolean) as Asset[];
-  const background = assetIndex.get(selection.background_id);
   const visibleTemplates = templates.filter((t) => t.enabled || t.id === selection.template_id);
   const basicTemplates = visibleTemplates.filter((t) => basicLayoutModes.has(t.mode));
   const moreTemplates = visibleTemplates.filter((t) => !basicLayoutModes.has(t.mode));
@@ -635,6 +648,30 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
       base_version_id: designRef.current?.current_version_id || null,
       value,
     });
+  }
+  function removeUnavailableAssets() {
+    const unusable = new Set(unavailablePatterns.map(({ id }) => id));
+    updateSelection({
+      ...selection,
+      asset_ids: selection.asset_ids.filter(id => !unusable.has(id)),
+      background_id: unavailableBackground ? "" : selection.background_id,
+      border_ref: unavailableBorder ? undefined : selection.border_ref,
+      zone_background_refs: selection.zone_background_refs && Object.fromEntries(
+        Object.entries(selection.zone_background_refs).filter(([zone]) => !unavailableZones.includes(zone))
+      ),
+    });
+  }
+  async function refreshSelectionAssets(signal?: AbortSignal) {
+    setAssetRefreshRequired(true);
+    try {
+      const catalog = await api<Asset[]>("/assets", { signal });
+      if (!mounted.current || signal?.aborted || !Array.isArray(catalog)) return;
+      setAssets(catalog);
+      setAssetRefreshRequired(false);
+    } catch (error) {
+      if (!mounted.current || signal?.aborted) return;
+      if (error instanceof ApiError && error.status === 401) onLogout();
+    }
   }
   function applyDesign(d: Design, force = false) {
     const changedVersion = lastVersion.current !== d.current_version_id;
@@ -700,6 +737,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
 
   async function previewCandidates() {
     if (candidateAbort.current || locked || !active || view !== "ribbon") return;
+    if (selectionUnavailable || assetRefreshRequired) return;
     if (!selection.asset_ids.length || !selection.background_id || !selection.template_id) {
       setCandidateError("先选择图案、底纹和排版");
       return;
@@ -737,6 +775,11 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
         } catch (error) {
           if (stale()) return;
           if (error instanceof ApiError && error.status === 401) { onLogout(); return; }
+          if (error instanceof ApiError && error.code === "asset_selection_unavailable") {
+            setCandidates(null);
+            await refreshSelectionAssets(controller.signal);
+            break;
+          }
           setCandidateError(message(error));
         }
         if (!stale()) setCandidateDone((done) => done + 1);
@@ -777,7 +820,10 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
         ] as const);
         if (cancelled) return;
         const [ar,tr,cr,dr,sr] = results;
-        if (ar.status==="fulfilled") setAssets(ar.value);
+        if (ar.status==="fulfilled") {
+          setAssets(ar.value);
+          setAssetRefreshRequired(false);
+        }
         if (tr.status==="fulfilled") setTemplates(tr.value);
         if (cr.status==="fulfilled") setConfig(cr.value);
         if (dr.status==="fulfilled") setDesigns(dr.value);
@@ -807,8 +853,18 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
         }
         const bgId = loadLocal<string | null>(prefix + "backgroundJob", null);
         if (bgId) {
-          const bg = await api<Job>(`/jobs/${bgId}`, {signal:controller.signal});
-          if (!cancelled) setBackgroundJob(bg);
+          try {
+            const bg = await api<Job>(`/jobs/${bgId}`, { signal: controller.signal });
+            if (!cancelled) setBackgroundJob(bg);
+          } catch (error) {
+            if (!(error instanceof ApiError) || ![404, 410].includes(error.status)) throw error;
+            if (!cancelled && loadLocal(prefix + "backgroundJob", null) === bgId) {
+              saveLocal(prefix + "backgroundJob", null);
+              saveLocal(prefix + "backgroundTarget", null);
+              setBackgroundJob(null);
+              setNotice({ text: "上次的底图任务已不可用，请从底图库选择底图。", type: "info" });
+            }
+          }
         }
       } catch (e) {
         if (!cancelled) {
@@ -932,7 +988,8 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
           prefix + "backgroundTarget",
           null,
         );
-        if (!target || target.design_id === (designRef.current?.id || null))
+        const available = a.some(asset => asset.id === backgroundJob.result_asset_id && asset.kind === "background");
+        if (available && (!target || target.design_id === (designRef.current?.id || null)))
           setSelection((prev) => {
             const value = {
               ...prev,
@@ -946,7 +1003,10 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
             return value;
           });
         saveLocal(prefix + "backgroundJob", null);
-        setNotice({ text: "已恢复上次完成的底图。", type: "success" });
+        saveLocal(prefix + "backgroundTarget", null);
+        setNotice(available
+          ? { text: "已恢复上次完成的底图。", type: "success" }
+          : { text: "上次生成的底图已不可用，请从底图库重新选择。", type: "info" });
       })
       .catch(() => {if (!controller.signal.aborted && mounted.current) setOffline(true);});
     return ()=>controller.abort();
@@ -1009,6 +1069,11 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
       }
       if (e instanceof ApiError && e.status === 401) {
         onLogout();
+        return;
+      }
+      if (!legacyRead && e instanceof ApiError && e.code === "asset_selection_unavailable") {
+        setNotice(null);
+        await refreshSelectionAssets();
         return;
       }
       setNotice({
@@ -1418,6 +1483,22 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
             </button>
           </div>
         )}
+        {!loading && !initError && (selectionUnavailable || assetRefreshRequired) && (
+          <div className="notice error asset-selection-notice" id="ribbon-asset-issue" role="alert">
+            <div>
+              <strong>所选素材有变动</strong>
+              <div>{assetRefreshRequired
+                ? "请刷新素材库，确认当前可用素材。"
+                : `${unavailableLabels.join("、")}已不可用，请移除或重新选择后再生成。`}</div>
+            </div>
+            <div className="asset-selection-actions">
+              {selectionUnavailable && !assetRefreshRequired && <button type="button" className="secondary small"
+                disabled={locked || candidateBusy} onClick={removeUnavailableAssets}>移除不可用素材</button>}
+              <button type="button" className="secondary small" disabled={locked || candidateBusy}
+                onClick={() => void action(() => refreshSelectionAssets())}>刷新素材库</button>
+            </div>
+          </div>
+        )}
         {offline && (
           <div className="notice error" role="status">
             连接暂时中断，正在重连。后台任务和已保存版本不会因此重置。
@@ -1491,28 +1572,32 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                   hidden
                   onChange={(e) => void upload(e.target.files, "pattern")}
                 />
-                {selectedPatterns.length ? (
+                {selection.asset_ids.length ? (
                   <div className={`selected-patterns${roleChoices ? " has-pattern-roles" : ""}`}>
-                    {selectedPatterns.map((a, index) => (
-                      <div className="pattern-tile" key={a.id}>
+                    {selection.asset_ids.map((id, index) => {
+                      const asset = assetIndex.get(id);
+                      const a = asset?.kind === "pattern" ? asset : undefined;
+                      const name = a?.name || `第 ${index + 1} 个图案`;
+                      return <div className="pattern-tile" key={id}>
                         <div className="checker">
-                          <RecoverableImage src={a.thumbnail_url || a.url} alt={a.name} decoding="async" />
+                          {a ? <RecoverableImage src={a.thumbnail_url || a.url} alt={a.name} decoding="async" />
+                            : <span className="unavailable-pattern">不可用</span>}
                           <button
                             className="remove-asset"
                             disabled={locked}
-                            aria-label={`移除${a.name}`}
-                            onClick={() => togglePattern(a.id)}
+                            aria-label={`移除${name}`}
+                            onClick={() => togglePattern(id)}
                           >
                             ×
                           </button>
                         </div>
-                        <span title={`第 ${index + 1} 个图案：${a.name}`}>{index + 1}. {a.name}</span>
-                        {roleChoices && <select className="pattern-role" aria-label={`图案 ${index + 1} 的排版角色`} value={roles[a.id]} disabled={locked}
-                          onChange={event => updateSelection({...selection, pattern_roles:{...roles,[a.id]:event.target.value as PatternRole}})}>
+                        <span title={name}>{index + 1}. {a?.name || "图案"}</span>
+                        {a && roleChoices && <select className="pattern-role" aria-label={`图案 ${index + 1} 的排版角色`} value={roles[id]} disabled={locked}
+                          onChange={event => updateSelection({...selection, pattern_roles:{...roles,[id]:event.target.value as PatternRole}})}>
                           {roleChoices.map(choice => <option key={choice.value} value={choice.value}>{choice.label}</option>)}
                         </select>}
-                      </div>
-                    ))}
+                      </div>;
+                    })}
                   </div>
                 ) : (
                   <button
@@ -1604,7 +1689,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                         );
                       })}
                     </div>
-                    <button type="button" className="primary small" disabled={locked || candidateBusy}
+                    <button type="button" className="primary small" disabled={locked || candidateBusy || selectionUnavailable || assetRefreshRequired}
                       onClick={() => void previewCandidates()}>
                       {candidateBusy ? `正在试排 ${candidateDone}/${candidateQueue.length}` : `试排这 ${trialStyles.length} 种风格`}
                     </button>
@@ -1700,7 +1785,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                   />
                   {!aiAvailable && <p className="model-help" id="background-ai-unavailable">AI 尚未配置，仍可从底图库选图。</p>}
                 </details>
-                {background ? (
+                {background?.kind === "background" ? (
                   <div className="background-selected">
                     <RecoverableImage src={background.thumbnail_url || background.url} alt="选中的底图" loading="lazy" decoding="async" />
                     <div>
@@ -1752,7 +1837,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                     <button
                       className="primary generation-button"
                       disabled={creationUncertain || !ready || locked || backgroundProcessing}
-                      aria-describedby={layoutIssue ? "ribbon-layout-issue" : undefined}
+                      aria-describedby={selectionUnavailable || assetRefreshRequired ? "ribbon-asset-issue" : layoutIssue ? "ribbon-layout-issue" : undefined}
                       onClick={() => void generate()}
                     >
                       {processing ? (

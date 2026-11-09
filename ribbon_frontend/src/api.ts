@@ -190,9 +190,11 @@ export type Overview = {
 };
 export class ApiError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  code?: string;
+  constructor(message: string, status: number, code?: string) {
     super(message);
     this.status = status;
+    this.code = code;
   }
 }
 export async function api<T>(
@@ -236,8 +238,10 @@ export async function api<T>(
   }
   if (!response.ok) {
     let message = `请求失败（${response.status}）`;
+    let code: string | undefined;
     try {
       const data = await response.json();
+      if (typeof data?.code === "string") code = data.code;
       message =
         typeof data.detail === "string"
           ? data.detail
@@ -245,7 +249,7 @@ export async function api<T>(
     } catch {
       /* keep status */
     }
-    throw new ApiError(message, response.status);
+    throw new ApiError(message, response.status, code);
   }
   if (response.status === 204) return undefined as T;
   return await response.json() as T;
