@@ -17,7 +17,7 @@ const fixture = "/api/ribbon/synthetic-loop.svg";
 const svg = (width = 1200, height = 520) => `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><rect width="100%" height="100%" fill="#e5eee0"/><circle cx="${width * .2}" cy="${height * .5}" r="${height * .25}" fill="#a9c68e"/><text x="${width * .4}" y="${height * .55}" font-size="${height * .1}">SYNTHETIC ONLY</text></svg>`;
 const assets = ["flower", "star"].map(name => ({ id: `demo-${name}`, name: `合成图案 ${name}`, kind: "pattern", source: "synthetic", is_demo: true, shared: true, url: fixture, thumbnail_url: fixture }));
 assets.push({ id: "demo-bg-sage", name: "合成底图", kind: "background", source: "synthetic", is_demo: true, shared: true, url: fixture, thumbnail_url: fixture });
-const templates = ["stagger", "ends", "split", "bordered", "scene", "scatter"].map(mode => ({ id: mode, name: mode, mode, version: 1, enabled: true, rules: {}, thumbnail_url: fixture }));
+const templates = ["stagger", "ends", "split", "bordered", "scene", "scatter", "fullwidth"].map(mode => ({ id: mode, name: mode, mode, version: 1, enabled: true, rules: {}, thumbnail_url: fixture }));
 const makeVersion = (id, sequence, parent, engine = "seamless-unit-v1", mode = "stagger") => ({
   id, design_id: "LOOP", sequence, parent_version_id: parent, prompt: sequence ? "旧版本说明" : "", render_kind: "parameters", provider: "test", created_at: "2026-11-04", editing,
   preview_url: `${fixture}?version=${id}`, view_url: `/api/ribbon/versions/${id}/view`, download_url: `/api/ribbon/versions/${id}/download`,
@@ -220,8 +220,8 @@ try {
     await page.screenshot({path:path.join(out,`ribbon-roles-${width}.png`)});
   }
   await page.setViewportSize(roleViewport);
-  await page.getByLabel("图案 1 的排版角色",{exact:true}).selectOption("accent");
-  assert.equal(await page.getByRole("button",{name:"生成新作品",exact:true}).isEnabled(),false,"accent-only content cannot become a valid composition");
+  await page.getByLabel("图案 1 的排版角色",{exact:true}).selectOption("decoration");
+  assert.equal(await page.getByRole("button",{name:"生成新作品",exact:true}).isEnabled(),false,"ornaments without a main cannot become a valid composition");
   await page.getByLabel("图案 1 的排版角色",{exact:true}).selectOption("main");
   await page.getByLabel("图案 2 的排版角色",{exact:true}).selectOption("support");
   assert.equal(await page.getByRole("button",{name:"生成新作品",exact:true}).isEnabled(),true,"valid roles prepare a new work");
@@ -229,8 +229,68 @@ try {
   await choose("EMPTY");
   await page.getByRole("button", { name: "生成首稿", exact: true }).waitFor();
   assert.equal(await page.locator(".loop-preview, a[download]").count(), 0);
+  const uploaded = ["synthetic-main", "synthetic-decoration"];
+  let uploadCount = 0;
+  await page.route("**/api/ribbon/assets", route => {
+    if (route.request().method() !== "POST") return route.continue();
+    const id = uploaded[uploadCount++];
+    assert.ok(route.request().postDataBuffer().includes(Buffer.from('filename="' + id + '.png"')));
+    const asset = { ...assets[0], id, name: id, shared: false };
+    assets.push(asset);
+    return route.fulfill({ json: asset });
+  });
+  const pixel = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aJH0AAAAASUVORK5CYII=", "base64");
+  const [uploadPicker] = await Promise.all([
+    page.waitForEvent("filechooser"), page.getByRole("button", { name: "上传图案", exact: true }).click(),
+  ]);
+  await uploadPicker.setFiles(uploaded.map(id => ({ name: id + ".png", mimeType: "image/png", buffer: pixel })));
+  const role = index => page.getByLabel("图案 " + index + " 的排版角色", { exact: true });
+  await role(2).waitFor();
+  assert.equal(uploadCount, 2);
+  await page.locator(".template-card").filter({ hasText: "stagger" }).click();
+  assert.equal(await role(1).inputValue(), "main");
+  assert.equal(await role(2).inputValue(), "main", "new uploads are not inferred to be ornaments");
+  await role(2).selectOption({ label: "周围装饰" });
+  await page.getByRole("button", { name: "底图库", exact: true }).click();
+  const backgrounds = page.getByRole("dialog", { name: "底图素材库", exact: true });
+  await backgrounds.locator(".library-card").first().click();
+  await backgrounds.getByRole("button", { name: "完成选择" }).click();
+  const selectMoreLayout = async name => {
+    await page.getByRole("button", { name: /^更多排法/ }).click();
+    const picker = page.getByRole("dialog", { name: "选择排版模式", exact: true });
+    await picker.locator(".template-card").filter({ hasText: name }).click();
+    await picker.getByRole("button", { name: "完成选择" }).click();
+  };
+  await selectMoreLayout("split");
+  const generate = page.getByRole("button", { name: "生成首稿", exact: true });
+  assert.equal(await role(2).inputValue(), "decoration");
+  assert.equal(await generate.isEnabled(), false, "a decoration cannot provide the second subject for split");
+  await page.getByRole("button", { name: "素材库", exact: true }).click();
+  const library = page.getByRole("dialog", { name: "图案素材库", exact: true });
+  await library.locator(".library-card").filter({ hasText: "合成图案 flower" }).click();
+  await library.getByRole("button", { name: "完成选择" }).click();
+  assert.equal(await role(2).inputValue(), "decoration");
+  assert.equal(await role(3).inputValue(), "main");
+  assert.equal(await generate.isEnabled(), true);
+  await page.getByRole("button", { name: "移除合成图案 flower", exact: true }).click();
+  await selectMoreLayout("fullwidth");
+  assert.equal(await generate.isEnabled(), true, "one subject plus a decoration is valid for fullwidth");
+  await page.reload();
+  await role(2).waitFor();
+  assert.equal(await role(2).inputValue(), "decoration", "role survives a reload under the same draft");
+  let generation;
+  await page.route("**/api/ribbon/designs/EMPTY/generate", route => {
+    generation = route.request().postDataJSON();
+    return route.fulfill({ status: 422, json: { detail: "合成测试已记录首稿参数" } });
+  });
+  await generate.click();
+  await page.getByText("合成测试已记录首稿参数", { exact: true }).waitFor();
+  assert.equal(generation.template_id, "fullwidth");
+  assert.equal(generation.background_id, "demo-bg-sage");
+  assert.deepEqual(generation.asset_ids, uploaded);
+  assert.deepEqual(generation.pattern_roles, { "synthetic-main": "main", "synthetic-decoration": "decoration" });
   assert.deepEqual(errors, []);
-  const result = { fixture: "synthetic HTTP only; no business images, no model calls", initialPreviewReads, repeatControlsExtraReads: 0, loopDefault: "unit", repeatedCopies: 3, seams: true, warningsVisible: true, sourceDetailsCollapsed: true, pollingPreservesView: true, versionDownload: true, historicRollback: true, legacyV1V2: true, switchingRejectsStaleImageAndResponse: true, responsiveWidths: [1920, 1366, 640, 375] };
+  const result = { fixture: "synthetic HTTP only; no business images, no model calls", initialPreviewReads, repeatControlsExtraReads: 0, loopDefault: "unit", repeatedCopies: 3, seams: true, warningsVisible: true, sourceDetailsCollapsed: true, pollingPreservesView: true, versionDownload: true, historicRollback: true, legacyV1V2: true, switchingRejectsStaleImageAndResponse: true, responsiveWidths: [1920, 1366, 640, 375], decorationUploadAndReload: true, decorationsDoNotCountAsSubjects: true, decorationRoleSubmittedByAssetId: true };
   await writeFile(path.join(out, "loop-preview.json"), JSON.stringify(result, null, 2));
   console.log(JSON.stringify(result));
 } finally { releaseSlow?.(); await browser.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }

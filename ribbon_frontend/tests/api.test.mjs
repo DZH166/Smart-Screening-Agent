@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { api, post, setRequestToken, ApiError, normalizedPatternRoles, snapshotPatternRoles, isDirectLayoutReference } from "../src/api.ts";
+import { api, post, setRequestToken, ApiError, normalizedPatternRoles, patternRoleChoices, snapshotPatternRoles, isDirectLayoutReference } from "../src/api.ts";
 
 test("one company case can be direct for one layout and only partial for another", () => {
   const example={available:true,reference_only:false,mode_tags:["split","panels"],mode_notes:{split:{fit:"direct"},panels:{fit:"partial"}}};
@@ -18,7 +18,12 @@ test("pattern roles preserve stable ownership after replacement and discard stal
   assert.deepEqual(normalizedPatternRoles(["a","b"],"bordered"),{a:"main",b:"main"},"a second person never silently becomes trim");
   assert.deepEqual(normalizedPatternRoles(["a","b"],"scatter",{a:"main",b:"accent",removed:"border"}),{a:"main",b:"accent"});
   assert.deepEqual(normalizedPatternRoles(["a","b"],"bordered",{a:"main",b:"accent"}),{a:"main",b:"main"});
-  assert.deepEqual(normalizedPatternRoles(["a","b"],"single",{a:"main",b:"accent"}),{});
+  assert.deepEqual(normalizedPatternRoles(["a","b"],"single",{a:"main",b:"accent"}),{a:"main",b:"main"});
+  assert.deepEqual(normalizedPatternRoles(["a","b","c"],"scene",{a:"decoration"}),{a:"decoration",b:"main",c:"support"});
+  assert.deepEqual(patternRoleChoices("scene").map(choice=>choice.value),["main","decoration","support"]);
+  assert.equal(patternRoleChoices("scene","accent").at(-1).value,"accent","saved legacy accents remain readable");
+  for (const mode of ["grid","stagger","scatter","single","ends","panels","bordered","scene","fullwidth","alternating","ends_open","split","stacked","opposed"])
+    assert.deepEqual(normalizedPatternRoles(["a","b"],mode,{b:"decoration",removed:"decoration"}),{a:"main",b:"decoration"});
   const snapshot={layout_engine:"seamless-unit-v3",template_mode:"scene",asset_refs:["edited-a","b","c"],pattern_slots:["slot-a","slot-b","slot-c"],pattern_roles:{"slot-a":"main","slot-b":"support","slot-c":"accent"}};
   assert.deepEqual(snapshotPatternRoles(snapshot),{"edited-a":"main",b:"support",c:"accent"},"derived asset keeps its stable slot's role");
   assert.deepEqual(snapshotPatternRoles({...snapshot,layout_engine:"seamless-unit-v2"}),{},"legacy snapshots cannot activate role controls");

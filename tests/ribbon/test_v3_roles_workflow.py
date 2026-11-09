@@ -7,10 +7,12 @@ visual design quality or call paid models.
 from legacy_jobs import recover_legacy_refinement
 from copy import deepcopy
 import hashlib
+from io import BytesIO
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from PIL import Image
 
 from ribbon_backend import loop_pipeline_v2, loop_pipeline_v3
 from ribbon_backend.providers import workflow_editing, _safe_plan_input
@@ -54,7 +56,7 @@ def test_defaults_do_not_turn_every_uploaded_figure_into_border(workflow):
 
 
 @pytest.mark.parametrize('mode,mapping', [
-    ('single', {'selected': 'main'}),
+    ('single', {'selected': 'border'}),
     ('scene', {'selected': 'border'}),
     ('scatter', {'selected': 'support'}),
     ('bordered', {'selected': 'accent'}),
@@ -77,7 +79,9 @@ def test_invalid_roles_fail_before_a_job_or_model_call(workflow, mode, mapping):
         assert not db.execute('SELECT 1 FROM jobs WHERE design_id=?', (design['id'],)).fetchone()
 
 
-@pytest.mark.parametrize('mode,role', [('scene', 'support'), ('scatter', 'accent'), ('bordered', 'border')])
+@pytest.mark.parametrize('mode,role', [
+    ('scene', 'support'), ('scatter', 'accent'), ('bordered', 'border'), ('single', 'decoration'),
+])
 def test_at_least_one_main_is_required(workflow, mode, role):
     design = workflow.create()
     body = {**workflow.selection, 'template_id': mode,
@@ -146,6 +150,47 @@ def test_saved_v2_generation_refinement_download_remain_on_v2(workflow, monkeypa
     assert invalid.value.status == 422
     assert workflow.client.post(f'/api/designs/{changed["id"]}/refinements', json={}).status_code == 410
     assert workflow.get(changed)['successful_refinement_count'] == 1
+
+
+def test_decoration_reaches_trial_generate_and_download(workflow):
+    decoration, main, _ = workflow.selection['asset_ids']
+    selection = {**workflow.selection, 'template_id': 'fullwidth',
+                 'asset_ids': [decoration, main], 'pattern_roles': {decoration: 'decoration'}}
+    candidate = ok(workflow.client.post('/api/candidates/one', json={**selection, 'style': 'hierarchy'}))
+    assert candidate['image'].startswith('data:image/png;base64,')
+    version = current(workflow.generate({**selection, 'design_style': 'hierarchy'}))
+    snapshot = version['snapshot']
+    decoration_slot, main_slot = snapshot['pattern_slots']
+    assert snapshot['pattern_roles'] == {decoration_slot: 'decoration', main_slot: 'main'}
+    assert set(snapshot['slot_params']) == {main_slot}
+    ornament, = [part for part in snapshot['object_transforms'] if part['slot_id'] == decoration_slot]
+    assert ornament['role'] == 'decoration'
+    raw = workflow.download(version)
+    loop_pipeline_v3.validate_binding(snapshot, hashlib.sha256(raw).hexdigest())
+    with Image.open(BytesIO(raw)) as image:
+        x, y = ornament['x'], ornament['y']
+        assert image.getpixel((round(x), round(y)))[:3] == (199, 101, 135)
+    assert not (workflow.provider.plan_calls or workflow.provider.edit_calls or workflow.provider.draft_calls)
+
+
+def test_candidate_reports_ornament_that_cannot_fit(workflow):
+    main = workflow.selection['asset_ids'][0]
+    decoration = workflow.upload(png((1200, 2), '#23ab78'), 'ultrathin-ornament')['id']
+    selection = {**workflow.selection, 'asset_ids': [main, decoration],
+                 'pattern_roles': {decoration: 'decoration'}}
+    result = workflow.client.post('/api/candidates/one', json={**selection, 'style': 'classic'})
+    assert result.status_code == 422 and '完整放置装饰' in result.text
+    assert not workflow.provider.draft_calls
+
+
+def test_decoration_does_not_count_as_second_zone_main(workflow):
+    decoration, main, _ = workflow.selection['asset_ids']
+    body = {**workflow.selection, 'template_id': 'split', 'asset_ids': [main, decoration],
+            'pattern_roles': {decoration: 'decoration'}, 'idempotency_key': str(uuid4())}
+    design = workflow.create()
+    result = workflow.client.post(f'/api/designs/{design["id"]}/generate', json=body)
+    assert result.status_code == 422 and '至少选择2个主图' in result.text
+    assert workflow.get(design)['active_job_id'] is None
 
 
 def test_v3_geometry_signature_rejects_role_relabel(workflow):

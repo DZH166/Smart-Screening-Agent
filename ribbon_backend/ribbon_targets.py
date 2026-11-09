@@ -13,8 +13,8 @@ def configure_roles(selection, mode, snapshot, ids, slots):
 
     Unknown IDs fail even if the employee can access those assets: a role is
     only meaningful for a pattern in this specific selection. Roles are not
-    inferred from filenames or the image model. Mode changes reset omitted
-    roles; an explicit unsupported mapping is a request error.
+    inferred from filenames or the image model. Decorations survive a change
+    of layout; mode-specific roles reset unless explicitly selected.
     """
     from .service import ServiceError
     supplied = selection.get('pattern_roles')
@@ -22,23 +22,28 @@ def configure_roles(selection, mode, snapshot, ids, slots):
             or any(not isinstance(k, str) or not isinstance(v, str) for k, v in supplied.items())
             or set(supplied) - set(ids)):
         raise ServiceError(422, '图案用途与当前所选素材不一致，请重新选择')
-    choices = ROLE_CHOICES.get(mode, frozenset())
-    if supplied and (not choices or any(value not in choices for value in supplied.values())):
+    special = ROLE_CHOICES.get(mode, frozenset())
+    choices = special | {'main', 'decoration'}
+    if supplied is not None and any(value not in choices for value in supplied.values()):
         raise ServiceError(422, '此排法不支持所选图案用途，请重新选择')
-    if not choices:
-        snapshot['pattern_roles'] = {}
-        return
-    previous = snapshot.get('pattern_roles', {}) if snapshot.get('template_mode') == mode else {}
+    previous = snapshot.get('pattern_roles', {})
+    same_mode = snapshot.get('template_mode') == mode
     result = {}
-    for index, (asset, slot) in enumerate(zip(ids, slots)):
-        default = 'support' if mode == 'scene' and index else 'main'
-        value = supplied.get(asset, default) if supplied is not None else previous.get(slot, default)
+    has_structural_pattern = False
+    for asset, slot in zip(ids, slots):
+        saved = previous.get(slot)
+        if not same_mode and saved != 'decoration':
+            saved = None
+        value = supplied.get(asset) if supplied is not None else saved
+        if value is None:
+            value = 'support' if mode == 'scene' and has_structural_pattern else 'main'
         if value not in choices:
             raise ServiceError(422, '保存的图案用途已不适用，请重新选择')
         result[slot] = value
+        has_structural_pattern |= value != 'decoration'
     if 'main' not in result.values():
-        raise ServiceError(422, '请至少保留一个主图，配饰和边饰不能代替全部主体')
-    snapshot['pattern_roles'] = result
+        raise ServiceError(422, '请至少保留一张主图')
+    snapshot['pattern_roles'] = result if special or 'decoration' in result.values() else {}
 
 
 def loop_inputs(snapshot):

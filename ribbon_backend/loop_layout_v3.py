@@ -14,6 +14,7 @@ import random
 
 from . import loop_layout_v2 as previous
 from .imaging import _profile, png_space
+from .loop_decorations import place_decorations
 
 ENGINE = 'seamless-unit-v3'
 MODES = previous.MODES
@@ -33,6 +34,19 @@ def pattern_roles(snapshot, slots):
     if not isinstance(supplied, dict) or set(supplied) - set(slots):
         raise ValueError('图案角色与所选素材不一致')
     allowed = ROLE_MODES.get(mode)
+    if 'decoration' in supplied.values():
+        choices = (allowed or {'main'}) | {'decoration'}
+        if any(not isinstance(role, str) or role not in choices for role in supplied.values()):
+            raise ValueError('图案角色不适用于当前排法')
+        structural = [slot for slot in slots if supplied.get(slot) != 'decoration']
+        if not structural:
+            raise ValueError('请至少保留一个主体图案')
+        defaults = {slot: ('support' if mode == 'scene' and i else 'main')
+                    for i, slot in enumerate(structural)}
+        result = {slot: supplied[slot] if slot in supplied else defaults[slot] for slot in slots}
+        if 'main' not in result.values():
+            raise ValueError('请至少保留一个主体图案')
+        return result
     if allowed is None:
         if supplied:
             raise ValueError('此排法不使用主辅图案角色')
@@ -493,7 +507,69 @@ def _structured_metadata(snapshot,specs,placements,groups,width,h,dpi,roles,slot
     return placements,metadata
 
 
+def _build_with_decorations(snapshot, specs, slots, edits, roles):
+    primary = [i for i, slot in enumerate(slots) if roles[slot] != 'decoration']
+    accents = [i for i, slot in enumerate(slots) if roles[slot] == 'decoration']
+    if not 1 <= len(slots) <= 12 or len(specs) != len(slots):
+        raise ValueError('请选择 1–12 个图案并核对其尺寸')
+    if any(edits.get(slots[i]) for i in accents):
+        raise ValueError('周围装饰不能使用旧版精修参数')
+    primary_slots = [slots[i] for i in primary]
+    mode = snapshot['template_mode']
+    body, metadata = _build({
+        **snapshot,
+        'asset_refs': [snapshot['asset_refs'][i] for i in primary],
+        'pattern_slots': primary_slots,
+        'pattern_roles': {slot: roles[slot] for slot in primary_slots} if mode in ROLE_MODES else {},
+        'slot_params': {slot: edits[slot] for slot in primary_slots if slot in edits},
+    }, [specs[i] for i in primary])
+
+    # The body retains its original sizes, centres and cyclic phase. Only
+    # convert its indices back to the full, original user selection.
+    primary_groups = {id(group): {**group, 'sequence': [primary[i] for i in group['sequence']]}
+                      for group in metadata['groups']}
+    for placement in body:
+        placement['asset_index'] = primary[placement['asset_index']]
+        placement['repetition'] = primary_groups[id(placement['repetition'])]
+    width, height = metadata['period_px'], metadata['height_px']
+    main = [part for part in body if roles[part['slot_id']] == 'main']
+    decorations = place_decorations(mode, width, height, body, main,
+                                   [(i, slots[i], specs[i]) for i in accents],
+                                   int(snapshot.get('seed', 0)))
+    placements = [*body, *decorations]
+    if len(placements) > original.MAX_PLACEMENTS:
+        raise ValueError('完整循环单元包含过多图案，请减少装饰或主体')
+    metadata['groups'] = list(primary_groups.values())
+    metadata['specs'] = specs
+    metrics = metadata['metrics']
+    slot_metrics = metrics['slots']
+    for part in decorations:
+        target_w, target_h = part['target_width'], part['target_height']
+        top, bottom = part['region'][1], part['region'][3]
+        half_height = part['planned_height'] / 2
+        slot_metrics[part['slot_id']] = dict(copies=1, target_width_px=[target_w, target_w],
+            target_height_px=[target_h, target_h], rotations_deg=[0.],
+            free_up_px=round(part['y'] - half_height - top, 2),
+            free_down_px=round(bottom - part['y'] - half_height, 2))
+    metrics.update(slots={slot: slot_metrics[slot] for slot in slots}, pattern_roles=roles,
+        placements=len(placements), per_1000px=round(len(placements) * 1000 / width, 4),
+        footprint_ratio=round(sum(part['target_width'] * part['target_height']
+                                  for part in placements) / (width * height), 5),
+        decorations=len(decorations))
+    metadata['verification'].update(selected_asset_count=len(slots), placement_count=len(placements),
+        decoration_count=len(decorations), decorations_clear_of_patterns=True)
+    binding = (metadata['input_signature'], snapshot['asset_refs'], roles,
+               int(snapshot.get('seed', 0)), decorations)
+    metadata['input_signature'] = hashlib.sha256(
+        json.dumps(binding, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    return placements, metadata
+
+
 def _build(snapshot, specs):
+    supplied = snapshot.get('pattern_roles', {})
+    if isinstance(supplied, dict) and 'decoration' in supplied.values():
+        slots, edits = previous._slots(snapshot)
+        return _build_with_decorations(snapshot, specs, slots, edits, pattern_roles(snapshot, slots))
     if snapshot['template_mode'] == 'scatter':
         return _scatter(snapshot, specs)
     if snapshot['template_mode'] in ('scene','bordered','split','panels','stacked'):

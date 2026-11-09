@@ -286,17 +286,22 @@ class Service:
         raise ServiceError(409, '新增排版的默认标识已被占用，请联系管理员处理；已有模板没有改动')
 
     @staticmethod
-    def validate_layout_selection(mode, asset_ids, engine=None):
-        if mode == 'bordered' and len(asset_ids) < 2 and engine not in MODERN_LOOP_ENGINES:
+    def validate_layout_selection(snapshot):
+        mode = snapshot['template_mode']
+        roles = snapshot.get('pattern_roles', {})
+        count = len(snapshot['asset_refs']) - sum(
+            roles.get(slot) == 'decoration' for slot in snapshot.get('pattern_slots', ())
+        )
+        if mode == 'bordered' and count < 2 and snapshot.get('layout_engine') not in MODERN_LOOP_ENGINES:
             raise ServiceError(422, '上下边饰至少选择2个图案：第1个作主体，其余作上下边饰')
-        if mode == 'fullwidth' and len(asset_ids) != 1:
-            raise ServiceError(422, '整幅定位请选择1张完整设计；不会忽略其他所选图案')
-        if mode == 'ends_open' and len(asset_ids) not in (1, 2):
-            raise ServiceError(422, '两端留白请选择1或2个图案：1个放两端，2个分别放左右')
-        if mode == 'split' and len(asset_ids) < 2:
-            raise ServiceError(422, '左右分区至少选择2个图案：前半组放左区，后半组放右区')
-        if mode == 'stacked' and len(asset_ids) < 2:
-            raise ServiceError(422, '上下分区至少选择2个图案：前半组放上区，后半组放下区')
+        if mode == 'fullwidth' and count != 1:
+            raise ServiceError(422, '整幅定位请选择1张完整设计作为主图')
+        if mode == 'ends_open' and count not in (1, 2):
+            raise ServiceError(422, '两端留白请选择1或2个主图：1张放两端，2张分别放左右')
+        if mode == 'split' and count < 2:
+            raise ServiceError(422, '左右分区至少选择2个主图：前半组放左区，后半组放右区')
+        if mode == 'stacked' and count < 2:
+            raise ServiceError(422, '上下分区至少选择2个主图：前半组放上区，后半组放下区')
 
     def insert_asset(self, db, asset):
         db.execute('INSERT INTO assets(id,owner_id,name,kind,path,sha256,source,is_demo,shared,derived_from,created_at,retained_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
@@ -879,7 +884,6 @@ class Service:
         template = db.execute('SELECT * FROM templates WHERE id=? ORDER BY version DESC LIMIT 1', (selection.get('template_id'),)).fetchone()
         if not template or not template['enabled']:
             raise ServiceError(422, '请选择可用的排版模式')
-        self.validate_layout_selection(template['mode'], ids, base.get('layout_engine') if base else LAYOUT_ENGINE)
         profile = profile or json.loads(db.execute('SELECT profile_json FROM output_profiles WHERE active=1').fetchone()[0])
         result = copy.deepcopy(base) if base else dict(schema_version=1, layout_engine=LAYOUT_ENGINE,
                     seed=secrets.randbelow(2**31), params=dict(scale=1.0, spacing=1.0, rotation=0.0, offset_x=0.0, offset_y=0.0, background_color=None))
@@ -903,6 +907,9 @@ class Service:
             from .ribbon_targets import configure_layers
             configure_layers(self, db, owner, selection, template['mode'], result, ids)
         result.update(asset_refs=ids, background_ref=selection['background_id'], template_id=template['id'], template_version=template['version'], template_mode=template['mode'], template_rules=json.loads(template['rules_json']), output_profile=profile)
+        self.validate_layout_selection(result)
+        roles = result.get('pattern_roles', {})
+        style_slots = [slot for slot in result.get('pattern_slots', ()) if roles.get(slot) != 'decoration']
         if result.get('layout_engine') in LOOP_ENGINES:
             result.setdefault('output_profile_source', copy.deepcopy(profile))
         result.pop('composite_ref', None)
@@ -915,7 +922,7 @@ class Service:
             if not isinstance(wanted, str) or wanted not in STYLES:
                 raise ServiceError(422, '请选择有效的设计风格')
             style, params, density, tone, slot_params = expand(
-                wanted, result.get('pattern_slots') or [], result['params'],
+                wanted, style_slots, result['params'],
                 result.get('design_density', 'balanced'), result.get('background_tone', default_tone),
                 density_given='design_density' in selection,
                 tone_given='background_tone' in selection,
@@ -940,7 +947,7 @@ class Service:
             if wanted != previous:
                 if result.get('layout_engine') not in MODERN_LOOP_ENGINES:
                     raise ServiceError(422, '此旧版作品不支持更换风格，请新建作品试排')
-                params, local, density, tone = restyle(previous, wanted, result.get('pattern_slots', []),
+                params, local, density, tone = restyle(previous, wanted, style_slots,
                     result['params'], result.get('slot_params', {}), result['design_density'], result['background_tone'],
                     density_given='design_density' in selection and selection['design_density'] != base.get('design_density', 'balanced'),
                     tone_given='background_tone' in selection and selection['background_tone'] != base.get('background_tone', 'original'))
@@ -1012,7 +1019,10 @@ class Service:
         else:
             from .loop_pipeline_v2 import resolve as resolve_loop
         resolve = lambda asset_id: self.verified_asset_path(owner, asset_id)
-        snapshot = resolve_loop(snapshot, resolve)
+        try:
+            snapshot = resolve_loop(snapshot, resolve)
+        except ValueError as error:
+            raise ServiceError(422, str(error)) from None
         workspace = self.root / 'tmp'
         workspace.mkdir(parents=True, exist_ok=True)
         directory = Path(tempfile.mkdtemp(prefix='candidates-', dir=workspace))
@@ -1436,7 +1446,7 @@ class Service:
             return dict(assets=new_assets, result_asset_id=asset_id, provider_metadata=metadata)
 
         snapshot = copy.deepcopy(payload['snapshot'])
-        self.validate_layout_selection(snapshot['template_mode'], snapshot['asset_refs'], snapshot.get('layout_engine'))
+        self.validate_layout_selection(snapshot)
         # Check immutable inputs before a paid planner/editor sees them. Recheck
         # when each input is opened and at commit; an old ID cannot silently
         # acquire different pixels while retaining its version provenance.

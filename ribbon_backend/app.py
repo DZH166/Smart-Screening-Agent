@@ -36,7 +36,7 @@ class Selection(StrictModel):
     # Keys are the selected asset IDs; the service binds them to immutable
     # pattern slots before saving a version. An omitted mapping preserves the
     # parent's roles or uses the new layout's explicit defaults.
-    pattern_roles: dict[str, Literal['main', 'support', 'accent', 'border']] = Field(default_factory=dict, max_length=12)
+    pattern_roles: dict[str, Literal['main', 'support', 'accent', 'border', 'decoration']] = Field(default_factory=dict, max_length=12)
     # Absence uses the saved/new-work defaults. An explicit null is retained
     # in the payload and rejected by the service instead of being discarded.
     background_tone: Literal['soft', 'quiet', 'original'] | None = None

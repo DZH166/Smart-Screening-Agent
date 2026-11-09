@@ -2079,6 +2079,7 @@ small {
 .template-examples-all:focus-visible { outline: 2px solid #507857; outline-offset: 2px; }
 .layout-examples-modal { width: 1160px; }
 .pattern-role { width: 100%; min-width: 0; min-height: 30px; margin-top: 5px; padding: 3px 5px; font-size: 12px; color: #284a36; border: 1px solid #b8c7b1; border-radius: 5px; background: #fff; }
+.pattern-role-help { margin: 10px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .selected-patterns.has-pattern-roles { grid-template-columns: repeat(2, minmax(80px, 1fr)); }
 .has-pattern-roles .pattern-tile { min-width: 80px; }
 .layout-examples-modal .modal-heading {

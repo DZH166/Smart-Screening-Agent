@@ -103,25 +103,33 @@ export type Snapshot = {
   design_style?: string;
   composite_ref?: string;
 };
-export type PatternRole = "main" | "support" | "accent" | "border";
+export type PatternRole = "main" | "decoration" | "support" | "accent" | "border";
 export function isDirectLayoutReference(example: {available:boolean; reference_only:boolean; mode_tags:string[]; mode_notes?:Record<string,{fit:string}>}, mode:string): boolean {
   return example.available && !example.reference_only && example.mode_tags.includes(mode) && example.mode_notes?.[mode]?.fit === "direct";
 }
-export const patternRoleChoices: Record<string, { value: PatternRole; label: string }[]> = {
-  scene: [{value:"main",label:"主图"},{value:"support",label:"配角"},{value:"accent",label:"小点缀"}],
-  scatter: [{value:"main",label:"主图"},{value:"accent",label:"小点缀"}],
-  bordered: [{value:"main",label:"中间主图"},{value:"border",label:"上下边饰"}],
-};
+export function patternRoleChoices(mode: string, selected?: PatternRole) {
+  const choices: { value: PatternRole; label: string }[] = [
+    {value:"main",label:mode === "bordered" ? "中间主图" : "主图"},
+    {value:"decoration",label:"周围装饰"},
+  ];
+  if (mode === "scene") choices.push({value:"support",label:"配角"});
+  if (mode === "bordered") choices.push({value:"border",label:"上下边饰"});
+  if (selected === "accent" && (mode === "scene" || mode === "scatter"))
+    choices.push({value:"accent",label:"旧点缀"});
+  return choices;
+}
 
 // Wire selections use current asset IDs; saved snapshots use stable slot IDs.
 // Never carry a role onto a removed/replaced asset by its array position.
 export function normalizedPatternRoles(ids: string[], mode: string, roles?: Record<string, PatternRole>): Record<string, PatternRole> {
-  const choices = patternRoleChoices[mode];
-  if (!choices) return {};
-  return Object.fromEntries(ids.map((id, index) => [id,
-    choices.some(choice => choice.value === roles?.[id]) ? roles![id] :
-      mode === "scene" && index > 0 ? "support" : "main",
-  ]));
+  let hasStructuralPattern = false;
+  return Object.fromEntries(ids.map(id => {
+    const selected = roles?.[id];
+    const role = selected && patternRoleChoices(mode, selected).some(choice => choice.value === selected)
+      ? selected : mode === "scene" && hasStructuralPattern ? "support" : "main";
+    if (role !== "decoration") hasStructuralPattern = true;
+    return [id, role];
+  }));
 }
 export function snapshotPatternRoles(snapshot: Snapshot): Record<string, PatternRole> {
   if (snapshot.layout_engine !== "seamless-unit-v3") return {};

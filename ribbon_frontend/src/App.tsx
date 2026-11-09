@@ -227,25 +227,25 @@ const layoutHints: Record<string, string> = {
   single: "适合文字或较大的主体，多个图案按选择顺序整组重复。",
   bordered: "第一个图案放中间，其余图案做上下边饰；至少选择 2 个图案。",
   scene: "第一个图案作主图，其余稍小、底部对齐，再整组循环；辅助装饰需自行选入。",
-  fullwidth: "只选 1 张完整设计，保持比例；循环作品会将整幅作为一个单元重复。",
+  fullwidth: "使用 1 个主图，保持完整比例；循环作品会将整幅作为一个单元重复。",
   alternating: "图案一大一小依次重复，可选择 1–12 个图案。",
-  ends_open: "选 1–2 个图案放在两端，中间留白；循环作品会将两端与留白作为完整面板重复。",
-  split: "至少选择 2 个图案，前半组放左侧，后半组放右侧。",
-  stacked: "至少选择 2 个图案，前半组放上方，后半组放下方。",
+  ends_open: "用 1–2 个主图放在两端，中间留白；循环作品会将两端与留白作为完整面板重复。",
+  split: "至少使用 2 个主图，前半组放左侧，后半组放右侧。",
+  stacked: "至少使用 2 个主图，前半组放上方，后半组放下方。",
   opposed: "相邻图案正向、倒置交替，旋转 180°，不会镜像翻字。",
 };
 const zoneNames: Record<string,string> = { left:"左区", center:"中区", right:"右区", top:"上区", bottom:"下区" };
 const zonesByMode: Record<string,string[]> = { panels:["left","center","right"], split:["left","right"], stacked:["top","bottom"] };
-const roleHints: Record<string,string> = { scene:"选择主图、配角和小点缀，按角色组成场景；完整人物和文字不拆开。", scatter:"主图错落倾斜，小点缀填入空隙；不会自动把人物缩成配饰。", bordered:"主图排在中间。需要小图沿上下边排列时，将它设为上下边饰，也可另选完整边饰条。" };
+const roleHints: Record<string,string> = { scene:"主图和配角在同一底线上，周围装饰排入空隙；完整人物和文字不拆开。", scatter:"主图错落倾斜，周围装饰填入空隙；不会自动把主图缩成装饰。", bordered:"主图排在中间。需要小图沿上下边排列时，将它设为上下边饰，也可另选完整边饰条。" };
 const advancedHints: Record<string,string> = { scatter:"完整图案以不同角度和大小错落分布，整个单元循环。", bordered:"中央重复主图，上下为连续边线，可选独立边饰。", panels:"左、中、右三区各自排放图案，可分别选择底纹。" };
 function layoutSelectionIssue(mode: string | undefined, count: number, modern = false) {
   if (!count) return "";
   if (mode === "fullwidth" && count !== 1)
-    return "整幅定位只使用 1 个完整图案，请移除多余图案。";
+    return "整幅定位只使用 1 个主图。其余图案可设为周围装饰。";
   if (mode === "ends_open" && count > 2)
-    return "两端留白最多使用 2 个图案，请保留 1–2 个。";
+    return "两端留白最多使用 2 个主图。其余图案可设为周围装饰。";
   if (mode && (!modern && mode === "bordered" || ["split", "stacked"].includes(mode)) && count < 2)
-    return "这类排版至少需要 2 个图案，请再选择一个。";
+    return "这类排版至少需要 2 个主图，周围装饰不计入。";
   return "";
 }
 function recommendedSelection(
@@ -550,10 +550,12 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
   }, [assets]);
   const template = templates.find((t) => t.id === selection.template_id);
   const zones = modern ? zonesByMode[template?.mode || ""] || [] : [];
-  const roleChoices = roleLayout ? patternRoleChoices[template?.mode || ""] : undefined;
-  const roles = roleChoices ? normalizedPatternRoles(selection.asset_ids, template?.mode || "", selection.pattern_roles) : {};
-  const layoutIssue = layoutSelectionIssue(template?.mode, selection.asset_ids.length, modern) ||
-    (roleChoices && selection.asset_ids.length > 0 && !Object.values(roles).includes("main") ? "至少保留一个主图，再安排配角、点缀或边饰。" : "");
+  const mode = template?.mode || "";
+  const roles = normalizedPatternRoles(selection.asset_ids, mode, selection.pattern_roles);
+  const assignedRoles = Object.values(roles);
+  const layoutIssue = assignedRoles.length > 0 && !assignedRoles.includes("main")
+    ? "请至少设置一个主图。"
+    : layoutSelectionIssue(mode, assignedRoles.filter(role => role !== "decoration").length, modern);
   const background = assetIndex.get(selection.background_id);
   const unavailablePatterns = selection.asset_ids.map((id, index) => ({ id, index }))
     .filter(({ id }) => assetIndex.get(id)?.kind !== "pattern");
@@ -583,7 +585,8 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
       current.snapshot.background_ref !== selection.background_id ||
       current.snapshot.template_id !== selection.template_id ||
       (current.snapshot.design_style || "classic") !== (selection.design_style || "classic") ||
-      (roleLayout && JSON.stringify(snapshotPatternRoles(current.snapshot)) !== JSON.stringify(roles)) ||
+      JSON.stringify(normalizedPatternRoles(current.snapshot.asset_refs, current.snapshot.template_mode,
+        snapshotPatternRoles(current.snapshot))) !== JSON.stringify(roles) ||
       (current.snapshot.border_ref || "") !== (selection.border_ref || "") ||
       zones.some(key=>current.snapshot.zone_background_refs?.[key] !== selection.zone_background_refs?.[key]) ||
       (current.snapshot.background_tone || "original") !== (selection.background_tone || "original") ||
@@ -642,11 +645,10 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
       setAiDraftReference(null);
       delete value.zone_background_refs;
       delete value.border_ref;
-      delete value.pattern_roles;
+      value.pattern_roles = Object.fromEntries(Object.entries(value.pattern_roles || {}).filter(([, role]) => role === "decoration"));
     }
     const nextMode = templates.find(t => t.id === value.template_id)?.mode || "";
-    if (roleLayout && patternRoleChoices[nextMode]) value.pattern_roles = normalizedPatternRoles(value.asset_ids, nextMode, value.pattern_roles);
-    else delete value.pattern_roles;
+    value.pattern_roles = normalizedPatternRoles(value.asset_ids, nextMode, value.pattern_roles);
     setSelection(value);
     saveLocal(prefix + "selection", {
       design_id: designRef.current?.id || null,
@@ -752,6 +754,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
       setCandidateError("先选择图案、底纹和排版");
       return;
     }
+    if (layoutIssue) return;
     if (trialStyles.length < 2) {
       setCandidateError("至少选择两种风格来对比");
       return;
@@ -777,7 +780,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
           const endpoint = "/candidates/one";
           const row = await api<Candidate>(endpoint, {
             method: "POST", signal: controller.signal,
-            body: JSON.stringify({ ...selection, pattern_roles: roleChoices ? roles : undefined, style }),
+            body: JSON.stringify({ ...selection, pattern_roles: roles, style }),
           });
           if (stale()) return;
           if (row.style !== style) throw new ApiError("试排结果与所选风格不一致，请重新试排。", 409);
@@ -1148,7 +1151,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
     if (localOnly && (!offerLocalRecovery || designRef.current?.id !== design?.id)) return;
     // Capture choices before selecting the newly created, initially empty work.
     // Never write a new first draft into a saved work or a historical version.
-    const chosen = structuredClone({...selection, pattern_roles: roleChoices ? roles : undefined});
+    const chosen = structuredClone({...selection, pattern_roles: roles});
     const useAi = !localOnly && aiDraftEnabled;
     const request: GenerateRequest = {idempotency_key: crypto.randomUUID(), ...chosen,
       ai_assisted: useAi, reference_code: useAi ? draftReference?.code || null : null};
@@ -1599,8 +1602,9 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                   hidden
                   onChange={(e) => void upload(e.target.files, "pattern")}
                 />
+                {selection.asset_ids.length > 1 && <p className="pattern-role-help">给每张图案选用途。主图按所选排法排列，周围装饰缩小后放入空隙。</p>}
                 {selection.asset_ids.length ? (
-                  <div className={`selected-patterns${roleChoices ? " has-pattern-roles" : ""}`}>
+                  <div className="selected-patterns has-pattern-roles">
                     {selection.asset_ids.map((id, index) => {
                       const asset = assetIndex.get(id);
                       const a = asset?.kind === "pattern" ? asset : undefined;
@@ -1619,9 +1623,9 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                           </button>
                         </div>
                         <span title={name}>{index + 1}. {a?.name || "图案"}</span>
-                        {a && roleChoices && <select className="pattern-role" aria-label={`图案 ${index + 1} 的排版角色`} value={roles[id]} disabled={locked}
+                        {a && <select className="pattern-role" aria-label={`图案 ${index + 1} 的排版角色`} value={roles[id]} disabled={locked}
                           onChange={event => updateSelection({...selection, pattern_roles:{...roles,[id]:event.target.value as PatternRole}})}>
-                          {roleChoices.map(choice => <option key={choice.value} value={choice.value}>{choice.label}</option>)}
+                          {patternRoleChoices(mode, roles[id]).map(choice => <option key={choice.value} value={choice.value}>{choice.label}</option>)}
                         </select>}
                       </div>;
                     })}
@@ -1716,7 +1720,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                         );
                       })}
                     </div>
-                    <button type="button" className="primary small" disabled={locked || candidateBusy || selectionUnavailable || assetRefreshRequired}
+                    <button type="button" className="primary small" disabled={locked || candidateBusy || selectionUnavailable || assetRefreshRequired || !!layoutIssue}
                       onClick={() => void previewCandidates()}>
                       {candidateBusy ? `正在试排 ${candidateDone}/${candidateQueue.length}` : `试排这 ${trialStyles.length} 种风格`}
                     </button>
