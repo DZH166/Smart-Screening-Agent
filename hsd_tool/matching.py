@@ -1276,7 +1276,18 @@ def _match_appearances_serial(rows, files, row_images, file_images, progress=Non
                     candidate['score_kind'] = 'geometric_upper_bound'
         base['evidence']['claim_strength'] = ('verified' if top_result.get('auto_ok')
                                                else 'credible' if _ownership_supported(top_result) else 'weak')
+        # Two independently verified files leave the original ambiguous even
+        # when their scores differ, for example after one preview was downsampled.
+        verified_candidates = [file['id'] for file in readable
+                               if not file.get('issue') and file.get('page_count', 1) == 1
+                               and scores[file['id']].get('auto_ok')]
+        ambiguous = len(verified_candidates) > 1
         decision_failures = []
+        if ambiguous:
+            base['evidence']['competition'].update(
+                hard_ambiguity=True, verified_candidate_ids=verified_candidates)
+            decision_failures.append('indistinguishable_candidates')
+            base['reason_code'] = 'indistinguishable_candidates'
         if top_score < .55:
             decision_failures.append('no_credible_candidate')
         if top_file.get('issue'):
@@ -1298,6 +1309,8 @@ def _match_appearances_serial(rows, files, row_images, file_images, progress=Non
                 base['reason'] = top_file['issue']
             elif duplicate_previews[file_images[top].digest] > 1:
                 base['reason'] = '多个 AI 文件有相同预览，无法自动确定唯一原文件。'
+            elif ambiguous:
+                base['reason'] = '多份 AI 原稿都通过了图案核验，请单独确认要使用的文件。'
             elif gap < .045:
                 base['reason'] = '存在十分接近的候选，请确认具体颜色、图案及文件。'
             elif failures:

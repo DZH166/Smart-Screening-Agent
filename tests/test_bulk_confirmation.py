@@ -48,7 +48,8 @@ def test_invalid_group_does_not_partially_confirm(tmp_path, invalid):
         manager.close()
 
 
-@pytest.mark.parametrize("problem", ["duplicate_preview", "ownership_conflict", "source_issue", "incomplete_candidate_validation"])
+@pytest.mark.parametrize("problem", ["duplicate_preview", "ownership_conflict", "source_issue",
+                                      "indistinguishable_candidates", "incomplete_candidate_validation"])
 def test_hard_anomaly_requires_individual_review(tmp_path, problem):
     manager, job = reviewing(tmp_path)
     try:

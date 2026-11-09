@@ -36,6 +36,7 @@ GATE_REASONS = {
     "model_uncertain": "模型未完整确认一致性和唯一性",
     "candidate_change_requires_review": "模型建议更换候选，需人工确认",
     "competition_not_verified": "竞争候选尚未完整核验",
+    "indistinguishable_candidates": "多份原稿均通过图案核验，需要单独确认",
     "coverage_not_verified": "仍有重要区域未完整核验",
     "local_evidence_conflict": "本地图案或颜色证据存在差异",
     "stale_case": "复核内容已经变化", "source_changed": "原稿或预览已经变化",

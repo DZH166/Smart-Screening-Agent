@@ -319,7 +319,7 @@ def select_review_case(row, rows, files, image_cache=None):
     if len(lookup) != len(files) or any(not isinstance(identity, str) or not identity for identity in lookup):
         return _refusal("invalid_candidates", "候选原文件记录不完整，仍需人工处理。")
     competition = _competition_evidence(row, files)
-    if competition.get("hard_ambiguity") is True:
+    if code == "indistinguishable_candidates" or competition.get("hard_ambiguity") is True:
         return _refusal("indistinguishable_candidates", "多个原文件的关键图案无法可靠区分，仍需人工处理。")
     top_score = _score(ranking[0])
     if competition["complete"]:

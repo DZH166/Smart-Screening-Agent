@@ -527,7 +527,8 @@ class JobManager:
             row["evidence"] = match.get("evidence")
             row["candidates"] = match.get("candidates", [])
             failures = set((row["evidence"] or {}).get("failed_checks", []))
-            hard = {"ownership_conflict", "source_issue", "duplicate_preview", "candidate_gap", "incomplete_candidate_validation"}
+            hard = {"ownership_conflict", "source_issue", "duplicate_preview", "candidate_gap",
+                    "indistinguishable_candidates", "incomplete_candidate_validation"}
             if row["_status"] == "review" and not failures.intersection(hard):
                 if "foreground_colours" in failures:
                     row.update(_reason="局部颜色存在差异，请确认是否为同款不同色。", _reason_code="local_colour_difference")
@@ -918,7 +919,8 @@ class JobManager:
         if row.get("status") != "review" or row.get("issue"):
             return "此项需要单独处理。"
         failures = set((row.get("evidence") or {}).get("failed_checks", []))
-        if failures.intersection({"duplicate_preview", "ownership_conflict", "source_issue", "incomplete_candidate_validation"}):
+        if failures.intersection({"duplicate_preview", "ownership_conflict", "source_issue",
+                                  "indistinguishable_candidates", "incomplete_candidate_validation"}):
             return "文件归属或预览有异常，请单独核对。"
         if row.get("reason_code") in {"ownership_or_number_conflict", "invalid_number", "number_exhausted", "retrieval_conflict"}:
             return "文件或编号冲突，请单独处理。"

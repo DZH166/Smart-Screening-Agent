@@ -78,6 +78,39 @@ def test_duplicate_ai_previews_require_review(tmp_path):
     assert len(result['matches'][0]['candidates']) == 2
 
 
+@pytest.mark.parametrize("routed", [False, True])
+def test_independently_verified_resolutions_require_review(tmp_path, routed):
+    from hsd_tool.ai_policy import select_review_case
+
+    image = artwork()
+    smaller = cv2.resize(image, (128, 45), interpolation=cv2.INTER_AREA)
+    source, rows = setup_case(tmp_path, [image, smaller])
+    prepared = matching.prepare_matching(str(source), rows, str(tmp_path / 'work'))
+    hint = {rows[0]['id']: {'file_id': 'f0001', 'verdict': 'same'}} if routed else None
+    result = matching.match_prepared(prepared, proposals=hint, texture_workers=1)
+    match = result['matches'][0]
+    assert match['evidence']['gap'] >= .045
+    assert match['status'] == 'review' and match['file_id'] is None
+    assert match['reason_code'] == 'indistinguishable_candidates'
+    evidence = match['evidence']['competition']
+    assert evidence['hard_ambiguity']
+    assert evidence['verified_candidate_ids'] == ['f0001', 'f0002']
+    row = {**rows[0], **match}
+    decision = select_review_case(row, [row], result['files'])
+    assert not decision['eligible'] and decision['reason_code'] == match['reason_code']
+
+
+def test_credible_colour_variant_does_not_block_unique_verified_original(tmp_path):
+    image = artwork()
+    variant = image.copy()
+    variant[:, -300:] = np.clip(variant[:, -300:].astype(np.int16) + 48, 0, 255)
+    source, rows = setup_case(tmp_path, [image, variant])
+    result = scan_and_match(str(source), rows, str(tmp_path / 'work'), texture_workers=1)
+    match = result['matches'][0]
+    assert match['evidence']['competition']['credible_candidate_ids'] == ['f0001', 'f0002']
+    assert match['status'] == 'auto' and match['file_id'] == 'f0001'
+
+
 def test_nearly_identical_files_require_review(tmp_path):
     image = artwork()
     near = image.copy()
