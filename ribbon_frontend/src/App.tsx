@@ -477,8 +477,8 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
   const [deletedDesigns, setDeletedDesigns] = useState<Design[]>([]);
   const [showDeleted, setShowDeleted] = useState(false);
   const [deletedLoading, setDeletedLoading] = useState(false);
-  // The default follows the server capability. An explicit opt-out lasts for
-  // this draft only; switching works clears both the choice and its reference.
+  // AI is an explicit choice for one draft. An unresolved submission still
+  // restores its original choice and reference.
   const [aiDraftChoice, setAiDraftChoice] = useState<boolean | null>(savedCreation?.aiDraftChoice ?? null);
   const [aiDraftReference, setAiDraftReference] = useState<{ code: string; mode: string } | null>(savedCreation?.aiDraftReference || null);
   useEffect(() => {
@@ -605,8 +605,10 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
   // explicitly marked test operations; employee services must never use them.
   const aiAvailable = testMode ? config?.auth_mode !== "hsd" : config?.ai_ready === true;
   const aiDraftAvailable = config?.provider === "deepseek_seedream" && config?.ai_ready === true && config?.ai_draft_available === true;
-  const aiDraftEnabled = aiDraftAvailable && aiDraftChoice !== false;
+  const aiDraftEnabled = aiDraftAvailable && aiDraftChoice === true;
   const draftReference = aiDraftEnabled && aiDraftReference?.mode === template?.mode ? aiDraftReference : null;
+  const generateLabel = busy ? "正在提交…" : processing ? "正在生成…" :
+    `${aiDraftEnabled ? "用 AI " : ""}生成${current || design?.versions?.length ? "新作品" : "首稿"}`;
   function templateImage(t: Template) {
     return modern && t.id === t.mode && t.version===1 ? `/static/ribbon/${roleLayout ? "layout-v3" : "layout-v2"}/${t.mode}.webp` : t.thumbnail_url;
   }
@@ -678,6 +680,11 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
   }
   function applyDesign(d: Design, force = false) {
     const changedVersion = lastVersion.current !== d.current_version_id;
+    const previous = designRef.current;
+    if (previous?.id === d.id && !previous.current_version_id && d.current_version_id) {
+      setAiDraftChoice(null);
+      setAiDraftReference(null);
+    }
     if (force || changedVersion || designRef.current?.id !== d.id) cancelCandidatePreview();
     designRef.current = d;
     setDesign(d);
@@ -1865,8 +1872,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                       ) : (
                         <Icon name="spark" />
                       )}
-                      {busy ? "正在提交…" : processing ? "正在生成…" : current || design?.versions?.length ? "生成新作品" :
-                        offerLocalRecovery && aiDraftEnabled ? "重新用 AI 生成" : "生成首稿"}
+                      {generateLabel}
                       <Icon name="arrow" size={16} />
                     </button>
                     {selected && (<div className="result-actions">
@@ -1897,10 +1903,10 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                         AI搭配底纹与装饰
                       </label>
                       {aiDraftEnabled ? <>
-                        <p>按原图保留人物文字。选择的案例会发送给Seedream。</p>
+                        <p>AI 根据配色与排版生成底纹，人物和文字使用原图排版。选择参考案例时会将案例图发送给 Seedream。</p>
                         {draftReference ? <div className="ai-draft-reference"><span>参考案例：<strong>{draftReference.code}</strong></span><button type="button" disabled={locked} onClick={() => setAiDraftReference(null)}>取消案例参考</button></div> :
                           <button type="button" className="ai-reference-picker" disabled={locked || !template} onClick={() => setExamplesView({ mode: template?.mode || null, name: template?.name || "全部排版案例" })}>选择案例参考</button>}
-                      </> : <p>按原素材直接排版，不调用AI搭配。</p>}
+                      </> : <p>直接用所选图案和底图排版。</p>}
                     </div>}
                     <small>
                       {!selection.asset_ids.length

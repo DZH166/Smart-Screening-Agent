@@ -3,9 +3,10 @@ import base64
 from contextlib import closing
 import io
 import json
+import re
 from types import SimpleNamespace
 
-from PIL import Image, PngImagePlugin
+from PIL import Image, ImageDraw, PngImagePlugin
 import pytest
 
 from hsd_tool.ai_key_pool import ApiKeyPool
@@ -48,13 +49,16 @@ def sources(tmp_path):
 
 
 def install_submit(provider, monkeypatch, calls, *, result_size=(2048, 2048)):
-    def submit(payload, cancel):
+    def transport(request, **kwargs):
+        payload = json.loads(request.data)
         calls.append(payload)
         output = image_bytes(result_size, '#E7DCA1')
-        return {'data': [{'b64_json': base64.b64encode(output).decode('ascii'),
-                          'size': f'{result_size[0]}x{result_size[1]}'}]}, {
-                              'generated_images': 1, 'input_images': len(payload['image'])}, 'synthetic-draft'
-    monkeypatch.setattr(provider.ark, '_submit', submit)
+        reply = {'data': [{'b64_json': base64.b64encode(output).decode('ascii'),
+                           'size': f'{result_size[0]}x{result_size[1]}'}],
+                 'usage': {'generated_images': 1, 'input_images': len(payload.get('image', []))}}
+        return material_ark.HttpReply(200, json.dumps(reply).encode(),
+                                     {'x-request-id': 'synthetic-draft'}, material_ark.ENDPOINT)
+    monkeypatch.setattr(provider.ark, '_transport', transport)
 
 
 def decode_reference(value):
@@ -62,7 +66,7 @@ def decode_reference(value):
     return Image.open(io.BytesIO(base64.b64decode(value.split(',', 1)[1])))
 
 
-def test_real_payload_carries_contactsheet_background_and_case_without_paths(tmp_path, sources, monkeypatch):
+def test_wire_payload_contains_only_the_explicit_case_and_colour_summaries(tmp_path, sources, monkeypatch):
     provider = client(tmp_path)
     patterns, background, case = sources
     originals = {p: p.read_bytes() for p in patterns + [background]}
@@ -74,42 +78,29 @@ def test_real_payload_carries_contactsheet_background_and_case_without_paths(tmp
     payload = calls[0]
     assert payload['size'] == '2048x2048' and payload['watermark'] is False
     assert payload['background'] == 'opaque' and payload['output_format'] == 'png'
-    assert payload['response_format'] == 'b64_json' and len(payload['image']) == 3
+    assert payload['response_format'] == 'b64_json' and len(payload['image']) == 1
     assert '左右两端各放完整大主体，中间单排小主体重复' in payload['prompt']
     assert '饱满' in payload['prompt'] and '浅绿色细小花点' in payload['prompt']
     assert '后续主体区域留出安静空间' in payload['prompt']
     assert '不复制其中人物、文字、水印或标志' in payload['prompt']
-    assert '原样' in payload['prompt'] and '细小花、点、线' in payload['prompt']
+    assert '原样' in payload['prompt'] and '简单几何或浅织纹' in payload['prompt']
+    assert all(colour in payload['prompt'] for colour in ('#DC2814', '#1446D0', '#E7DCA1'))
     assert 'private' not in json.dumps(payload) and 'case-secret' not in json.dumps(payload)
-    for value in payload['image']:
-        with closing(decode_reference(value)) as reference:
-            assert reference.size == (2048, 2048)
-            assert not reference.info
-    # Independent bounds measurements: both complete originals keep their
-    # proportions inside the sheet rather than filling/cropping their cells.
-    with closing(decode_reference(payload['image'][0])) as sheet:
-        with closing(sheet.crop((0, 0, 1024, 2048))) as portrait:
-            with closing(portrait.getchannel('G').point(lambda v: 255 if v < 100 else 0)) as mask:
-                left, top, right, bottom = mask.getbbox()
-                assert (right - left) / (bottom - top) == pytest.approx(1 / 3, rel=.01)
-        with closing(sheet.crop((1024, 0, 2048, 2048))) as landscape:
-            with closing(landscape.getchannel('R').point(lambda v: 255 if v < 100 else 0)) as mask:
-                left, top, right, bottom = mask.getbbox()
-                assert (right - left) / (bottom - top) == pytest.approx(4, rel=.01)
-    with closing(decode_reference(payload['image'][2])) as reference:
+    with closing(decode_reference(payload['image'][0])) as reference:
+        assert reference.size == (2048, 2048) and not reference.info
         with closing(reference.getchannel('R').point(lambda v: 255 if v < 100 else 0)) as mask:
             left, top, right, bottom = mask.getbbox()
             assert (right - left) / (bottom - top) == pytest.approx(1000 / 44, rel=.02)
     assert originals == {p: p.read_bytes() for p in originals}
-    assert metadata['is_demo'] is False and metadata['usage']['input_images'] == 3
+    assert metadata['is_demo'] is False and metadata['usage']['input_images'] == 1
     assert metadata['request_id'] == 'synthetic-draft'
     with Image.open(tmp_path / 'result.png') as output:
         assert output.size == (2048, 2048)
 
 
 @pytest.mark.parametrize('include_background,include_case', [(False, False), (True, False), (False, True)])
-def test_optional_references_have_correct_image_numbers(tmp_path, sources, monkeypatch,
-                                                        include_background, include_case):
+def test_no_case_omits_the_image_field_on_the_wire(tmp_path, sources, monkeypatch,
+                                               include_background, include_case):
     provider = client(tmp_path)
     patterns, background, case = sources
     calls = []
@@ -117,14 +108,16 @@ def test_optional_references_have_correct_image_numbers(tmp_path, sources, monke
     provider.generate_draft_background(patterns, background if include_background else None,
                                        case if include_case else None, tmp_path / 'out.png',
                                        mode='stagger', density='airy')
-    assert len(calls) == 1 and len(calls[0]['image']) == 1 + include_background + include_case
-    if include_background:
-        assert '参考图2是员工所选底图' in calls[0]['prompt']
+    assert len(calls) == 1
+    assert ('#E7DCA1' in calls[0]['prompt']) is include_background
     if include_case:
-        assert '参考图2是员工选择的公司案例' in calls[0]['prompt']
+        assert len(calls[0]['image']) == 1
+        assert '参考图1是员工明确选择的公司案例' in calls[0]['prompt']
+    else:
+        assert 'image' not in calls[0] and 'data:image' not in json.dumps(calls[0])
 
 
-def test_contactsheet_contains_twelve_complete_inputs_in_selection_order(tmp_path, monkeypatch):
+def test_twelve_inputs_only_send_a_bounded_palette(tmp_path, monkeypatch):
     provider = client(tmp_path)
     patterns = []
     for index in range(12):
@@ -134,13 +127,23 @@ def test_contactsheet_contains_twelve_complete_inputs_in_selection_order(tmp_pat
     calls = []
     install_submit(provider, monkeypatch, calls)
     provider.generate_draft_background(patterns, None, None, tmp_path / 'out.png', mode='grid', density='balanced')
-    assert len(calls) == 1 and len(calls[0]['image']) == 1
-    with closing(decode_reference(calls[0]['image'][0])) as sheet:
-        for index in range(12):
-            column, row = index % 4, index // 4
-            center = ((column * 2048 // 4 + (column + 1) * 2048 // 4) // 2,
-                      (row * 2048 // 3 + (row + 1) * 2048 // 3) // 2)
-            assert sheet.getpixel(center) == (20 + index * 12, 30, 80, 255)
+    assert len(calls) == 1 and 'image' not in calls[0]
+    assert len(re.findall(r'#[0-9A-F]{6}', calls[0]['prompt'])) == 4
+
+
+def test_palette_excludes_hidden_rgb_and_prioritises_visible_alpha(tmp_path, monkeypatch):
+    provider = client(tmp_path)
+    path = tmp_path / 'transparent-pattern.png'
+    with Image.new('RGBA', (128, 64), (0, 255, 0, 0)) as source:
+        draw = ImageDraw.Draw(source)
+        draw.rectangle((0, 0, 31, 63), fill=(255, 0, 0, 255))
+        draw.rectangle((96, 0, 127, 63), fill=(0, 0, 255, 32))
+        source.save(path)
+    calls = []
+    install_submit(provider, monkeypatch, calls)
+    provider.generate_draft_background([path], None, None, tmp_path / 'out.png', mode='grid', density='balanced')
+    assert re.findall(r'#[0-9A-F]{6}', calls[0]['prompt']) == ['#FF0000', '#0000FF']
+    assert 'image' not in calls[0] and 'transparent-pattern' not in json.dumps(calls[0])
 
 
 @pytest.mark.parametrize('layer', ['pattern', 'background', 'case'])

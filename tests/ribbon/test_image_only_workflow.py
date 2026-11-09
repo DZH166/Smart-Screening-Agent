@@ -86,6 +86,7 @@ def test_ark_only_runtime_and_http_background_and_first_draft(tmp_path, monkeypa
         with service.db.connect() as db:
             assert {row[0] for row in db.execute('SELECT operation FROM provider_calls')} == {'generate_background', 'design_background'}
     assert len(calls) == 2
+    assert "image" not in calls[1] and "本地图案主色" in calls[1]["prompt"]
     assert ai == {'enabled': False, 'api_key': '', 'keys': [], 'key_revision': 3}
     # Older accepted planning cannot borrow image readiness as text readiness.
     provider = store.provider_for_job(runtime.provider, {field: getattr(runtime, field)

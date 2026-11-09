@@ -229,6 +229,9 @@ async function checkLocalPolicyRecovery(){
    await page.goto(url);
    await page.getByRole('heading',{name:draft.name,exact:true}).waitFor();
    const aiOption=page.getByRole('checkbox',{name:'AI搭配底纹与装饰',exact:true});
+   assert.equal(await aiOption.isChecked(),false,'an existing blank draft opens in direct composition mode');
+   assert.equal(await page.getByRole('button',{name:'选择案例参考',exact:true}).count(),0);
+   await aiOption.check();
    const selectReference=async()=>{
     await page.getByRole('button',{name:'选择案例参考',exact:true}).click();
     await page.getByRole('button',{name:'用于AI首稿参考',exact:true}).click();
@@ -236,8 +239,7 @@ async function checkLocalPolicyRecovery(){
    };
    if(recovery_action)await selectReference();
    const local=page.getByRole('button',{name:'改用本地合成',exact:true});
-   const generate=page.getByRole('button',{name:'生成首稿',exact:true});
-   await generate.click();
+   await page.locator('.generation-button').click();
    await page.getByRole('button',{name:'正在生成…',exact:true}).waitFor();
    assert.equal(submitted.length,1);
    assert.equal(submitted[0].ai_assisted,true);
@@ -252,6 +254,8 @@ async function checkLocalPolicyRecovery(){
     await page.reload();
     await page.getByRole('heading',{name:draft.name,exact:true}).waitFor();
     await local.waitFor();
+    assert.equal(await aiOption.isChecked(),false,'reopening a draft does not restore an unsent AI choice');
+    await aiOption.check();
     await selectReference();
     assert.equal(submitted.length,1,'failed/reopened draft recovery waits for an explicit click');
     await local.click();
@@ -378,17 +382,30 @@ try{
  await page.waitForFunction(()=>document.querySelector('#ribbon-mount').shadowRoot.querySelector('.preview-panel h2')?.textContent?.startsWith('丝带设计'));
  assert.equal(works.length,before+1);assert.equal(JSON.stringify(original.versions),oldVersions);
  const generated=writes.findLast(w=>w.path.endsWith('/generate'));
- assert.equal(generated.path,'/api/ribbon/designs/new-1/generate');assert.equal(generated.body.design_style,'hierarchy');assert.equal(generated.body.ai_assisted,true);
+ assert.equal(generated.path,'/api/ribbon/designs/new-1/generate');assert.equal(generated.body.design_style,'hierarchy');
+ assert.equal(generated.body.ai_assisted,false);assert.equal(generated.body.reference_code,null);
  assert.equal('prompt' in generated.body,false);assert.equal('base_version_id' in generated.body,false);
- // Accepted generation with a lost response: retain and recover the same key.
+ // An explicit AI submission with a lost response keeps its full request,
+ // even though the default for future work is direct composition.
+ const aiOption=page.getByRole('checkbox',{name:'AI搭配底纹与装饰',exact:true});
+ assert.equal(await aiOption.isChecked(),false);
+ await aiOption.check();
  let loseResponse=true;
  await page.route('**/api/ribbon/designs/*/generate',async route=>{if(loseResponse){loseResponse=false;await route.fetch();return route.abort('connectionreset');}return route.continue();});
- await page.getByRole('button',{name:'生成新作品',exact:true}).click();
+ await page.locator('.generation-button').click();
  await page.getByRole('button',{name:'恢复提交',exact:true}).waitFor();
- const lost=writes.findLast(w=>w.path.endsWith('/generate'));await page.getByRole('button',{name:'恢复提交',exact:true}).click();
- await page.getByRole('button',{name:'恢复提交',exact:true}).waitFor({state:'detached'});
- assert.equal(writes.findLast(w=>w.path.endsWith('/generate')).body.idempotency_key,lost.body.idempotency_key);
+ const lost=writes.findLast(w=>w.path.endsWith('/generate'));
+ assert.equal(lost.body.ai_assisted,true);assert.equal(lost.body.reference_code,null);
+ await page.getByRole('button',{name:'恢复提交',exact:true}).click();
+ await page.getByRole('button',{name:'生成新作品',exact:true}).waitFor();
+ assert.deepEqual(writes.findLast(w=>w.path.endsWith('/generate')),lost);
  assert.equal(works.length,before+2);assert.equal(works.at(-1).versions.length,1);
+ assert.equal(await aiOption.isChecked(),false,'the next work requires a fresh AI opt-in after a saved result');
+ await page.getByRole('button',{name:'生成新作品',exact:true}).click();
+ await page.locator('.result-actions a[href="/api/ribbon/versions/new-3-v0/download"]').waitFor();
+ const afterAi=writes.findLast(w=>w.path.endsWith('/generate'));
+ assert.equal(afterAi.body.ai_assisted,false);assert.equal(afterAi.body.reference_code,null);
+ assert.equal(works.length,before+3);
  await assertNoRefinement(page);
  for(const size of [{width:1366,height:768},{width:1920,height:1080}]){
   await page.setViewportSize(size);await page.evaluate(()=>window.scrollTo(0,0));
@@ -401,6 +418,8 @@ try{
  // Empty works still generate a first draft through the same public endpoint.
  await page.getByRole('button',{name:'新建作品',exact:true}).click();await page.getByRole('button',{name:'生成首稿',exact:true}).waitFor();
  const count=works.length;await page.getByRole('button',{name:'生成首稿',exact:true}).click();await page.getByRole('button',{name:'生成新作品',exact:true}).waitFor();assert.equal(works.length,count);
+ const firstDraft=writes.findLast(w=>w.path.endsWith('/generate'));
+ assert.equal(firstDraft.body.ai_assisted,false);assert.equal(firstDraft.body.reference_code,null);
  await page.close();
  // Stored old requests can only read existing jobs, never replay the old POST.
  for(const mode of ['ok','disconnect','missing','expired','mismatch','unauthorized']){
@@ -417,7 +436,7 @@ try{
   await assertNoRefinement(p);await p.close();
  }
  assert.deepEqual(errors,[]);
- console.log(JSON.stringify({source:'synthetic_http_browser',checks:['no-edit-UI-or-posts','old-version-download-and-rollback','new-work-not-overwrite','selection-reload','new-profile-trial','lost-generate-idempotency','first-draft','legacy-read-only-recovery-and-owner-check','1366/1920/115%-layout'],real_model_calls:0}));
+ console.log(JSON.stringify({source:'synthetic_http_browser',checks:['no-edit-UI-or-posts','old-version-download-and-rollback','new-work-not-overwrite','selection-reload','new-profile-trial','direct-composition-default','fresh-opt-in-after-success','lost-ai-generate-identical-request','first-draft','legacy-read-only-recovery-and-owner-check','1366/1920/115%-layout'],real_model_calls:0}));
  }
 }catch(e){console.error(JSON.stringify({writes,errors}));throw e;}finally{await browser.close();await new Promise(resolve=>server.close(resolve));}
 

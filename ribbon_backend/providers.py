@@ -248,12 +248,11 @@ _DRAFT_MODES = {
 
 @memory_bounded_operation
 def _draft_background_inputs(pattern_paths, background_path, reference_bytes, *, mode, density, prompt):
-    """Capture local references before dispatch; never modify production assets.
+    """Extract only local palette summaries and an explicitly chosen case.
 
     Only the service may resolve an authorized company reference into bytes.
     The provider accepts no company path, identifier, URL or arbitrary fetch.
-    Every model input is a bounded square reference canvas, not a production
-    replacement for the complete originals composited by the ribbon renderer.
+    Original pattern and background pixels stay with the local renderer.
     """
     from hsd_tool.material_ark import ArkProviderError, MAX_INPUT_BYTES, _decode
     if not isinstance(mode, str) or mode not in _DRAFT_MODES:
@@ -286,51 +285,61 @@ def _draft_background_inputs(pattern_paths, background_path, reference_bytes, *,
             raise ProviderError('参考图片没有可见内容，未调用图片模型。')
         return image
 
-    def place(canvas, source, box):
-        left, top, right, bottom = box
-        ratio = min((right - left) / source.width, (bottom - top) / source.height)
-        size = max(1, round(source.width * ratio)), max(1, round(source.height * ratio))
-        with closing(source.resize(size, Image.Resampling.LANCZOS)) as fitted:
-            canvas.alpha_composite(fitted, (left + (right - left - size[0]) // 2,
-                                           top + (bottom - top - size[1]) // 2))
+    def palette(paths):
+        # Each source contributes at most 64×64 samples. Only aggregate colour
+        # counts survive this step. Transparent padding/hidden RGB carries no
+        # weight, and the summary cannot describe geometry or identify objects.
+        buckets = {}
+        for path in paths:
+            with closing(decoded(source_bytes(path))) as source, closing(source.getchannel('A')) as alpha:
+                box = alpha.getbbox()
+                width, height = box[2] - box[0], box[3] - box[1]
+                scale = min(1., 64 / max(width, height))
+                size = (max(1, round(width * scale)), max(1, round(height * scale)))
+                with closing(source.resize(size, Image.Resampling.BOX, box=box)) as sample:
+                    for red, green, blue, weight in sample.get_flattened_data():
+                        if not weight:
+                            continue
+                        key = red // 32, green // 32, blue // 32
+                        bucket = buckets.setdefault(key, [0, 0, 0, 0])
+                        bucket[0] += weight
+                        bucket[1] += red * weight
+                        bucket[2] += green * weight
+                        bucket[3] += blue * weight
+        ranked = sorted(buckets, key=lambda key: (-buckets[key][0], key))[:4]
+        colours = []
+        for key in ranked:
+            weight, *totals = buckets[key]
+            rgb = tuple(round(value / weight) for value in totals)
+            colours.append('#{:02X}{:02X}{:02X}'.format(*rgb))
+        return '、'.join(colours) or '未提取明显主色'
 
-    def data_uri(canvas):
-        buffer = io.BytesIO()
-        # Strip EXIF, filenames and other source metadata from model references.
-        canvas.save(buffer, format='PNG')
-        if buffer.tell() > MAX_INPUT_BYTES:
-            raise ProviderError('派生参考超过模型图片大小限制，未调用图片模型。')
-        return 'data:image/png;base64,' + base64.b64encode(buffer.getvalue()).decode('ascii')
-
-    columns = math.ceil(math.sqrt(len(pattern_paths)))
-    rows = math.ceil(len(pattern_paths) / columns)
+    pattern_palette = palette(pattern_paths)
+    background_palette = palette([background_path]) if background_path is not None else '未指定'
     images = []
-    with closing(Image.new('RGBA', (2048, 2048), '#FFFFFF')) as sheet:
-        for index, path in enumerate(pattern_paths):
-            column, row = index % columns, index // columns
-            box = (column * 2048 // columns + 16, row * 2048 // rows + 16,
-                   (column + 1) * 2048 // columns - 16, (row + 1) * 2048 // rows - 16)
-            with closing(decoded(source_bytes(path))) as image:
-                place(sheet, image, box)
-        images.append(data_uri(sheet))
-    roles = ['参考图1是所选原图案的等比联系表，仅用于理解配色和风格；这些人物、文字和完整主体稍后由程序原样叠放。']
-    for value, label in ((source_bytes(background_path) if background_path is not None else None,
-                          '员工所选底图，仅参考其底色和纹理'),
-                         (reference_bytes, '员工选择的公司案例，只学习空间、色彩与辅助装饰，不复制其中人物、文字、水印或标志')):
-        if value is not None:
-            with closing(decoded(value)) as source, closing(Image.new('RGBA', (2048, 2048), '#FFFFFF')) as canvas:
-                place(canvas, source, (16, 16, 2032, 2032))
-                images.append(data_uri(canvas))
-            roles.append(f'参考图{len(images)}是{label}。')
+    case_note = ''
+    if reference_bytes is not None:
+        with closing(decoded(reference_bytes)) as source, closing(Image.new('RGBA', (2048, 2048), '#FFFFFF')) as canvas:
+            scale = 2016 / max(source.size)
+            size = tuple(max(1, round(side * scale)) for side in source.size)
+            with closing(source.resize(size, Image.Resampling.LANCZOS)) as fitted:
+                canvas.alpha_composite(fitted, ((2048 - size[0]) // 2, (2048 - size[1]) // 2))
+            buffer = io.BytesIO()
+            # Keep the existing complete, metadata-free company case view.
+            canvas.save(buffer, format='PNG')
+            if buffer.tell() > MAX_INPUT_BYTES:
+                raise ProviderError('派生参考超过模型图片大小限制，未调用图片模型。')
+            images.append('data:image/png;base64,' + base64.b64encode(buffer.getvalue()).decode('ascii'))
+        case_note = '参考图1是员工明确选择的公司案例，只参考留白与底纹节奏，不复制其中人物、文字、水印或标志。'
     density_text = {'airy': '疏朗', 'balanced': '均衡', 'rich': '饱满'}[density]
     instruction = (
-        '只生成一张正方形丝带搭配底纹和细小辅助装饰，输出不是最终丝带成稿。'
-        '上传的完整人物、文字和主体将由程序保持原样、完整等比叠放；本次不要重绘、复制或新增这些主体与文字。'
-        + ''.join(roles) + f'最终排版为：{_DRAFT_MODES[mode]}；疏密：{density_text}。'
-        '底纹低对比、铺满、横向纹理节奏自然，避免跨边的大主体或文字；程序随后会做周期化和接缝检查。按该布局给后续主体区域留出安静空间，'
-        '可用细小花、点、线等辅助装饰丰富空隙，不能放抢眼的大焦点。'
-        '不新增文字、水印、logo或标志。遵守用户明确配色；用户补充只用于底纹、配色和辅助装饰：'
-        + (prompt.strip() or '按所选图案与参考的色彩和风格协调搭配。'))
+        '只生成一张正方形丝带底纹。使用低对比的细小圆点、线条、简单几何或浅织纹铺满画面，横向节奏自然。'
+        '不画人物、主体插画、文字、水印、标志或大焦点。原图案会由程序原样、等比叠放。'
+        f'本地图案主色：{pattern_palette}；所选底图主色：{background_palette}。'
+        + case_note + f'程序的最终排版为：{_DRAFT_MODES[mode]}；疏密：{density_text}。'
+        '按布局给后续主体区域留出安静空间，四边尽量连续，程序随后会做周期化和接缝检查。'
+        '遵守用户明确配色。补充要求仅用于底纹：'
+        + (prompt.strip() or '按上述主色协调搭配。'))
     return images, instruction
 
 
@@ -1003,10 +1012,11 @@ class DeepSeekSeedreamProvider:
                                   *, mode, density, prompt=''):
         images, instruction = _draft_background_inputs(
             pattern_paths, background_path, reference_bytes, mode=mode, density=density, prompt=prompt)
-        return self._image({'model': self.image_model, 'image': images, 'prompt': instruction,
-                            'size': '2048x2048', 'background': 'opaque', 'output_format': 'png',
-                            'response_format': 'b64_json', 'watermark': False}, output_path,
-                           expected_size=(2048, 2048))
+        payload = {'model': self.image_model, 'prompt': instruction, 'size': '2048x2048',
+                   'background': 'opaque', 'output_format': 'png', 'response_format': 'b64_json', 'watermark': False}
+        if images:
+            payload['image'] = images
+        return self._image(payload, output_path, expected_size=(2048, 2048))
 
     def validate_edit_input(self, source_path, target):
         if target not in ('asset', 'pattern', 'background', 'composite'):
