@@ -1,12 +1,14 @@
 #  HSD 图号助手
 
-v1.28.2 已上线。丝带设计会标出草稿中的不可用素材，并提供移除和刷新入口。处理失效选择后，可在原草稿继续试排和生成。Windows 和 Linux 各通过 248 项专项测试，线上通过同草稿拒绝失效素材、换用有效素材并下载的检查。详见[项目进度](docs/PROGRESS.md)。
+v1.28.3 已上线。AI 搭配结果明确被图片服务拒绝后，可以在原草稿点击「改用本地合成」，沿用当前图案、底图和排版。Windows 和 Linux 各通过 368 项专项测试。详见[项目进度](docs/PROGRESS.md)。
+
+v1.28.2 增加了草稿失效素材标识和恢复入口。Windows 和 Linux 各通过 248 项专项测试，线上通过同草稿更换素材并下载的检查。
 
 v1.28.1 的任务恢复和资源可靠性变更，以及当时的完整测试，见[质量收尾记录](docs/phase1-quality-v1.28.1.md)。
 
 按用户要求移除丝带精修，页面只保留“选素材 → 排版与底图 → 生成 → 下载”。换素材或排版后可生成独立新作品，旧作品及历史下载在保留期内保持。素材提取的单图精修继续保留。[v1.28.0移除记录](docs/ribbon-refinement-retirement-v1.28.0.md)及以下旧版精修描述保留为历史说明。
 
-当前网站为 **v1.28.2 / e3bb5bb7**（2026-11-09）。发布的三个附件已读回校验。[打开丝带设计](https://39.106.45.116:8443/#ribbon) · [Linux Release](https://github.com/DZH166/Smart-Screening-Agent/releases/tag/v1.28.2)
+当前网站为 **v1.28.3 / d13e0272**（2026-11-09）。发布的三个附件已读回校验。[打开丝带设计](https://39.106.45.116:8443/#ribbon) · [Linux Release](https://github.com/DZH166/Smart-Screening-Agent/releases/tag/v1.28.3)
 
 已整合 `codex/ribbon-layout-understanding`：新作品使用 v3 排版，补充散点、场景、边饰和分区行为，图案用途可明确选择；34张私有公司案例与公开程序演示分开呈现。历史作品继续使用原引擎和原下载。[分支原始验证记录](docs/ribbon-layout-understanding-branch.md)保留，不替代本轮整合验收。
 
