@@ -57,6 +57,11 @@ roleVersion.snapshot.pattern_roles = {"stable-flower":"main","stable-star":"acce
 works.push(makeDesign("ROLES",roleVersion));
 const jobs = new Map(), writes = [], requests = [], errors = [];
 let releaseSlow;
+let failNextDownload = true, holdNextDownload = false, releaseDownload;
+let markDownloadHeld;
+const downloadHeld = new Promise(resolve => { markDownloadHeld = resolve; });
+const busyDownloadMessage = "合成测试：传输名额已满，请稍后重试。";
+const staleDownloadMessage = "合成测试：旧版本下载失败。";
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, "http://localhost"), p = url.pathname;
   const json = (value, status = 200) => { if (!res.destroyed) { res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" }); res.end(JSON.stringify(value)); } };
@@ -70,7 +75,18 @@ const server = createServer(async (req, res) => {
     if (p.startsWith("/static/")) { res.writeHead(200, { "Content-Type": p.endsWith(".css") ? "text/css" : "text/javascript" }); res.end(await readFile(path.join(root, "hsd_tool", p))); return; }
     if (p === fixture) { res.writeHead(200, { "Content-Type": "image/svg+xml", "Cache-Control": "private, no-cache, must-revalidate" }); res.end(svg(600, 260)); return; }
     if (p.endsWith("/view")) { res.writeHead(200, { "Content-Type": "image/svg+xml" }); res.end(svg(11811, 520)); return; }
-    if (p.endsWith("/download")) { res.writeHead(200, { "Content-Type": "image/svg+xml", "Content-Disposition": 'attachment; filename="synthetic-unit.svg"' }); res.end(svg()); return; }
+    if (p.endsWith("/download")) {
+      if (failNextDownload || holdNextDownload) {
+        const held = holdNextDownload;
+        failNextDownload = holdNextDownload = false;
+        if (held) await new Promise(resolve => { releaseDownload = resolve; markDownloadHeld(); });
+        res.setHeader("X-Frame-Options", "SAMEORIGIN");
+        res.setHeader("Content-Security-Policy", "frame-ancestors 'self'");
+        res.setHeader("Retry-After", "2");
+        return json({code:"transfer_busy",error:held ? staleDownloadMessage : busyDownloadMessage},429);
+      }
+      res.writeHead(200, { "Content-Type": "image/svg+xml", "Content-Disposition": 'attachment; filename="synthetic-unit.svg"' }); res.end(svg()); return;
+    }
     if (p === "/api/ribbon/auth/me") return json({ id: "synthetic-loop-user", username: "合成员工", role: "employee" });
     if (p === "/api/ribbon/config") return json({ provider: "test", auth_mode: "demo", ai_ready: true, output_profile: sourceProfile, max_refinements: 2, editing });
     if (p === "/api/ribbon/assets") return json(assets);
@@ -154,9 +170,16 @@ try {
   assert.equal(requests.filter(r => r.p === fixture && r.search === "?version=loop-0").length, initialPreviewReads, "view, seams, resize and poll fetch no extra image bytes");
   assert.equal(requests.some(r => r.p.endsWith("/view") || r.p.endsWith("/download")), false, "loop preview never fetches a production master");
   assert.equal(writes.length, 0, "preview controls never create a version or spend quota");
+  await unitDownload().click();
+  await page.getByText(busyDownloadMessage, { exact: true }).waitFor();
+  assert.deepEqual(requests.filter(r => r.p.endsWith("/download")), [
+    {p:"/api/ribbon/versions/loop-0/download",search:"?frame=1",method:"GET"},
+  ], "busy download has no preflight or automatic retry");
   const downloadEvent = page.waitForEvent("download"); await unitDownload().click();
   const download = await downloadEvent;
   assert.match(await readFile(await download.path(), "utf8"), /width="1200" height="520"/, "download is the full-size single unit, not a three-unit strip");
+  assert.equal(await page.getByText(busyDownloadMessage, { exact: true }).count(), 0);
+  assert.equal(requests.filter(r => r.p.endsWith("/download") && r.search === "?frame=1").length, 2);
   await page.locator(".loop-technical-details summary").click();
   assert.match(await page.locator(".loop-technical-details").innerText(), /11811×520px/);
   const historic = makeVersion("loop-1",1,"loop-0");
@@ -170,10 +193,18 @@ try {
   assert.equal(await page.locator(".loop-check ul").count(), 0);
   await page.locator(".history-panel summary").click();
   await page.locator(".version-card").first().click();
-  assert.equal(await page.getByRole("link", { name: "下载所选版本", exact: true }).getAttribute("href"), "/api/ribbon/versions/loop-0/download");
+  const historyDownload = page.getByRole("link", { name: "下载所选版本", exact: true });
+  assert.equal(await historyDownload.getAttribute("href"), "/api/ribbon/versions/loop-0/download");
   assert.equal(await page.getByText("合成提示：请复核接缝附近的留白。", { exact: true }).isVisible(), true);
   assert.equal(await page.locator(".refinement-panel").count(), 0);
+  holdNextDownload = true;
+  await historyDownload.click();
+  await downloadHeld;
   await page.getByRole("button", { name: "返回当前版本", exact: true }).click();
+  releaseDownload();
+  await page.waitForFunction(() => document.querySelector("#ribbon-mount").shadowRoot
+    .querySelector('iframe[title="丝带版本下载"]').contentDocument?.body?.textContent?.includes("旧版本下载失败"));
+  assert.equal(await page.getByText(staleDownloadMessage, { exact: true }).count(), 0, "late historical error cannot affect the active version");
   await page.getByRole("button", { name: "回退上一版", exact: true }).click();
   await assertUnit("loop-0");
   assert.equal(loopWork.versions.length,2,"history remains intact after rollback");
@@ -290,7 +321,7 @@ try {
   assert.deepEqual(generation.asset_ids, uploaded);
   assert.deepEqual(generation.pattern_roles, { "synthetic-main": "main", "synthetic-decoration": "decoration" });
   assert.deepEqual(errors, []);
-  const result = { fixture: "synthetic HTTP only; no business images, no model calls", initialPreviewReads, repeatControlsExtraReads: 0, loopDefault: "unit", repeatedCopies: 3, seams: true, warningsVisible: true, sourceDetailsCollapsed: true, pollingPreservesView: true, versionDownload: true, historicRollback: true, legacyV1V2: true, switchingRejectsStaleImageAndResponse: true, responsiveWidths: [1920, 1366, 640, 375], decorationUploadAndReload: true, decorationsDoNotCountAsSubjects: true, decorationRoleSubmittedByAssetId: true };
+  const result = { fixture: "synthetic HTTP only; no business images, no model calls", initialPreviewReads, repeatControlsExtraReads: 0, loopDefault: "unit", repeatedCopies: 3, seams: true, warningsVisible: true, sourceDetailsCollapsed: true, pollingPreservesView: true, versionDownload: true, versionDownloadBusyRetry: true, staleVersionDownloadErrorIgnored: true, historicRollback: true, legacyV1V2: true, switchingRejectsStaleImageAndResponse: true, responsiveWidths: [1920, 1366, 640, 375], decorationUploadAndReload: true, decorationsDoNotCountAsSubjects: true, decorationRoleSubmittedByAssetId: true };
   await writeFile(path.join(out, "loop-preview.json"), JSON.stringify(result, null, 2));
   console.log(JSON.stringify(result));
-} finally { releaseSlow?.(); await browser.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
+} finally { releaseSlow?.(); releaseDownload?.(); await browser.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }

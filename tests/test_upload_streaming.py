@@ -61,6 +61,37 @@ def test_disk_free_space_is_rechecked_by_windows_not_each_multipart_chunk(employ
     assert 3 <= len(calls) <= 4
 
 
+def test_concurrent_uploads_share_in_flight_capacity_across_directories(tmp_path, monkeypatch):
+    import hsd_tool.uploads as module
+    (tmp_path / "numbering").mkdir()
+    (tmp_path / "material").mkdir()
+    monkeypatch.setattr(module.shutil, "disk_usage", lambda path: SimpleNamespace(free=100))
+    numbering = DiskBudget(tmp_path / "numbering", headroom=20)
+    material = DiskBudget(tmp_path / "material", headroom=20)
+    with numbering.writing(60):
+        with pytest.raises(UploadWriteError, match="磁盘空间不足"):
+            with material.writing(21):
+                pytest.fail("two uploads must share the in-flight reservation")
+        with material.writing(20):
+            pass
+    with material.writing(80):
+        pass  # The next physical check sees capacity released by our fake writes.
+
+
+def test_slow_upload_rechecks_disk_even_without_reaching_the_byte_window(tmp_path, monkeypatch):
+    import hsd_tool.uploads as module
+    free = 100
+    monkeypatch.setattr(module, "DISK_REFRESH_SECONDS", 0)
+    monkeypatch.setattr(module.shutil, "disk_usage", lambda path: SimpleNamespace(free=free))
+    budget = DiskBudget(tmp_path, headroom=20)
+    with budget.writing(1):
+        pass
+    free = 20
+    with pytest.raises(UploadWriteError, match="磁盘空间不足"):
+        with budget.writing(1):
+            pytest.fail("an external writer consumed the remaining space")
+
+
 def test_no_physical_space_fails_clearly_and_cleans_staged_files(employee_app, captured_jobs, monkeypatch):
     import hsd_tool.uploads as module
     monkeypatch.setattr(module.shutil, "disk_usage", lambda path: SimpleNamespace(free=0))

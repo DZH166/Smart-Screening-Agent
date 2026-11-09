@@ -71,6 +71,28 @@ def cloud_request(client, path, *, method="GET", peer="127.0.0.1", forwarded=CLI
                        environ_overrides={"REMOTE_ADDR": peer}, **kwargs)
 
 
+@pytest.mark.parametrize("path,authenticated,token,status", [
+    ("/api/jobs", False, TOKEN, 401),
+    ("/api/admin/keys", False, TOKEN, 401),
+    ("/api/lan/logout", True, "stale-token", 403),
+])
+def test_unauthorized_json_is_rejected_without_reading_the_body(employee_app, path, authenticated, token, status):
+    class NoBodyReads(BytesIO):
+        def read(self, *args):
+            pytest.fail("unauthorized request body was read")
+
+        def readinto(self, *args):
+            pytest.fail("unauthorized request body was read")
+
+    client = employee_app.test_client()
+    if authenticated:
+        login(client)
+    response = cloud_request(client, path, method="POST", token=token,
+                             input_stream=NoBodyReads(b"{}"), content_length=2,
+                             content_type="application/json")
+    assert response.status_code == status
+
+
 def login(client):
     result = cloud_request(client, "/api/lan/login", method="POST", payload={"code": CODE})
     assert result.status_code == 200
@@ -530,3 +552,108 @@ def test_cloud_liveness_probe_is_public_but_says_nothing(employee_app):
     # Everything else still requires the employee access code.
     assert cloud_request(client, "/api/health").status_code == 401
     assert cloud_request(client, "/api/config").status_code == 401
+
+
+def test_two_cloud_transfers_share_slots_and_leave_control_requests_available(employee_app, captured_jobs):
+    from hsd_tool.service import sha256
+    from test_material_service import Provider, Settings, png
+
+    client = employee_app.test_client()
+    login(client)
+    data = {"start_number": "12", "workbook": (BytesIO(workbook_bytes()), "synthetic.xlsx"),
+            "source": (BytesIO(zip_bytes({"pattern.ai": b"synthetic"})), "synthetic.zip")}
+    numbered = cloud_request(client, "/api/jobs/upload", method="POST", data=data)
+    assert numbered.status_code == 200
+    job_id = numbered.json["id"]
+    job = employee_app.config["HSD_MANAGER"].jobs[job_id]
+    archive = Path(job["_work_dir"]) / "result.zip"
+    archive.write_bytes(zip_bytes({"HSD0012.ai": b"synthetic"}))
+    job.update(status="done", _download_path=str(archive), _download_sha256=sha256(archive))
+
+    material = employee_app.config["HSD_MATERIAL_MANAGER"]
+    provider = Provider()
+    provider.block = True
+    material.settings = Settings()
+    material.ai_settings = None
+    material.provider_factory = lambda config: provider
+    upload_id = uuid.uuid4().hex
+    sse, download = None, None
+    try:
+        material_response = cloud_request(client, "/api/material/jobs", method="POST",
+            data={"files": (BytesIO(png()), "synthetic.png")})
+        assert material_response.status_code == 200
+        material_id = material_response.json["id"]
+        assert provider.entered.wait(5)
+        event_path = f"/api/material/jobs/{material_id}/events"
+        download_path = f"/api/jobs/{job_id}/download"
+        sse = cloud_request(client, event_path, buffered=False)
+        download = cloud_request(client, download_path, buffered=False,
+                                 proxy_headers={"Range": "bytes=0-0"})
+        assert sse.status_code == 200 and download.status_code == 206
+
+        # Different tools share the same two slots, even before resolving
+        # foreign/missing IDs or parsing upload multipart bodies.
+        routes = [
+            ("POST", "/api/jobs/upload"), ("POST", "/api/material/jobs"),
+            ("POST", "/api/ribbon/assets"), ("GET", download_path + "-status"),
+            ("GET", f"/api/jobs/{job_id}/image/row/r2"),
+            ("GET", event_path), ("GET", f"/api/material/jobs/{material_id}/download"),
+            ("GET", f"/api/material/jobs/{material_id}/item/{'a' * 32}/before"),
+            ("GET", f"/api/ribbon/assets/{'b' * 32}/file"),
+            ("GET", f"/api/ribbon/versions/{'c' * 32}/preview"),
+            ("GET", f"/api/ribbon/versions/{'c' * 32}/view"),
+            ("GET", f"/api/ribbon/versions/{'c' * 32}/download"),
+        ]
+        for method, path in routes:
+            response = cloud_request(client, path, method=method,
+                                     proxy_headers={"X-HSD-Upload-ID": upload_id})
+            assert response.status_code == 429, path
+            assert response.json["code"] == "transfer_busy"
+            assert response.headers["Retry-After"] == "2"
+        for path in ("/healthz", f"/api/jobs/{job_id}", f"/api/material/jobs/{material_id}",
+                     f"/api/jobs/upload-status/{upload_id}"):
+            response = cloud_request(client, path)
+            assert response.status_code == 200, path
+            response.close()
+        assert cloud_request(client, f"/api/material/upload-status/{upload_id}").json == {"state": "missing"}
+        thumb = cloud_request(client, f"/api/jobs/{job_id}/image/row/r2?size=thumb")
+        assert thumb.status_code == 404
+        thumb.close()
+        stranger = employee_app.test_client()
+        assert cloud_request(stranger, download_path).status_code == 401
+        assert cloud_request(client, "/api/jobs/upload", method="POST", token="stale").status_code == 403
+
+        # Close the stream after just its first chunk. HEAD and a 304 validate
+        # within the other slot but have no body that can hold it afterwards.
+        sse.close()
+        sse.close()
+        head = cloud_request(client, download_path, method="HEAD")
+        assert head.status_code == 200
+        conditional = cloud_request(client, download_path, proxy_headers={"If-None-Match": head.headers["ETag"]})
+        assert conditional.status_code == 304
+        assert cloud_request(client, download_path + "-status").json["ready"]
+        head.close()
+        conditional.close()
+    finally:
+        if sse is not None:
+            sse.close()
+        if download is not None:
+            download.close()
+        provider.release.set()
+        material.close()
+
+
+def test_cloud_transfer_slot_releases_when_request_raises_before_response(employee_app, monkeypatch):
+    client = employee_app.test_client()
+    login(client)
+    material = employee_app.config["HSD_MATERIAL_MANAGER"]
+
+    def abort(*args):
+        raise RuntimeError("synthetic disconnect before response")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(material, "acquire", abort)
+        for _ in range(3):
+            with pytest.raises(RuntimeError, match="synthetic disconnect"):
+                cloud_request(client, f"/api/material/jobs/{'a' * 32}/events")
+    assert cloud_request(client, f"/api/material/jobs/{'a' * 32}/events").status_code == 404

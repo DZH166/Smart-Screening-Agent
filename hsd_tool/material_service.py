@@ -33,7 +33,7 @@ from . import __version__
 from .cancellation import TaskCancelled
 from .material_ark import normalise_rgba
 from .retention_window import RETENTION_SECONDS
-from .uploads import DiskBudget, UploadFile, checked_path
+from .uploads import CLOUD_UPLOAD_HEADROOM, DiskBudget, UploadFile, checked_path
 from .image_budget import IMAGE_BUDGET, image_workspace_bytes
 from .image_headers import image_header
 
@@ -211,14 +211,15 @@ class MaterialManager:
     def _directory(self, identifier):
         return checked_path(self.tasks_root / _identifier(identifier), self.tasks_root)
 
-    def _write(self, path, raw):
+    def _write(self, path, raw, *, headroom=0):
         path = checked_path(path, self.root)
-        DiskBudget(path.parent).reserve(len(raw))
+        budget = DiskBudget(path.parent, headroom=headroom)
         temporary = path.parent / (".write-" + secrets.token_hex(16))
         try:
-            with os.fdopen(os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
-                                  getattr(os, "O_NOFOLLOW", 0), 0o600), "wb") as stream:
-                stream.write(raw); stream.flush(); os.fsync(stream.fileno())
+            with budget.writing(len(raw)):
+                with os.fdopen(os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+                                      getattr(os, "O_NOFOLLOW", 0), 0o600), "wb") as stream:
+                    stream.write(raw); stream.flush(); os.fsync(stream.fileno())
             os.replace(temporary, path)
         finally:
             temporary.unlink(missing_ok=True)
@@ -394,6 +395,7 @@ class MaterialManager:
         self._runtime()
         directory = self.begin_upload(owner=owner) if directory is None else self._upload_directory(directory)
         sources = []
+        headroom = CLOUD_UPLOAD_HEADROOM if self.cloud else 0
         try:
             for value in files.getlist("files"):
                 if ensure_active:
@@ -405,11 +407,11 @@ class MaterialManager:
                 stream.seek(0)
                 with _image_workspace(stream, check_cancel=ensure_active), closing(_decode(stream)) as image:
                     raw = _png(image)
-                    self._write(directory / (source_id + ".png"), raw)
+                    self._write(directory / (source_id + ".png"), raw, headroom=headroom)
                     source_sha = hashlib.sha256(raw).hexdigest()
                     del raw
                     thumbnail = _thumbnail(image)
-                    self._write(directory / (source_id + ".thumb.png"), thumbnail)
+                    self._write(directory / (source_id + ".thumb.png"), thumbnail, headroom=headroom)
                     sources.append({"id": source_id, "name": name, "width": image.width,
                                     "height": image.height, "sha256": source_sha,
                                     "thumbnail_sha256": hashlib.sha256(thumbnail).hexdigest(),

@@ -158,9 +158,9 @@ def register_ribbon(app, manager, material_settings, employee_id):
             current = service.ensure_external_user('hsd:' + owner, role)
             environ = request.environ.copy()
             environ['hsd.ribbon_user'] = current
-            # The host JSON guard has read/cached the body. Multipart input
-            # stays streaming and is not parsed twice.
-            if request.is_json:
+            # Replay JSON already read by the host guard only for writes.
+            # Read routes must not wait for a caller-supplied request body.
+            if request.is_json and request.method in {'POST', 'PUT', 'PATCH', 'DELETE'}:
                 body = request.get_data()
                 environ['wsgi.input'] = io.BytesIO(body)
                 environ['CONTENT_LENGTH'] = str(len(body))

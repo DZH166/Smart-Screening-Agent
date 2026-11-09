@@ -1558,6 +1558,12 @@ dialog::backdrop {
   font-size:14px;
   color:var(--muted)
 }
+.preview-retry {
+  margin-top:6px;
+  min-height:32px;
+  padding:4px 10px;
+  font-size:12px
+}
 /* AI advice keeps meaningful differences visible;
 diagnostics are expandable. */
 .ai-settings-dialog {

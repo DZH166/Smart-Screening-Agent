@@ -681,12 +681,39 @@
     if (index<0) return;
     [rows[index+1],rows[index-1]].forEach((neighbour)=>{
       if (!neighbour) return;
-      preloadImage(previewUrl('row',neighbour.id));
+      preloadImage(previewUrl('row',neighbour.id)+'?size=thumb');
       const fileId=neighbour.file_id||neighbour.candidates?.[0]?.file_id;
-      if (fileId) preloadImage(previewUrl('file',fileId));
+      if (fileId) preloadImage(previewUrl('file',fileId)+'?size=thumb');
     });
   }
   function preloadImage(url){if(preloaded.has(url))return;if(preloaded.size>=200)preloaded.delete(preloaded.values().next().value);preloaded.add(url);const preview=new Image();preview.src=url;}
+  function previewImageResult(image,failed) {
+    image.classList.toggle('image-broken',failed);
+    const frame=image.parentElement;
+    if(!frame?.matches('.preview-frame,.enlarged-image,.batch-pair-images figure'))return;
+    let retry=frame.nextElementSibling;
+    if(!retry?.matches('[data-preview-retry]'))retry=null;
+    if(!failed){
+      if(retry){
+        if(document.activeElement===retry&&frame.hasAttribute('tabindex'))frame.focus({preventScroll:true});
+        retry.remove();
+      }
+      return;
+    }
+    if(!retry){
+      retry=document.createElement('button');
+      retry.type='button';retry.className='button button-secondary preview-retry';retry.dataset.previewRetry='';
+      retry.addEventListener('click',()=>{
+        if(!image.isConnected)return;
+        retry.disabled=true;retry.textContent='正在重试大图…';
+        const url=new URL(image.src);
+        url.searchParams.set('retry',String(Number(url.searchParams.get('retry')||0)+1));
+        image.src=url.href;
+      });
+      frame.after(retry);
+    }
+    retry.disabled=false;retry.textContent='预览未加载，重试大图';
+  }
   async function resolveRow(fileId) {
     if(state.authExpired||state.resolving||state.job?.status!=='ready')return;
     const rowId=state.selectedRowId;
@@ -896,7 +923,8 @@
         if(job.revision===revision)renderAiOverview();else renderJob();
       }catch(error){if(error.obsolete)return;notice(`未能更新本批复核状态：${error.message} 可在主机管理中重新读取设置。`);}
     });
-    document.addEventListener('error',(event)=>{if(event.target instanceof HTMLImageElement)event.target.classList.add('image-broken');},true);
+    document.addEventListener('error',(event)=>{if(event.target instanceof HTMLImageElement)previewImageResult(event.target,true);},true);
+    document.addEventListener('load',(event)=>{if(event.target instanceof HTMLImageElement)previewImageResult(event.target,false);},true);
     let config=null;
     try {
       config=await api('/api/config');

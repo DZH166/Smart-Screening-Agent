@@ -57,6 +57,34 @@ def test_host_auth_namespace_and_header_spoof(employee_app):
     assert config['output_profile']['is_demo'] is True
 
 
+def test_catalog_get_does_not_consume_an_unexpected_json_body(employee_app, monkeypatch):
+    from hsd_tool.server import EmployeeUploadRequest
+
+    client = employee_app.test_client()
+    login(client)
+
+    def unexpected_body(*args, **kwargs):
+        raise AssertionError('The ribbon catalog must never copy a GET body')
+
+    monkeypatch.setattr(EmployeeUploadRequest, 'get_data', unexpected_body)
+    assets = read(call(client, '/assets', content_type='application/json', data=b'{"ignored":true}'))
+    assert isinstance(assets, list)
+
+
+def test_only_ribbon_download_opt_in_errors_can_be_read_in_a_same_origin_frame(employee_app):
+    client = employee_app.test_client()
+    for route, expected in (
+        ("/versions/missing/download?frame=1", "SAMEORIGIN"),
+        ("/versions/missing/download", "DENY"),
+        ("/versions/missing/view?frame=1", "DENY"),
+    ):
+        response = call(client, route)
+        assert response.status_code == 401
+        assert response.headers["X-Frame-Options"] == expected
+        ancestor = "self" if expected == "SAMEORIGIN" else "none"
+        assert f"frame-ancestors '{ancestor}'" in response.headers["Content-Security-Policy"]
+
+
 def test_first_draft_retired_refinement_and_exact_download(employee_app):
     client = employee_app.test_client()
     login(client)

@@ -1,15 +1,19 @@
 """Streaming employee uploads; original names never become filesystem paths."""
 from __future__ import annotations
 
+from contextlib import contextmanager
 import errno
 import hashlib
 import os
 import re
 import shutil
 import stat
+import threading
+import time
 import uuid
 import zipfile
 from pathlib import Path
+from weakref import WeakValueDictionary
 
 # Public configuration uses null for unlimited. Structural and disk checks remain.
 MAX_UPLOAD_BYTES = None
@@ -17,6 +21,10 @@ MAX_WORKBOOK_BYTES = None
 MAX_SOURCE_BYTES = None
 COPY_BUFFER_BYTES = 1024 * 1024
 DISK_CHECK_INTERVAL = 64 * 1024**2
+DISK_REFRESH_SECONDS = 2
+CLOUD_UPLOAD_HEADROOM = 256 * 1024**2
+_VOLUME_LOCK = threading.Lock()
+_VOLUME_BUDGETS = WeakValueDictionary()
 
 
 class UploadWriteError(RuntimeError):
@@ -27,23 +35,62 @@ def disk_full(exc):
     return getattr(exc, "errno", None) in {errno.ENOSPC, errno.EDQUOT} or getattr(exc, "winerror", None) in {39, 112}
 
 
-class DiskBudget:
-    """Recheck physical free space by written windows, not every upload chunk."""
-    def __init__(self, directory):
-        self.directory = Path(directory)
-        self.remaining = None
-        self.since_check = DISK_CHECK_INTERVAL
+class _VolumeBudget:
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.free = 0
+        self.pending = 0
+        self.since_check = 0
+        self.checked_at = 0
 
-    def reserve(self, count):
-        if self.remaining is None or self.since_check >= DISK_CHECK_INTERVAL or self.remaining < count:
-            self.remaining = shutil.disk_usage(self.directory).free
-            self.since_check = 0
-        if self.remaining < count:
+
+class DiskBudget:
+    """Share checked disk capacity and in-flight writes on each volume."""
+    def __init__(self, directory, *, headroom=0):
+        self.directory = Path(directory).resolve()
+        self.headroom = headroom
+        self._fresh = True
+        key = (self.directory.anchor, self.directory.stat().st_dev)
+        with _VOLUME_LOCK:
+            volume = _VOLUME_BUDGETS.get(key)
+            if volume is None:
+                volume = _VolumeBudget()
+                _VOLUME_BUDGETS[key] = volume
+            self._volume = volume
+
+    def _check(self, count, *, refresh=False):
+        volume = self._volume
+        needed = volume.pending + count + self.headroom
+        now = time.monotonic()
+        if (refresh or self._fresh or volume.since_check >= DISK_CHECK_INTERVAL
+                or now - volume.checked_at >= DISK_REFRESH_SECONDS or volume.free < needed):
+            volume.free = shutil.disk_usage(self.directory).free
+            volume.since_check = 0
+            volume.checked_at = now
+            self._fresh = False
+        if volume.free < needed:
             raise UploadWriteError("主机磁盘空间不足，请联系管理员清理后再上传。")
 
-    def written(self, count):
-        self.remaining -= count
-        self.since_check += count
+    def reserve(self, count):
+        # Check-only callers perform their own writes outside this budget.
+        with self._volume.lock:
+            self._check(count, refresh=True)
+
+    @contextmanager
+    def writing(self, count):
+        volume = self._volume
+        with volume.lock:
+            self._check(count)
+            volume.pending += count
+        try:
+            yield
+        finally:
+            with volume.lock:
+                volume.pending -= count
+                # Account conservatively even if a write only partly succeeded.
+                # The next physical refresh recovers any unused capacity.
+                volume.free -= count
+                volume.since_check += count
 
 
 class UploadFile:
@@ -52,7 +99,7 @@ class UploadFile:
         self.path = Path(path)
         self.directory = self.path.parent
         self.budget = budget
-        self._file = self.path.open("x+b")
+        self._file = self.path.open("x+b", buffering=0)
         self._digest = hashlib.sha256()
         self.bytes_written = 0
 
@@ -65,17 +112,16 @@ class UploadFile:
         return self._digest.hexdigest()
 
     def write(self, data):
-        self.budget.reserve(len(data))
-        try:
-            written = self._file.write(data)
-        except OSError as exc:
-            if disk_full(exc):
-                raise UploadWriteError("主机磁盘空间不足，请联系管理员清理后再上传。") from exc
-            raise
+        with self.budget.writing(len(data)):
+            try:
+                written = self._file.write(data)
+            except OSError as exc:
+                if disk_full(exc):
+                    raise UploadWriteError("主机磁盘空间不足，请联系管理员清理后再上传。") from exc
+                raise
         if written:
             self._digest.update(memoryview(data)[:written])
             self.bytes_written += written
-            self.budget.written(written)
         if written != len(data):
             raise UploadWriteError("上传文件未完整写入主机，请检查磁盘空间后重试。")
         return written

@@ -9,26 +9,66 @@ server {
     access_log off;
     error_log /var/log/hsd-agent/nginx-error.log warn;
 
-    client_max_body_size 0;
+    # BEGIN HSD PROXY POLICY
+    # Fully receive ordinary small request bodies before using a Gunicorn thread.
+    client_max_body_size 64k;
+    client_body_buffer_size 64k;
     client_body_temp_path /var/lib/hsd-agent/storage/nginx-body;
-    client_body_timeout 300s;
-    send_timeout 300s;
+    client_body_timeout 15s;
+    send_timeout 30s;
+
+    proxy_http_version 1.1;
+    proxy_request_buffering on;
+    proxy_buffering on;
+    proxy_max_temp_file_size 0;
+    proxy_read_timeout 300s;
+    proxy_send_timeout 30s;
+    proxy_set_header Host $http_host;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-Host "";
+    proxy_set_header X-Forwarded-Port "";
+    proxy_set_header X-Forwarded-Prefix "";
+    proxy_set_header Forwarded "";
+    proxy_set_header X-Real-IP "";
+    proxy_set_header Connection "";
 
     location / {
         proxy_pass http://127.0.0.1:8830;
-        proxy_http_version 1.1;
+    }
+
+    # Both normalized upload routes stream, including chunked bodies over HTTP/1.1.
+    # The application checks ownership, multipart structure, disk and cancellation.
+    location ~ ^/api/(?:jobs/upload|material/jobs)$ {
+        if ($request_method != POST) { return 405; }
+        client_max_body_size 0;
+        client_body_timeout 300s;
+        send_timeout 300s;
         proxy_request_buffering off;
-        proxy_buffering off;
         proxy_read_timeout 300s;
         proxy_send_timeout 300s;
-        proxy_set_header Host $http_host;
-        proxy_set_header X-Forwarded-For $remote_addr;
-        proxy_set_header X-Forwarded-Proto https;
-        proxy_set_header X-Forwarded-Host "";
-        proxy_set_header X-Forwarded-Port "";
-        proxy_set_header X-Forwarded-Prefix "";
-        proxy_set_header Forwarded "";
-        proxy_set_header X-Real-IP "";
-        proxy_set_header Connection "";
+        proxy_pass http://127.0.0.1:8830;
     }
+
+    location = /api/ribbon/assets {
+        # The catalog remains readable. Reject unsupported methods before their bodies.
+        if ($request_method !~ ^(?:GET|HEAD|POST)$) { return 405; }
+        # Preserve the 20 MiB per-image limit plus the existing multipart allowance.
+        client_max_body_size 21m;
+        client_body_timeout 300s;
+        send_timeout 300s;
+        proxy_request_buffering off;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+        proxy_pass http://127.0.0.1:8830;
+    }
+
+    # Keep live progress and authorized files flowing without a proxy spool.
+    location ~ ^/api/(?:jobs/[^/]+/(?:download|image/[^/]+/[^/]+)|material/jobs/[^/]+/(?:events|download(?:/[^/]+)?|source/[^/]+|item/[^/]+(?:/before)?)|ribbon/(?:assets/[^/]+/file|versions/[^/]+/(?:preview|view|download)))$ {
+        send_timeout 300s;
+        proxy_buffering off;
+        proxy_read_timeout 300s;
+        proxy_pass http://127.0.0.1:8830;
+    }
+    # END HSD PROXY POLICY
 }

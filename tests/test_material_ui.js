@@ -73,6 +73,26 @@ test("a definitively unavailable accepted batch releases the upload controls wit
   assert.match(h.node("material-notice").textContent,/不可读取/);assert.equal(h.xhrs.length,1);
 });
 test("missing upload keeps the same ID for a safe retry instead of creating a second batch",async()=>{const h=harness();h.ui.state.config={available:true};h.ui.state.files=[{name:"a.png",size:2}];h.ui.state.uploadId="old-request";h.ui.state.uncertain=true;const check=h.ui.recoverUpload();await h.reply(0,{state:"missing"});await check;assert.equal(h.ui.state.uploadId,"old-request");assert.equal(h.ui.state.retryUpload,true);const retry=h.ui.start();assert.equal(h.xhrs[0].headers["X-HSD-Upload-ID"],"old-request");h.xhrs[0].reply(400,{error:"synthetic failure"});await retry;assert.equal(h.ui.state.uncertain,false);});
+test("busy transfer shows the retry interval and only a manual retry uses the original upload ID",async()=>{
+  const h=harness(),file={name:"kept.png",size:2};
+  h.ui.state.config={available:true};h.ui.state.files=[file];
+  const pending=h.ui.start();await flush();
+  const first=h.xhrs[0],id=first.headers["X-HSD-Upload-ID"];
+  first.getResponseHeader=name=>name==="Retry-After"?"2":null;
+  first.reply(429,{code:"transfer_busy",error:"服务器正在处理其他传输，请稍后重试。"});await flush();
+  assert.equal(h.requests.length,1);
+  assert.ok(h.requests[0].url.endsWith("/upload-status/"+id));
+  assert.equal(h.requests[0].options.method,"GET");
+  await h.reply(0,{state:"missing"});await pending;
+  assert.equal(h.xhrs.length,1);
+  assert.equal(h.ui.state.files[0],file);
+  assert.match(h.node("material-notice").textContent,/服务器正在处理其他传输.*等待 2 秒.*沿用同一个请求/);
+  assert.equal(h.node("material-start").disabled,false);
+  const retry=h.ui.start();
+  assert.equal(h.xhrs[1].headers["X-HSD-Upload-ID"],id);
+  h.xhrs[1].reply(400,{error:"synthetic terminal validation"});
+  await retry;
+});
 test("a cancelled upload only becomes stopped after server confirmation",async()=>{const h=harness();h.ui.state.uploadId="request";h.ui.state.uncertain=true;const pending=h.ui.stop();assert.equal(h.ui.state.stopRequested,true);assert.equal(h.ui.state.uncertain,true);await h.reply(0,{state:"pending",cancellation_requested:true});assert.equal(h.requests.length,2);await h.reply(1,{state:"cancelled"});await pending;assert.equal(h.ui.state.uncertain,false);assert.match(h.node("material-notice").textContent,/已停止/);});
 test("terminal jobs stop polling and skipped items leave the default queue",()=>{const h=harness();h.ui.state.workspace="material";h.ui.setJob(job({status:"processing"}));assert.equal(h.timers.size,2);h.ui.setJob(job({items:[{...job().items[0],status:"skipped"}]}));assert.equal(h.timers.size,0);h.ui.state.filter="available";h.ui.render();const node=h.ui.state.items.get("i1").node;assert.ok(node.classList.contains("hidden"));assert.match(h.node("material-summary").textContent,/1 个已舍弃/);});
 test("stop can cancel a running job and waits for backend convergence",async()=>{const h=harness();h.ui.setJob(job({status:"processing"}));const stop=h.ui.stop();assert.equal(h.requests.length,1);assert.ok(h.requests[0].url.endsWith("/cancel"));assert.equal(h.ui.state.job.status,"processing");await h.reply(0,job({status:"cancelling",revision:4}));await stop;assert.equal(h.ui.state.job.status,"cancelling");assert.equal(h.node("material-stop").disabled,true);assert.match(h.node("material-progress-title").textContent,/正在停止/);});

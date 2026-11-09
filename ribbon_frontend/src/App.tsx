@@ -3,6 +3,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type MouseEvent,
   type ReactNode,
 } from "react";
 import {
@@ -457,6 +458,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
   const [notice, setNotice] = useState<{
       text: string;
       type: "error" | "success" | "info";
+      downloadVersion?: string;
     } | null>(null),
     [modal, setModal] = useState<
       "pattern" | "background" | "designs" | "layouts" | "admin" | null
@@ -530,6 +532,9 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
   const offerLocalRecovery = design?.recovery_action === "compose_locally" &&
     !design.current_version_id && !design.versions?.length && !processing && !pending && !designTarget;
   const isHistory = !!selected && selected.id !== design?.current_version_id;
+  const visibleNotice = notice?.downloadVersion && notice.downloadVersion !== selected?.id ? null : notice;
+  const downloadFrame = useRef<HTMLIFrameElement | null>(null);
+  const downloadAttempt = useRef<{ url: string; versionId: string; designId: string } | null>(null);
   const shownProfile = selected?.snapshot?.output_profile;
   const selectedLoop = ["seamless-unit-v1","seamless-unit-v2","seamless-unit-v3"].includes(selected?.snapshot.loop?.engine || "");
   // Settings and trials prepare a new work using the current engine/profile.
@@ -1189,6 +1194,36 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
       });
     });
   }
+  function downloadVersion(event: MouseEvent<HTMLAnchorElement>, version: Version) {
+    if (event.defaultPrevented || event.button !== 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    event.preventDefault();
+    const frame = downloadFrame.current;
+    if (!frame || !design || selected?.id !== version.id || !active || view !== "ribbon") return;
+    const url = new URL(event.currentTarget.href);
+    if (url.origin !== location.origin || url.pathname !== `/api/ribbon/versions/${encodeURIComponent(version.id)}/download`) return;
+    url.searchParams.set("frame", "1");
+    downloadAttempt.current = {url:url.href, versionId:version.id, designId:design.id};
+    setNotice(previous => previous?.downloadVersion ? null : previous);
+    frame.src = url.href;
+  }
+  function readDownloadFeedback() {
+    const attempt = downloadAttempt.current;
+    const doc = downloadFrame.current?.contentDocument;
+    // Initial about:blank loads and previous document navigations have no
+    // bearing on this attempt. Attachments stream without an iframe document.
+    if (!attempt || doc?.URL !== attempt.url) return;
+    downloadAttempt.current = null;
+    if (!active || view !== "ribbon" || designRef.current?.id !== attempt.designId || selected?.id !== attempt.versionId) return;
+    const text = doc.body?.textContent?.trim();
+    if (!text) return;
+    let reason = "";
+    try {
+      const response = JSON.parse(text);
+      if (typeof response?.error === "string") reason = response.error;
+      else if (typeof response?.detail === "string") reason = response.detail;
+    } catch { /* A proxy can return an HTML error page. */ }
+    setNotice({type:"error", text:reason || "下载未能开始，请稍后重试。", downloadVersion:attempt.versionId});
+  }
   async function newDesign() {
     if (creationGate.current || busy || pending || backgroundProcessing || uploading) return;
     cancelCandidatePreview();
@@ -1483,17 +1518,18 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
         </div>
       </header>
       <main>
+        <iframe ref={downloadFrame} hidden title="丝带版本下载" onLoad={readDownloadFeedback} />
         {config && (testMode || !aiAvailable || config.output_profile?.is_demo) && <div className="environment-strip compact-status">
           {testMode && <span className={current ? undefined : "test-limit"}>测试模型 · 演示模式（测试替身）</span>}
           {config.output_profile?.is_demo && <span>演示输出 · 未经业务验收</span>}
           {!aiAvailable && <span>AI 尚未配置，可用已有素材排版。</span>}
         </div>}
-        {notice && (
+        {visibleNotice && (
           <div
-            className={`notice ${notice.type}`}
-            role={notice.type === "error" ? "alert" : "status"}
+            className={`notice ${visibleNotice.type}`}
+            role={visibleNotice.type === "error" ? "alert" : "status"}
           >
-            <span>{notice.text}</span>
+            <span>{visibleNotice.text}</span>
             <button
               aria-label="关闭提示"
               className="icon-button"
@@ -1894,6 +1930,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                         className="secondary"
                         href={selected.download_url}
                         download
+                        onClick={event => downloadVersion(event, selected)}
                       >
                         <Icon name="download" size={17} />
                         {isHistory ? "下载所选版本" : selectedLoop ? "下载循环单元" : "下载当前图"}

@@ -145,7 +145,18 @@
       const form=new FormData();files.forEach(file=>form.append("files",file));
       const xhr=new XMLHttpRequest();state.xhr=xhr;xhr.open("POST","/api/material/jobs");xhr.timeout=0;xhr.setRequestHeader("X-HSD-Token",window.HSD_TOKEN||"");xhr.setRequestHeader("X-HSD-Upload-ID",state.uploadId);
       xhr.upload.addEventListener("progress",event=>{if(!state.uploading)return;const known=event.lengthComputable&&event.total>0;$("material-progress-fill").classList.toggle("indeterminate",!known);if(known){const percent=Math.min(100,Math.round(event.loaded/event.total*100));$("material-progress-fill").style.width=`${percent}%`;$("material-progress-percent").textContent=`${percent}%`;$("material-progress-track").setAttribute("aria-valuenow",String(percent));$("material-progress-detail").textContent=`上传 ${formatBytes(event.loaded)} / ${formatBytes(event.total)}`;if(percent===100)$("material-progress-message").textContent="上传完成，正在检查图片，请稍候。";}});
-      xhr.addEventListener("load",()=>{let data;try{data=JSON.parse(xhr.responseText);}catch(_){reject(new Error("上传结果未确认。"));return;}if(xhr.status<200||xhr.status>=300){const error=new Error(data.error||"上传未完成。");error.status=xhr.status;reject(error);return;}if(!data.id){reject(new Error("上传结果未确认。"));return;}resolve(data);});
+      xhr.addEventListener("load",()=>{
+        let data;try{data=JSON.parse(xhr.responseText);}catch(_){reject(new Error("上传结果未确认。"));return;}
+        if(xhr.status<200||xhr.status>=300){
+          const error=new Error(data.error||"上传未完成。");error.status=xhr.status;
+          if(xhr.status===429&&data.code==="transfer_busy"){
+            const wait=Number(xhr.getResponseHeader("Retry-After"));
+            error.capacityMessage=error.message+(Number.isSafeInteger(wait)&&wait>0?` 建议等待 ${wait} 秒。`:"");
+          }
+          reject(error);return;
+        }
+        if(!data.id){reject(new Error("上传结果未确认。"));return;}resolve(data);
+      });
       ["error","abort","timeout"].forEach(name=>xhr.addEventListener(name,()=>reject(new Error("上传连接中断，正在核对结果。"))));xhr.send(form);
     });
   }
@@ -162,12 +173,35 @@
       state.pendingJobId=data.id;state.acceptedJobId=data.id;remember("hsd-material-job",data.id);clearUpload();state.newBatch=false;remember("hsd-material-new",null);
       try{await loadJob(data.id);}catch(error){if(epoch!==state.epoch)return;showReadRecovery();notify(error.status===408?"任务已创建，但读取进度超时；点“重新查询”即可继续。":"任务已创建，但这次没取到进度；点“重新查询”即可继续。",true);}
     }
-    catch(error){if(epoch!==state.epoch)return;state.uploading=false;if(error.status===410){unavailableUpload(error.message);}else if([400,413,415,422].includes(error.status)){clearUpload();$("material-progress").classList.add("hidden");notify(error.message,true);}else if(error.status===401){state.uncertain=true;lockAuth();}else{state.uncertain=true;showUpload();await recoverUpload();}}
+    catch(error){if(epoch!==state.epoch)return;state.uploading=false;if(error.status===410){unavailableUpload(error.message);}else if([400,413,415,422].includes(error.status)){clearUpload();$("material-progress").classList.add("hidden");notify(error.message,true);}else if(error.status===401){state.uncertain=true;lockAuth();}else{state.uncertain=true;showUpload();await recoverUpload(error.capacityMessage);}}
     finally{if(epoch===state.epoch)controls();}
   }
-  async function recoverUpload() {
+  async function recoverUpload(capacityMessage="") {
     if(!state.uploadId||state.busy||state.authLost)return;const epoch=state.epoch;state.busy=true;controls();
-    try{const data=await api(`/api/material/upload-status/${encodeURIComponent(state.uploadId)}`);if(epoch!==state.epoch)return;const id=data.job_id||data.id;if(id&&data.state==="completed"){const stop=state.stopRequested||data.cancellation_requested;state.pendingJobId=id;state.acceptedJobId=id;remember("hsd-material-job",id);clearUpload();await loadJob(id);if(epoch!==state.epoch)return;if(stop&&activeStatuses.has(state.job?.status)){const job=await api(jobPath("/cancel"),{expected_revision:state.job.revision});if(epoch===state.epoch)setJob(job);}}else if(data.state==="unavailable"){unavailableUpload();}else if(data.state==="cancelled"){clearUpload();$("material-progress").classList.add("hidden");notify("上传已停止，可以重新选择图片。");}else if(data.state==="missing"){state.uncertain=true;state.retryUpload=!!state.files.length&&!state.stopRequested;showUpload();notify(state.retryUpload?"当前未找到已受理任务。可重试本次上传（沿用同一个请求），或先停止再更换图片。":"当前未找到已受理任务，请先停止本次上传，再重新选择图片。",true);}else{state.uncertain=true;state.retryUpload=false;showUpload();notify(data.cancellation_requested?"正在停止上传，请稍后查询最终结果。":"还在核对上传结果，请稍后点击“查询上传结果”。不要重复提交。",true);}}
+    try{
+      const data=await api(`/api/material/upload-status/${encodeURIComponent(state.uploadId)}`);
+      if(epoch!==state.epoch)return;
+      const id=data.job_id||data.id;
+      if(id&&data.state==="completed"){
+        const stop=state.stopRequested||data.cancellation_requested;
+        state.pendingJobId=id;state.acceptedJobId=id;remember("hsd-material-job",id);clearUpload();
+        await loadJob(id);if(epoch!==state.epoch)return;
+        if(stop&&activeStatuses.has(state.job?.status)){
+          const job=await api(jobPath("/cancel"),{expected_revision:state.job.revision});
+          if(epoch===state.epoch)setJob(job);
+        }
+      }else if(data.state==="unavailable"){unavailableUpload();}
+      else if(data.state==="cancelled"){
+        clearUpload();$("material-progress").classList.add("hidden");notify("上传已停止，可以重新选择图片。");
+      }else if(data.state==="missing"){
+        state.uncertain=true;state.retryUpload=!!state.files.length&&!state.stopRequested;showUpload();
+        const retry=state.retryUpload?"可重试本次上传（沿用同一个请求），或先停止再更换图片。":"请先停止本次上传，再重新选择图片。";
+        notify((capacityMessage||"当前未找到已受理任务。")+retry,true);
+      }else{
+        state.uncertain=true;state.retryUpload=false;showUpload();
+        notify(data.cancellation_requested?"正在停止上传，请稍后查询最终结果。":"还在核对上传结果，请稍后点击“查询上传结果”。不要重复提交。",true);
+      }
+    }
     catch(error){if(epoch===state.epoch&&!state.authLost){showReadRecovery();notify(error.message||"无法查询上传结果，请稍后重试。",true);}}finally{if(epoch===state.epoch){state.busy=false;controls();}}
   }
   async function loadJob(id=state.job?.id||state.pendingJobId,parentCurrent=()=>true) {

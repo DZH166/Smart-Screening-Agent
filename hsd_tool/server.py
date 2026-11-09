@@ -17,7 +17,7 @@ from flask import Flask, Request, Response, current_app, g, jsonify, redirect, r
 from werkzeug.exceptions import BadRequest, Conflict, RequestEntityTooLarge
 
 from .service import JobManager
-from .uploads import EmployeeUploads, DiskBudget, UploadWriteError, MAX_UPLOAD_BYTES, MAX_WORKBOOK_BYTES, MAX_SOURCE_BYTES, disk_full
+from .uploads import CLOUD_UPLOAD_HEADROOM, EmployeeUploads, DiskBudget, UploadWriteError, MAX_UPLOAD_BYTES, MAX_WORKBOOK_BYTES, MAX_SOURCE_BYTES, disk_full
 from . import __version__
 from . import admin_auth
 from .cloud_tasks import CloudTaskStore, UploadClaims, upload_id
@@ -51,7 +51,8 @@ class EmployeeUploadRequest(Request):
             claim = getattr(g, "hsd_upload_claim", None)
             if claim is not None:
                 current_app.config[getattr(self, "_hsd_upload_claims_key", "HSD_UPLOAD_CLAIMS")].bind_directory(*claim, self._hsd_upload_directory)
-            self._hsd_upload_budget = DiskBudget(self._hsd_upload_directory)
+            headroom = CLOUD_UPLOAD_HEADROOM if current_app.config["HSD_CLOUD"] else 0
+            self._hsd_upload_budget = DiskBudget(self._hsd_upload_directory, headroom=headroom)
             self._hsd_upload_streams = []
         stream = uploads.open_stream(self._hsd_upload_directory, self._hsd_upload_budget)
         claim = getattr(g, "hsd_upload_claim", None)
@@ -88,6 +89,24 @@ class EmployeeUploadRequest(Request):
 
 
 _ASSET_REF = re.compile(r'(/static/[^"\']+\.(?:js|css))')
+_RIBBON_FILE_TRANSFER = re.compile(r"(?:assets/[^/]+/file|versions/[^/]+/(?:preview|view|download))")
+
+
+def _uses_cloud_transfer_slot(request):
+    endpoint = request.endpoint
+    ribbon_path = (request.view_args or {}).get("ribbon_path", "")
+    if request.method == "POST":
+        return (endpoint in {"upload_job", "material_upload_job"}
+                or endpoint == "ribbon_api" and ribbon_path == "assets")
+    if request.method not in {"GET", "HEAD"}:
+        return False
+    if endpoint in {"download", "download_status", "material_download", "material_events"}:
+        return True
+    if endpoint == "image":
+        return request.args.get("size", "full") != "thumb"
+    if endpoint == "material_image":
+        return request.args.get("variant", "full") != "thumb"
+    return endpoint == "ribbon_api" and bool(_RIBBON_FILE_TRANSFER.fullmatch(ribbon_path))
 
 
 def _build_id():
@@ -152,6 +171,8 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
                                        ai_key_pool=manager.ai_key_pool)
     app.config["HSD_MATERIAL_MANAGER"] = material_manager
     material_streams = threading.BoundedSemaphore(2)
+    cloud_transfers = threading.BoundedSemaphore(2) if cloud else None
+    transfer_release_lock = threading.Lock()
     material_claims = UploadClaims()
     material_manager.restore_upload_claims(material_claims)
     app.config["HSD_MATERIAL_UPLOAD_CLAIMS"] = material_claims
@@ -219,6 +240,23 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
             result = redact(result)
         return result
 
+    def reserve_cloud_transfer():
+        if cloud_transfers is None or not _uses_cloud_transfer_slot(request):
+            return None
+        if not cloud_transfers.acquire(blocking=False):
+            response = jsonify(error="服务器正在上传、下载或发送实时进度，请稍后重试。", code="transfer_busy")
+            response.status_code = 429
+            response.headers["Retry-After"] = "2"
+            return response
+        g.hsd_transfer_slot = {"bound": False, "released": False}
+        return None
+
+    def release_cloud_transfer(slot):
+        with transfer_release_lock:
+            if not slot["released"]:
+                slot["released"] = True
+                cloud_transfers.release()
+
     @app.before_request
     def guard_local():
         if lan and not lan.allows(request.remote_addr):
@@ -240,12 +278,14 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
         is_ribbon = request.endpoint == "ribbon_api"
         ribbon_upload = is_ribbon and request.method == "POST" and request.path == "/api/ribbon/assets"
         mutating = request.method == "POST" or (is_ribbon and request.method in {"PUT", "PATCH", "DELETE"})
+        expects_json = False
         if mutating:
             origin = request.headers.get("Origin")
             if (origin and origin != request.host_url.rstrip("/")) or (remote and not origin):
                 return jsonify(error="请求来源不匹配。"), 403
             empty_delete = is_ribbon and request.method == "DELETE" and not request.content_length
-            if not is_upload and not ribbon_upload and not empty_delete and (not request.is_json or not isinstance(request.get_json(silent=True), dict)):
+            expects_json = not (is_upload or ribbon_upload or empty_delete)
+            if expects_json and not request.is_json:
                 return jsonify(error="请求必须使用 JSON 对象。"), 400
         if lan and request.endpoint == "lan_login":
             return None
@@ -304,6 +344,20 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
                 if request.path.startswith(("/api/admin/", "/api/ribbon/admin/")) or protected_static or material_admin_static:
                     return jsonify(error="请先登录管理员分区。"), 401
                 return (static / "admin-login.html").read_text("utf-8")
+        if mutating and request.endpoint != "admin_login":
+            provided = request.headers.get("X-HSD-Token", "")
+            if not secrets.compare_digest(provided.encode(), token.encode()):
+                return jsonify(error="页面凭证已更新，请刷新页面后继续。", code="page_token_expired"), 403
+            with manager.lock:
+                if app.config["HSD_STOPPING"] and request.endpoint != "shutdown":
+                    raise Conflict("主机正在退出，请稍后重新打开员工入口。")
+        transfer_rejection = reserve_cloud_transfer()
+        if transfer_rejection is not None:
+            return transfer_rejection
+        # Reject unauthorized requests before consuming their request bodies.
+        # Login routes validate their own bodies after origin checks.
+        if expects_json and request.endpoint != "admin_login" and not isinstance(request.get_json(silent=True), dict):
+            return jsonify(error="请求必须使用 JSON 对象。"), 400
         if lan:
             employee_id()
         if lan and (request.view_args or {}).get("identifier"):
@@ -330,13 +384,6 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
                 else:
                     lan.validate_paths({"workbook_path": job["_workbook_path"], "source_path": job["_source_path"],
                                         "output_root": job["_output_root"]})
-        if mutating and request.endpoint != "admin_login":
-            provided = request.headers.get("X-HSD-Token", "")
-            if not secrets.compare_digest(provided.encode(), token.encode()):
-                return jsonify(error="页面凭证已更新，请刷新页面后继续。", code="page_token_expired"), 403
-            with manager.lock:
-                if app.config["HSD_STOPPING"] and request.endpoint != "shutdown":
-                    raise Conflict("主机正在退出，请稍后重新打开员工入口。")
         if ribbon_upload:
             # Ribbon receives individual images, separate from the unlimited
             # numbering ZIP uploader. FastAPI bounds decoding to 40 MP/20 MiB.
@@ -365,18 +412,23 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
 
     @app.teardown_request
     def release_upload_streams(exc):
-        state = getattr(g, "hsd_lease_state", None)
-        if state is not None and not state["bound"]:
-            release_job_lease(g.hsd_job_lease, state)
+        transfer_slot = getattr(g, "hsd_transfer_slot", None)
         try:
-            request.release_upload()
-        except (OSError, ValueError):
-            # Do not mask an interrupted/malformed request or follow a replaced
-            # link during cleanup. No path, file contents or credentials logged.
-            app.logger.warning("上传临时文件未能清理，请管理员检查磁盘空间与权限。")
-        claim = getattr(g, "hsd_upload_claim", None)
-        if claim is not None:
-            (material_claims if request.endpoint == "material_upload_job" else claims).finish(*claim)
+            state = getattr(g, "hsd_lease_state", None)
+            if state is not None and not state["bound"]:
+                release_job_lease(g.hsd_job_lease, state)
+            try:
+                request.release_upload()
+            except (OSError, ValueError):
+                # Do not mask an interrupted/malformed request or follow a
+                # replaced link during cleanup. Keep file details private.
+                app.logger.warning("上传临时文件未能清理，请管理员检查磁盘空间与权限。")
+            claim = getattr(g, "hsd_upload_claim", None)
+            if claim is not None:
+                (material_claims if request.endpoint == "material_upload_job" else claims).finish(*claim)
+        finally:
+            if transfer_slot is not None and not transfer_slot["bound"]:
+                release_cloud_transfer(transfer_slot)
 
     def release_job_lease(identifier, state):
         with manager.lock:
@@ -411,7 +463,10 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
         if not ribbon_thumbnail and (request.endpoint not in {"image", "material_image", "ribbon_layout_example_image"} or response.status_code not in {200, 304}):
             response.headers["Cache-Control"] = "no-store"
         response.headers["X-Content-Type-Options"] = "nosniff"
-        download_frame = request.endpoint in {"download", "material_download"} and request.args.get("frame") == "1"
+        ribbon_download = (request.endpoint == "ribbon_api" and
+                           re.fullmatch(r"versions/[^/]+/download", (request.view_args or {}).get("ribbon_path", "")))
+        download_frame = (request.method in {"GET", "HEAD"} and request.args.get("frame") == "1"
+                          and (request.endpoint in {"download", "material_download"} or ribbon_download))
         response.headers["X-Frame-Options"] = "SAMEORIGIN" if download_frame else "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
         # The inline token/bootstrap is the only inline script; UI does not load external resources.
@@ -427,6 +482,14 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
             response.headers["Content-Security-Policy"] = material_demo.CSP
         if download_frame:
             response.headers["Content-Security-Policy"] = response.headers["Content-Security-Policy"].replace("frame-ancestors 'none'", "frame-ancestors 'self'")
+        transfer_slot = getattr(g, "hsd_transfer_slot", None)
+        if (transfer_slot is not None and response.is_streamed and request.method != "HEAD"
+                and response.status_code not in {204, 304}):
+            # Keep binary responses streaming and release on disconnect too.
+            # Werkzeug's direct passthrough iterator bypasses Response.close.
+            response.direct_passthrough = False
+            response.call_on_close(lambda: release_cloud_transfer(transfer_slot))
+            transfer_slot["bound"] = True
         return response
 
     @app.before_request
@@ -726,7 +789,10 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
             raise KeyError("未启用局域网测试。")
         if request.headers.get("Origin") != request.host_url.rstrip("/"):
             return jsonify(error="请求来源不匹配。"), 403
-        accepted = lan.login(request.remote_addr, request.get_json().get("code"))
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return jsonify(error="请求必须使用 JSON 对象。"), 400
+        accepted = lan.login(request.remote_addr, payload.get("code"))
         if accepted is None:
             return jsonify(error="尝试过多，请一分钟后重试。"), 429
         if not accepted:
@@ -919,20 +985,22 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
 
     @app.get("/api/material/jobs/<material_id>/events")
     def material_events(material_id):
-        # Reserve two of the four HTTP threads for ordinary operations. A
-        # bounded connection renews authentication, and polling is a fallback.
-        if not material_streams.acquire(blocking=False):
+        # Cloud SSE already holds a shared transfer slot. Keep the existing
+        # local/LAN-only SSE limit and bounded connection renewal.
+        local_slot = not cloud
+        if local_slot and not material_streams.acquire(blocking=False):
             return jsonify(error="实时通道繁忙，已切换普通进度刷新。"), 429
         owner = employee_id()
         try:
             initial = material_manager.snapshot(material_id, owner)
         except BaseException:
-            material_streams.release()
+            if local_slot:
+                material_streams.release()
             raise
         released = False
         def release_slot():
             nonlocal released
-            if not released:
+            if local_slot and not released:
                 released = True
                 material_streams.release()
         def events():

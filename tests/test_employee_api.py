@@ -359,6 +359,20 @@ def test_finished_result_is_downloaded_by_its_owner_without_a_post_token(employe
         assert archive.read("已编号AI/HSD0023.ai") == b"synthetic-original"
 
 
+def test_lan_downloads_do_not_use_cloud_transfer_slots(employee_app, captured_jobs):
+    client = employee_app.test_client()
+    login(client)
+    completed_download(employee_app, client)
+    responses = []
+    try:
+        for _ in range(3):
+            responses.append(request(client, "/api/jobs/employee1/download", buffered=False))
+        assert [response.status_code for response in responses] == [200, 200, 200]
+    finally:
+        for response in responses:
+            response.close()
+
+
 def test_finished_download_still_requires_the_owner_and_login(employee_app, captured_jobs):
     owner, other, anonymous = [employee_app.test_client() for _ in range(3)]
     login(owner)
