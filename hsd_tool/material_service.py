@@ -14,6 +14,7 @@ import hashlib
 import hmac
 from io import BytesIO
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -36,6 +37,7 @@ from .uploads import DiskBudget, UploadFile, checked_path
 from .image_budget import IMAGE_BUDGET, image_workspace_bytes
 from .image_headers import image_header
 
+_LOG = logging.getLogger(__name__)
 _ID = re.compile(r"[a-f0-9]{32}")
 _BUSY = {"queued", "processing", "cancelling"}
 _TERMINAL = {"ready", "cancelled", "error"}
@@ -60,6 +62,9 @@ _STAGES = {
     "locating": ("识别设计范围", "正在识别完整设计的位置，等待识别服务返回"),
     "designs": ("生成素材", "正在逐个生成高清素材，等待图片服务返回"),
     "refining": ("精修素材", "正在精修这一张素材，等待图片服务返回"),
+    "refine_done": ("精修完成", "当前素材已替换，可查看前后对照"),
+    "refine_error": ("精修未完成", "原素材已保留，请查看这张素材的提示"),
+    "refine_cancelled": ("精修已停止", "原素材已保留"),
     "cropping": ("裁剪素材", "正在按设计范围裁剪素材"),
     "saving": ("保存素材", "正在保存本张图片的结果"),
     "source_done": ("本张已完成", "本张素材已生成，继续处理其余图片"),
@@ -300,6 +305,13 @@ class MaterialManager:
                 if self.cloud and type(job.get("expires_at")) in {int, float} and job["expires_at"] <= self.clock():
                     continue
                 if job["status"] in _BUSY:
+                    for attempt in job["attempts"]:
+                        if attempt["state"] == "submitted":
+                            attempt["state"] = "unknown"
+                    if "refine_origin" in job:
+                        self._settle_refine(job, "refine_error", "上次精修被中断，原素材已保留。")
+                        self.jobs[job["id"]] = job
+                        continue
                     job.update(status="error", error="上次处理被中断，未自动重复调用。请检查已有结果后重新处理。",
                                revision=job["revision"] + 1, run_finished_at=self.clock())
                     self._progress(job, "error")
@@ -312,13 +324,6 @@ class MaterialManager:
                         elif source["status"] == "queued":
                             source.update(status="error", submission_unknown=False,
                                           error="上次处理被中断，尚未发送这张图片，可重新处理。")
-                    for attempt in job["attempts"]:
-                        if attempt["state"] == "submitted":
-                            attempt["state"] = "unknown"
-                    for item in job["items"]:
-                        if item["status"] != "superseded" and self._refine_submission_unknown(job, item["id"]):
-                            item.update(refine_submission_unknown=True,
-                                refine_error="上次精修被中断，是否扣费尚未确定；原素材已保留，重新精修前请先核对。")
                     self._save(job, touch=True)
                 self.jobs[job["id"]] = job
             except (OSError, ValueError, KeyError, TypeError):
@@ -382,7 +387,7 @@ class MaterialManager:
         self._remove_tree(directory)
         self.upload_leases.discard(directory.name)
 
-    def receive(self, files, form, *, owner, directory=None, before_submit=None, upload_request_id="",
+    def receive(self, files, form, *, owner, directory=None, on_accept=None, upload_request_id="",
                 ensure_active=None):
         if set(files) != {"files"} or form or not 1 <= len(files.getlist("files")) <= _MAX_FILES:
             raise ValueError("请一次选择 1 到 100 张 PNG、JPG 或 WebP 图片。")
@@ -418,6 +423,7 @@ class MaterialManager:
                 identifier = secrets.token_hex(16)
                 target = self._directory(identifier)
                 target.mkdir(mode=0o700)
+                future = None
                 try:
                     for source in sources:
                         os.replace(directory / (source["id"] + ".png"), target / (source["id"] + ".png"))
@@ -433,19 +439,55 @@ class MaterialManager:
                            "attempts": [], "upload_id": str(upload_request_id)}
                     self._progress(job, "queued", item_id="")
                     self.jobs[identifier] = job
-                    self._save(job)
-                    if before_submit:
-                        before_submit(job)
-                    self.futures[identifier] = self.executor.submit(self._run, identifier)
+                    try:
+                        future = self.executor.submit(self._run_queued, identifier, job["run_id"])
+                    except RuntimeError:
+                        raise Conflict("素材任务未能加入队列，可查询上传状态后重试。") from None
+                    if on_accept:
+                        on_accept(job, self._save)
+                    else:
+                        self._save(job)
+                    self.futures[identifier] = future
                     return identifier
                 except BaseException:
                     self.jobs.pop(identifier, None)
+                    if future is not None:
+                        future.cancel()
                     self._remove_tree(target)
                     raise
         finally:
+            # A cleanup error must not hide an already accepted receipt.
             for value in files.getlist("files"):
-                value.close()
-            self.discard(directory)
+                try:
+                    value.close()
+                except (OSError, ValueError):
+                    _LOG.warning("Material upload stream cleanup postponed.")
+            try:
+                self.discard(directory)
+            except (OSError, ValueError):
+                self.upload_leases.discard(directory.name)
+                _LOG.warning("Material upload staging cleanup postponed.")
+
+    def _run_queued(self, identifier, run_id, redo=None):
+        # submit() can enqueue the callback and still raise while starting a
+        # thread. Only a callback belonging to the accepted current run may
+        # proceed after the submission and its receipt are committed.
+        with self.lock:
+            job = self.jobs.get(identifier)
+            if (job is None or job["run_id"] != run_id or job["status"] not in {"queued", "cancelling"}
+                    or identifier not in self.futures):
+                return
+        self._run(identifier, redo)
+
+    def upload_job_available(self, identifier, owner):
+        with self.lock:
+            try:
+                self._get(identifier, owner)
+            except (KeyError, FileNotFoundError):
+                return False
+            except (OSError, ValueError):
+                raise Conflict("上传已受理，但任务暂时无法校验，请保留本次请求并联系管理员。") from None
+            return True
 
     def _runtime(self, *, require_locator=True):
         config = self.settings.runtime()
@@ -505,7 +547,7 @@ class MaterialManager:
         """
         states = {"unknown", "submitted"} if include_pending else {"unknown"}
         for attempt in job.get("attempts", ()):
-            if attempt.get("source_id") != source_id:
+            if attempt.get("source_id") != source_id or attempt.get("operation") == "refine":
                 continue
             if attempt.get("state") in states or any(
                     call.get("state") in states for call in attempt.get("pipeline_attempts", ())):
@@ -513,11 +555,18 @@ class MaterialManager:
         return False
 
     @staticmethod
-    def _refine_submission_unknown(job, item_id):
+    def _refine_submission_unknown(job, item):
         attempt = next((row for row in reversed(job.get("attempts", ()))
-                        if row.get("operation") == "refine" and row.get("item_id") == item_id), None)
-        return bool(attempt and (attempt.get("state") in {"unknown", "submitted"}
-            or any(row.get("state") in {"unknown", "submitted"} for row in attempt.get("pipeline_attempts", ()))))
+                        if row.get("operation") == "refine" and row.get("item_id") == item["id"]
+                        and row.get("run_id") == job.get("run_id")), None)
+        if attempt is None:
+            # A retry that stops before submitting must not clear a previous
+            # unknown result or its explicit acknowledgement requirement.
+            return bool(item.get("refine_submission_unknown"))
+        calls = attempt.get("pipeline_attempts", ())
+        if calls:
+            return any(row.get("state") in {"unknown", "submitted"} for row in calls)
+        return attempt.get("state") in {"unknown", "submitted"}
 
     def _invoke(self, job, provider, raw, instructions, edit=False, bounds=None, source_id="", refine=False, item_id=""):
         # Retry only a definite provider rejection marked safe by the adapter.
@@ -526,9 +575,28 @@ class MaterialManager:
             attempt = {"at": self.clock(), "operation": "refine" if refine else "edit" if edit else "extract",
                        "number": number + 1, "state": "submitted", "usage": {}, "source_id": source_id}
             if refine:
-                attempt["item_id"] = item_id
+                attempt.update(item_id=item_id, run_id=job["run_id"])
             with self.lock:
-                job["attempts"].append(attempt); self._save(job)
+                job["attempts"].append(attempt)
+                try:
+                    self._save(job)
+                except Exception:
+                    if refine:
+                        # No request was dispatched. Retain any earlier
+                        # unknown result without mislabelling this attempt.
+                        job["attempts"].pop()
+                    raise
+            checkpoint_error = None
+
+            def save_checkpoint():
+                nonlocal checkpoint_error
+                try:
+                    self._save(job)
+                except Exception as exc:
+                    if refine:
+                        checkpoint_error = exc
+                    raise
+
             try:
                 kwargs = {"instructions": instructions, "check_cancel": lambda: self._check(job)}
                 if getattr(provider, "supports_progress", False):
@@ -540,7 +608,7 @@ class MaterialManager:
                         with self.lock:
                             if not job.get("cancel_requested"):
                                 self._progress(job, stage, source_id=source_id, done=current, of=total)
-                                self._save(job)
+                                save_checkpoint()
                     def record(update):
                         with self.lock:
                             calls = attempt.setdefault("pipeline_attempts", [])
@@ -553,7 +621,15 @@ class MaterialManager:
                                 calls.append(data)
                             else:
                                 existing.update(data)
-                            self._save(job)
+                            try:
+                                save_checkpoint()
+                            except Exception:
+                                # The provider dispatches only after this
+                                # callback returns. A failed first write of
+                                # the submitted child did not send it.
+                                if refine and existing is None and data.get("state") == "submitted":
+                                    calls.pop()
+                                raise
                     kwargs.update(on_progress=progress, on_attempt=record)
                 if refine:
                     kwargs.pop("instructions")
@@ -562,23 +638,33 @@ class MaterialManager:
                     result = provider.edit(raw, bounds=bounds, **kwargs)
                 else:
                     result = provider.extract(raw, **kwargs)
-                attempt.update(state="returned", usage=dict(getattr(result, "usage", {}) or {}),
-                               request_id=str(getattr(result, "request_id", "")))
-                attempt["provider_usage"] = deepcopy(getattr(result, "provider_usage", {}) or {})
-                with self.lock:
-                    self._save(job)
-                return result
             except TaskCancelled as exc:
                 settled = bool(getattr(exc, "settled", False))
                 attempt.update(state="cancelled" if settled else "unknown", usage=dict(getattr(exc, "usage", {}) or {}),
                                settled=settled, request_id=str(getattr(exc, "request_id", "")))
                 attempt["provider_usage"] = deepcopy(getattr(exc, "provider_usage", {}) or {})
-                if not settled:
+                if not settled and not refine:
                     job["warnings"].append("本机已结束等待，但上游请求和扣费状态尚未确定；本次未重复提交。")
                 with self.lock:
                     self._save(job)
                 raise
             except Exception as exc:
+                if refine and exc is checkpoint_error:
+                    with self.lock:
+                        calls = attempt.get("pipeline_attempts", ())
+                        if not calls:
+                            job["attempts"].pop()
+                        else:
+                            # Refinement has one provider call. Its actual
+                            # callback receipt remains authoritative when a
+                            # local progress or accounting write fails.
+                            call = calls[-1]
+                            attempt.update({key: deepcopy(call[key]) for key in
+                                            ("state", "usage", "request_id", "settled", "code") if key in call})
+                            if attempt["state"] == "submitted":
+                                attempt.update(state="unknown", settled=False)
+                            attempt["provider_usage"] = {call.get("provider", "seedream"): dict(attempt["usage"])}
+                    raise
                 retry = bool(getattr(exc, "safe_retry", False)) and bool(getattr(exc, "settled", False))
                 attempt.update(state="failed" if getattr(exc, "settled", False) else "unknown",
                                usage=dict(getattr(exc, "usage", {}) or {}),
@@ -589,12 +675,24 @@ class MaterialManager:
                     self._save(job)
                 if refine or number or not retry:
                     raise
+            else:
+                # A local checkpoint failure cannot change a received
+                # provider result into an uncertain provider submission.
+                attempt.update(state="returned", usage=dict(getattr(result, "usage", {}) or {}),
+                               request_id=str(getattr(result, "request_id", "")))
+                attempt["provider_usage"] = deepcopy(getattr(result, "provider_usage", {}) or {})
+                with self.lock:
+                    self._save(job)
+                return result
 
     def _run(self, identifier, redo=None):
         refining = bool(redo and redo.get("_refine"))
         with self.lock:
             job = self.jobs[identifier]
             if job["cancel_requested"]:
+                if refining:
+                    self._settle_refine(job, "refine_cancelled", "本次精修已停止，原素材已保留。")
+                    return
                 job["status"] = "cancelled"
                 job["revision"] += 1
                 job["run_finished_at"] = self.clock()
@@ -602,8 +700,6 @@ class MaterialManager:
                 for source in job["sources"]:
                     if source["status"] == "queued":
                         source["status"] = "cancelled"
-                if refining:
-                    self._refine_failure(job, redo, "本次精修已停止，仍保留精修前的素材。", False)
                 self._save(job, touch=True); return
             job["status"] = "processing"; job["revision"] += 1
             # Accepted/queued time is part of this run. Do not restart its clock
@@ -615,15 +711,18 @@ class MaterialManager:
                 # No provider has been called yet, so nothing was billed; the
                 # batch must still reach a terminal state instead of sitting in
                 # "processing" until the process restarts.
-                message = ("精修未能开始，原素材已保留，请稍后重试。" if refining
-                           else "本批未能开始，任务状态写入失败，请稍后重试。")
+                if refining:
+                    try:
+                        self._settle_refine(job, "refine_error", "精修未能开始，原素材已保留，请稍后重试。")
+                    except (OSError, ValueError):
+                        pass  # The last saved queued refinement can be recovered without replay.
+                    return
+                message = "本批未能开始，任务状态写入失败，请稍后重试。"
                 job.update(status="error", error=message, run_finished_at=self.clock())
                 for source in job["sources"]:
                     if source["status"] in {"queued", "processing"}:
                         source["status"] = "error"
                         source["error"] = message
-                if refining:
-                    self._refine_failure(job, redo, message, self._refine_submission_unknown(job, redo["item_id"]))
                 self._progress(job, "error")
                 job["revision"] += 1
                 try:
@@ -640,7 +739,8 @@ class MaterialManager:
                 source = self._source(job, source_id)
                 self._check(job)
                 with self.lock:
-                    source["status"] = "processing"
+                    if not refining:
+                        source["status"] = "processing"
                     self._progress(job, "preparing", current=index, total=len(source_ids), source_id=source["id"])
                     self._save(job)
                 try:
@@ -713,21 +813,28 @@ class MaterialManager:
                             candidate["items"][replacement_index:replacement_index] = new_items
                         else:
                             candidate["items"].extend(new_items)
-                        updated_source = self._source(candidate, source["id"])
-                        unknown = self._source_submission_unknown(candidate, source["id"])
-                        common = list(getattr(result, "warnings", ()) or ())
-                        if len(new_items) >= (128 if getattr(result, "rectangular_crops", False) else 16):
-                            common.append("本图设计较多，可能还有漏提取；请查看原图并框选补提取。")
-                        updated_source.update(status="done", submission_unknown=unknown,
-                            warnings=list(dict.fromkeys(list(updated_source.get("warnings", ())) + common)),
-                            error="部分调用结果尚未确认，已完成素材可下载；重新处理前请先核对，可能重复计费。" if unknown else "")
-                        self._progress(candidate, "source_done", current=index + 1, total=len(source_ids), source_id=source["id"])
-                        candidate["revision"] += 1
-                        self._save(candidate)
+                        if refining:
+                            self._settle_refine(candidate, "refine_done")
+                        else:
+                            updated_source = self._source(candidate, source["id"])
+                            unknown = self._source_submission_unknown(candidate, source["id"])
+                            common = list(getattr(result, "warnings", ()) or ())
+                            if len(new_items) >= (128 if getattr(result, "rectangular_crops", False) else 16):
+                                common.append("本图设计较多，可能还有漏提取；请查看原图并框选补提取。")
+                            updated_source.update(status="done", submission_unknown=unknown,
+                                warnings=list(dict.fromkeys(list(updated_source.get("warnings", ())) + common)),
+                                error="部分调用结果尚未确认，已完成素材可下载；重新处理前请先核对，可能重复计费。" if unknown else "")
+                            self._progress(candidate, "source_done", current=index + 1, total=len(source_ids), source_id=source["id"])
+                            candidate["revision"] += 1
+                            self._save(candidate)
                         job.clear(); job.update(candidate)
+                        if refining:
+                            return
                 except TaskCancelled:
                     raise
                 except Exception as exc:
+                    if refining:
+                        raise
                     with self.lock:
                         # Never return upstream exception text (may contain a
                         # credential, base64 request or internal filesystem path).
@@ -735,25 +842,22 @@ class MaterialManager:
                                    self._source_submission_unknown(job, source["id"]))
                         message = ("接口返回中断，是否扣费尚未确定；未自动重发。请联系管理员核对后再重做。"
                                    if unknown else self._public_error(exc))
-                        refine_unknown = self._refine_submission_unknown(job, redo["item_id"]) if refining else False
-                        if refining and not refine_unknown:
-                            message = self._public_error(exc)
                         source.update(status="error", error=message, submission_unknown=unknown)
-                        if refining:
-                            self._refine_failure(job, redo, message, refine_unknown)
                         self._progress(job, "source_error", current=index + 1, total=len(source_ids), source_id=source["id"])
                         job["revision"] += 1
                         self._save(job)
             with self.lock:
                 self._check(job)
                 job["status"] = "ready" if any(s["status"] == "done" for s in job["sources"]) else "error"
-                job["error"] = "" if job["status"] == "ready" else (
-                    "本次精修未完成，原素材已保留，可下载原结果。" if refining else "本批未能生成素材，请查看图片旁的原因后重试。")
+                job["error"] = "" if job["status"] == "ready" else "本批未能生成素材，请查看图片旁的原因后重试。"
                 job["run_finished_at"] = self.clock()
                 self._progress(job, "done" if job["status"] == "ready" else "error", current=len(source_ids), total=len(source_ids))
                 job["revision"] += 1; self._save(job, touch=True)
         except TaskCancelled:
             with self.lock:
+                if refining:
+                    self._settle_refine(job, "refine_cancelled", "本次精修已停止，原素材已保留。")
+                    return
                 job["status"] = "cancelled"
                 job["run_finished_at"] = self.clock()
                 self._progress(job, "cancelled")
@@ -763,17 +867,13 @@ class MaterialManager:
                             source["submission_unknown"] = True
                             source["error"] = "上次已发送请求的结果和扣费尚未确定；重新提交前请先核对。"
                         source["status"] = "cancelled"
-                if refining:
-                    unknown = self._refine_submission_unknown(job, redo["item_id"])
-                    self._refine_failure(job, redo, "本次精修已停止，仍保留精修前的素材。" if not unknown else
-                        "精修返回中断，是否扣费尚未确定；原素材已保留，重新精修前请先核对。", unknown)
                 job["revision"] += 1; self._save(job, touch=True)
         except Exception as exc:
             with self.lock:
-                message = self._public_error(exc)
                 if refining:
-                    self._refine_failure(job, redo, message,
-                        self._refine_submission_unknown(job, redo["item_id"]))
+                    self._settle_refine(job, "refine_error", "本次精修未完成，原素材已保留。" + self._public_error(exc))
+                    return
+                message = self._public_error(exc)
                 # A failed batch must not leave originals stuck in "queued":
                 # that hides their reason and blocks the one-click retry, which
                 # only accepts an errored source.
@@ -790,11 +890,27 @@ class MaterialManager:
                 self._progress(job, "error")
                 job["revision"] += 1; self._save(job, touch=True)
 
-    @staticmethod
-    def _refine_failure(job, redo, message, unknown):
-        item = next((row for row in job["items"] if row["id"] == redo["item_id"] and row["status"] != "superseded"), None)
-        if item is not None:
-            item.update(refine_error=message, refine_submission_unknown=bool(unknown))
+    def _settle_refine(self, job, stage, message=None):
+        # The batch's extraction outcome and all its source rows belong to
+        # extraction, even while the worker is replacing an individual result.
+        original = job["refine_origin"]
+        if not isinstance(original, dict) or original.get("status") not in _TERMINAL or not isinstance(original.get("error"), str):
+            raise ValueError("精修恢复记录无效。")
+        if message:
+            item_id = job["progress"]["item_id"]
+            item = next((row for row in job["items"] if row["id"] == item_id and row["status"] != "superseded"), None)
+            if item is None:
+                raise ValueError("找不到精修前的素材。")
+            unknown = self._refine_submission_unknown(job, item)
+            if unknown:
+                message = "精修结果和扣费尚未确定，原素材已保留。请先核对，再决定是否重新精修。"
+            item.update(refine_error=message, refine_submission_unknown=unknown)
+        del job["refine_origin"]
+        job.update(status=original["status"], error=original["error"],
+                   cancel_requested=False, run_finished_at=self.clock())
+        self._progress(job, stage, current=1 if stage == "refine_done" else 0, total=1)
+        job["revision"] += 1
+        self._save(job, touch=True)
 
     @staticmethod
     def _public_error(exc):
@@ -1122,6 +1238,7 @@ class MaterialManager:
             self._runtime(require_locator=False)
             candidate = deepcopy(job)
             candidate.pop("batch_undo", None)
+            candidate["refine_origin"] = {"status": job["status"], "error": job["error"]}
             candidate.update(status="queued", cancel_requested=False, error="", settled_at=None, expires_at=None,
                        run_id=secrets.token_hex(16), run_started_at=self.clock(), run_finished_at=None)
             self._progress(candidate, "queued", current=0, total=1, source_id=source["id"], item_id=item["id"])
@@ -1129,19 +1246,15 @@ class MaterialManager:
             job.clear(); job.update(candidate)
             operation = {"source_id": source["id"], "item_id": item["id"], "_refine": True}
             try:
-                future = self.executor.submit(self._run, identifier, operation)
+                future = self.executor.submit(self._run_queued, identifier, job["run_id"], operation)
             except Exception:
                 # The queue rejected the work: no provider request was sent.
                 # Publish a new terminal revision rather than leaving the saved
                 # queued state (or a previous completed future) looking active.
                 message = "精修未能排队，原素材已保留，请稍后重试。"
                 rejected = deepcopy(job)
-                rejected.update(status="error", error=message, run_finished_at=self.clock())
-                self._refine_failure(rejected, operation, message, bool(item.get("refine_submission_unknown")))
-                self._progress(rejected, "error")
-                rejected["revision"] += 1
                 try:
-                    self._save(rejected, touch=True)
+                    self._settle_refine(rejected, "refine_error", message)
                 finally:
                     # Even a second local write failure must not lock the old
                     # image in memory. Saved queued work is recovered as an
@@ -1202,7 +1315,7 @@ class MaterialManager:
                 raise Conflict("任务状态写入失败，请稍后重试。") from None
             job.clear(); job.update(candidate)
             try:
-                future = self.executor.submit(self._run, identifier, deepcopy(payload))
+                future = self.executor.submit(self._run_queued, identifier, job["run_id"], deepcopy(payload))
             except Exception:
                 # Queue rejection sends no model request. Publish a terminal
                 # revision, preserving old images and any prior unknown bill.

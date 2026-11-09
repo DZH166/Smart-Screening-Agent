@@ -336,7 +336,10 @@ def test_redo_rejected_queue_preserves_old_images_without_sticking_busy(service,
     originals = {row["id"]: (service._directory(state["id"]) / (row["id"] + ".png")).read_bytes() for row in state["items"]}
     before_calls = service._synthetic_provider.calls
     save = service._save
-    def rejected(*args, **kwargs):
+    pending = []
+    submit = service.executor.submit
+    def rejected(function, *args):
+        pending.append((function, args))
         raise RuntimeError("synthetic-executor-rejected")
     def unavailable(value, **kwargs):
         if failed_terminal_write and value["status"] == "error":
@@ -348,6 +351,8 @@ def test_redo_rejected_queue_preserves_old_images_without_sticking_busy(service,
                "box": {"x": 0, "y": 0, "width": 32, "height": 32}, "acknowledge_unknown": True}
     with pytest.raises(Exception):
         service.redo(state["id"], "employee-a", payload)
+    for function, args in pending:
+        submit(function, *args).result(5)
     current = service.snapshot(state["id"], "employee-a")
     assert current["status"] == "error" and "排队" in current["error"]
     assert current["revision"] == state["revision"] + 2

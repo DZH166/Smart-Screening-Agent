@@ -90,6 +90,119 @@ def test_employee_real_multipart_upload_review_and_download(application):
     assert "frame-ancestors 'self'" in frame.headers["Content-Security-Policy"]
 
 
+@pytest.mark.parametrize("late_callback", [False, True])
+def test_rejected_upload_queue_never_creates_a_receipt(application, monkeypatch, late_callback):
+    app, manager, provider = application
+    client = app.test_client()
+    login(client)
+    request_id = uuid.uuid4().hex
+    pending = []
+    submit = manager.executor.submit
+
+    def reject(fn, *args):
+        if late_callback:
+            pending.append((fn, args))
+        raise RuntimeError("executor rejected the upload")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(manager.executor, "submit", reject)
+        assert upload(client, request_id=request_id).status_code == 409
+    for fn, args in pending:
+        submit(fn, *args).result(5)
+    assert call(client, f"/api/material/upload-status/{request_id}").json == {"state": "missing"}
+    assert not manager.jobs and not list(manager.tasks_root.iterdir()) and provider.calls == 0
+
+    result = upload(client, request_id=request_id)
+    assert result.status_code == 200
+    identifier = result.json["id"]
+    manager.futures[identifier].result(10)
+    assert upload(client, request_id=request_id).json == {"id": identifier, "reused": True}
+    assert provider.calls == 2
+
+
+def test_cancellation_between_enqueue_and_receipt_never_calls_provider(application, monkeypatch):
+    app, manager, provider = application
+    client = app.test_client()
+    login(client)
+    request_id = uuid.uuid4().hex
+    submit = manager.executor.submit
+    futures = []
+
+    def enqueue_then_cancel(fn, identifier, *args):
+        future = submit(fn, identifier, *args)
+        futures.append(future)
+        owner = manager.jobs[identifier]["owner"]
+        app.config["HSD_MATERIAL_UPLOAD_CLAIMS"].cancel(request_id, owner)
+        return future
+
+    monkeypatch.setattr(manager.executor, "submit", enqueue_then_cancel)
+    assert upload(client, request_id=request_id).status_code == 400
+    assert len(futures) == 1
+    if not futures[0].cancelled():
+        futures[0].result(5)
+    assert call(client, f"/api/material/upload-status/{request_id}").json == {
+        "state": "cancelled", "cancellation_requested": True}
+    assert not manager.jobs and not list(manager.tasks_root.iterdir()) and provider.calls == 0
+
+
+def test_first_manifest_failure_does_not_arm_the_upload_worker(application, monkeypatch):
+    app, manager, provider = application
+    client = app.test_client()
+    login(client)
+    request_id = uuid.uuid4().hex
+
+    def fail_save(job, **kwargs):
+        raise OSError("cannot save the task manifest")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(manager, "_save", fail_save)
+        assert upload(client, request_id=request_id).status_code == 400
+    manager.executor.submit(lambda: None).result(5)
+    assert call(client, f"/api/material/upload-status/{request_id}").json == {"state": "missing"}
+    assert not manager.jobs and not list(manager.tasks_root.iterdir()) and provider.calls == 0
+    result = upload(client, request_id=request_id)
+    assert result.status_code == 200
+    manager.futures[result.json["id"]].result(10)
+    assert provider.calls == 2
+
+
+def test_staging_cleanup_error_does_not_hide_an_accepted_upload(application, monkeypatch):
+    app, manager, provider = application
+    client = app.test_client()
+    login(client)
+    request_id = uuid.uuid4().hex
+
+    def fail_cleanup(directory):
+        raise OSError("upload staging is temporarily busy")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(manager, "discard", fail_cleanup)
+        result = upload(client, request_id=request_id)
+    assert result.status_code == 200
+    identifier = result.json["id"]
+    assert call(client, f"/api/material/upload-status/{request_id}").json == {
+        "state": "completed", "job_id": identifier}
+    assert upload(client, request_id=request_id).json == {"id": identifier, "reused": True}
+    manager.futures[identifier].result(10)
+    assert not manager.upload_leases and provider.calls == 2
+
+
+def test_unavailable_completed_upload_is_not_reported_as_reusable(application):
+    app, manager, provider = application
+    client = app.test_client()
+    login(client)
+    request_id = uuid.uuid4().hex
+    identifier = upload(client, request_id=request_id).json["id"]
+    manager.futures[identifier].result(10)
+    with manager.lock:
+        manager.jobs.pop(identifier)
+    assert call(client, f"/api/material/upload-status/{request_id}").json == {"state": "unavailable"}
+    assert call(client, f"/api/material/upload-status/{request_id}/cancel", method="POST",
+                payload={}).json == {"state": "unavailable"}
+    assert upload(client, request_id=request_id).status_code == 410
+    assert provider.calls == 2
+
+
 def test_material_endpoints_require_employee_and_csrf(application):
     app, manager, provider = application
     anonymous = app.test_client()

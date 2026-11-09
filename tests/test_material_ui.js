@@ -62,6 +62,16 @@ test("a failed first read keeps the created batch recoverable without a reload",
   await recheck;
   assert.equal(h.ui.state.job.id,"b".repeat(32));assert.equal(h.ui.state.pendingJobId,null);
 });
+test("a definitively unavailable accepted batch releases the upload controls without resubmitting",async()=>{
+  const h=harness();h.ui.state.config={available:true};h.ui.state.files=[{name:"kept.png",size:2}];
+  const pending=h.ui.start();await flush();
+  h.xhrs[0].reply(200,{id:"b".repeat(32)});await flush();
+  await h.reply(0,{error:"synthetic missing receipt"},404);await pending;
+  assert.equal(h.ui.state.acceptedJobId,null);assert.equal(h.ui.state.pendingJobId,null);
+  assert.equal(h.storage.has("hsd-material-job"),false);
+  assert.equal(h.ui.state.files[0].name,"kept.png");assert.equal(h.node("material-start").disabled,false);
+  assert.match(h.node("material-notice").textContent,/不可读取/);assert.equal(h.xhrs.length,1);
+});
 test("missing upload keeps the same ID for a safe retry instead of creating a second batch",async()=>{const h=harness();h.ui.state.config={available:true};h.ui.state.files=[{name:"a.png",size:2}];h.ui.state.uploadId="old-request";h.ui.state.uncertain=true;const check=h.ui.recoverUpload();await h.reply(0,{state:"missing"});await check;assert.equal(h.ui.state.uploadId,"old-request");assert.equal(h.ui.state.retryUpload,true);const retry=h.ui.start();assert.equal(h.xhrs[0].headers["X-HSD-Upload-ID"],"old-request");h.xhrs[0].reply(400,{error:"synthetic failure"});await retry;assert.equal(h.ui.state.uncertain,false);});
 test("a cancelled upload only becomes stopped after server confirmation",async()=>{const h=harness();h.ui.state.uploadId="request";h.ui.state.uncertain=true;const pending=h.ui.stop();assert.equal(h.ui.state.stopRequested,true);assert.equal(h.ui.state.uncertain,true);await h.reply(0,{state:"pending",cancellation_requested:true});assert.equal(h.requests.length,2);await h.reply(1,{state:"cancelled"});await pending;assert.equal(h.ui.state.uncertain,false);assert.match(h.node("material-notice").textContent,/已停止/);});
 test("terminal jobs stop polling and skipped items leave the default queue",()=>{const h=harness();h.ui.state.workspace="material";h.ui.setJob(job({status:"processing"}));assert.equal(h.timers.size,2);h.ui.setJob(job({items:[{...job().items[0],status:"skipped"}]}));assert.equal(h.timers.size,0);h.ui.state.filter="available";h.ui.render();const node=h.ui.state.items.get("i1").node;assert.ok(node.classList.contains("hidden"));assert.match(h.node("material-summary").textContent,/1 个已舍弃/);});
@@ -246,6 +256,18 @@ test("a background refinement failure keeps the old download and its own visible
   assert.equal(h.ui.state.job.items[0].image_url,old.image_url);
   h.ui.openDetail("s1",h.ui.state.job.items[0]);assert.match(h.node("material-detail-warning").textContent,/精修未完成/);
   await h.ui.itemAction(actionEvent("download"));assert.equal(h.requests.length,0);assert.match(h.node("material-download-frame").src,/download\/i1\?frame=1$/);
+});
+test("equal refinement failures remain on their own cards and never offer whole-source retry",()=>{
+  const h=harness(),base=job(),old=base.items[0],message="本次精修未完成，原素材已保留。";
+  h.ui.setJob({...base,sources:[{...base.sources[0],status:"done"}],
+    items:[{...old,refine_error:message},{...old,id:"i2",refine_error:message}]});
+  assert.equal(h.node("material-source-details").open,false);
+  assert.ok(!h.node("material-source-grid").innerHTML.includes("自动重试"));
+  assert.ok(!h.node("material-shared-warning").textContent.includes(message));
+  for(const id of ["i1","i2"]){
+    assert.ok(h.ui.state.items.get(id).contentNode.innerHTML.includes(message));
+    assert.equal(h.ui.state.job.items.find(item=>item.id===id).downloadable,true);
+  }
 });
 test("an unknown prior refinement requires an explicit acknowledgement before another submission",async()=>{
   const h=harness(),old=job().items[0];h.ui.setJob(job({items:[{...old,refine_submission_unknown:true}]}));

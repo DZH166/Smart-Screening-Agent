@@ -133,6 +133,13 @@
   }
   function showUpload() {$("material-upload-check").textContent="查询上传结果";$("material-progress").classList.remove("hidden");$("material-upload-check").classList.toggle("hidden",!state.uncertain);$("material-stop").classList.remove("hidden");$("material-progress-title").textContent=state.uncertain?"正在核对上传结果":"正在上传图片";$("material-progress-message").textContent=state.uncertain?"连接中断，先确认服务器是否收到，避免重复处理。":"上传完成后自动开始提取。";$("material-progress-meter").classList.remove("hidden");$("material-progress-label").textContent="上传进度";$("material-progress-track").setAttribute("aria-label","上传进度");$("material-progress-percent").textContent="";$("material-progress-fill").classList.toggle("indeterminate",true);$("material-progress-track").removeAttribute("aria-valuenow");$("material-progress-detail").textContent="";}
   function clearUpload() {state.uploading=false;state.uncertain=false;state.retryUpload=false;state.stopRequested=false;state.uploadId=null;state.xhr=null;remember("hsd-material-upload",null);$("material-upload-check").classList.add("hidden");}
+  function unavailableUpload(message="原素材任务已不可读取，请核对后再提交图片。") {
+    clearUpload();
+    state.pendingJobId=null;state.acceptedJobId=null;state.newBatch=true;
+    remember("hsd-material-job",null);remember("hsd-material-new","1");
+    $("material-progress").classList.add("hidden");
+    notify(message,true);
+  }
   function upload(files) {
     return new Promise((resolve,reject)=>{
       const form=new FormData();files.forEach(file=>form.append("files",file));
@@ -155,12 +162,12 @@
       state.pendingJobId=data.id;state.acceptedJobId=data.id;remember("hsd-material-job",data.id);clearUpload();state.newBatch=false;remember("hsd-material-new",null);
       try{await loadJob(data.id);}catch(error){if(epoch!==state.epoch)return;showReadRecovery();notify(error.status===408?"任务已创建，但读取进度超时；点“重新查询”即可继续。":"任务已创建，但这次没取到进度；点“重新查询”即可继续。",true);}
     }
-    catch(error){if(epoch!==state.epoch)return;state.uploading=false;if([400,413,415,422].includes(error.status)){clearUpload();$("material-progress").classList.add("hidden");notify(error.message,true);}else if(error.status===401){state.uncertain=true;lockAuth();}else{state.uncertain=true;showUpload();await recoverUpload();}}
+    catch(error){if(epoch!==state.epoch)return;state.uploading=false;if(error.status===410){unavailableUpload(error.message);}else if([400,413,415,422].includes(error.status)){clearUpload();$("material-progress").classList.add("hidden");notify(error.message,true);}else if(error.status===401){state.uncertain=true;lockAuth();}else{state.uncertain=true;showUpload();await recoverUpload();}}
     finally{if(epoch===state.epoch)controls();}
   }
   async function recoverUpload() {
     if(!state.uploadId||state.busy||state.authLost)return;const epoch=state.epoch;state.busy=true;controls();
-    try{const data=await api(`/api/material/upload-status/${encodeURIComponent(state.uploadId)}`);if(epoch!==state.epoch)return;const id=data.job_id||data.id;if(id&&data.state==="completed"){const stop=state.stopRequested||data.cancellation_requested;state.pendingJobId=id;state.acceptedJobId=id;remember("hsd-material-job",id);clearUpload();await loadJob(id);if(epoch!==state.epoch)return;if(stop&&activeStatuses.has(state.job?.status)){const job=await api(jobPath("/cancel"),{expected_revision:state.job.revision});if(epoch===state.epoch)setJob(job);}}else if(data.state==="cancelled"){clearUpload();$("material-progress").classList.add("hidden");notify("上传已停止，可以重新选择图片。");}else if(data.state==="missing"){state.uncertain=true;state.retryUpload=!!state.files.length&&!state.stopRequested;showUpload();notify(state.retryUpload?"当前未找到已受理任务。可重试本次上传（沿用同一个请求），或先停止再更换图片。":"当前未找到已受理任务，请先停止本次上传，再重新选择图片。",true);}else{state.uncertain=true;state.retryUpload=false;showUpload();notify(data.cancellation_requested?"正在停止上传，请稍后查询最终结果。":"还在核对上传结果，请稍后点击“查询上传结果”。不要重复提交。",true);}}
+    try{const data=await api(`/api/material/upload-status/${encodeURIComponent(state.uploadId)}`);if(epoch!==state.epoch)return;const id=data.job_id||data.id;if(id&&data.state==="completed"){const stop=state.stopRequested||data.cancellation_requested;state.pendingJobId=id;state.acceptedJobId=id;remember("hsd-material-job",id);clearUpload();await loadJob(id);if(epoch!==state.epoch)return;if(stop&&activeStatuses.has(state.job?.status)){const job=await api(jobPath("/cancel"),{expected_revision:state.job.revision});if(epoch===state.epoch)setJob(job);}}else if(data.state==="unavailable"){unavailableUpload();}else if(data.state==="cancelled"){clearUpload();$("material-progress").classList.add("hidden");notify("上传已停止，可以重新选择图片。");}else if(data.state==="missing"){state.uncertain=true;state.retryUpload=!!state.files.length&&!state.stopRequested;showUpload();notify(state.retryUpload?"当前未找到已受理任务。可重试本次上传（沿用同一个请求），或先停止再更换图片。":"当前未找到已受理任务，请先停止本次上传，再重新选择图片。",true);}else{state.uncertain=true;state.retryUpload=false;showUpload();notify(data.cancellation_requested?"正在停止上传，请稍后查询最终结果。":"还在核对上传结果，请稍后点击“查询上传结果”。不要重复提交。",true);}}
     catch(error){if(epoch===state.epoch&&!state.authLost){showReadRecovery();notify(error.message||"无法查询上传结果，请稍后重试。",true);}}finally{if(epoch===state.epoch){state.busy=false;controls();}}
   }
   async function loadJob(id=state.job?.id||state.pendingJobId,parentCurrent=()=>true) {
@@ -173,7 +180,11 @@
       if(!current()||state.authLost)return;
       if(!job||job.id!==id)throw new Error("素材结果与当前批次不一致，请重新查询。");
       setJob(job);state.pendingJobId=null;
-    } catch(error) {if(current())throw error;}
+    } catch(error) {
+      if(!current())return;
+      if(!previous&&state.pendingJobId===id&&[404,410].includes(error.status)){unavailableUpload();return;}
+      throw error;
+    }
   }
   function closeStream() {clearTimeout(state.clockTimer);clearTimeout(state.renewTimer);state.renewTimer=null;if(state.stream)state.stream.close();state.stream=null;state.streamJob=null;}
   function schedule() {
@@ -266,7 +277,7 @@
   function specificWarnings(item) {return itemWarnings(item).filter(warning=>warning===item.refine_error||!routineWarning(warning));}
   function processingNotes(item) {return itemWarnings(item).filter(warning=>warning!==item.refine_error&&routineWarning(warning));}
   let warningItems=null,warningCache=[];
-  function sharedWarnings() {if(warningItems===state.job?.items)return warningCache;warningItems=state.job?.items;const counts=new Map();for(const item of state.job?.items||[])for(const warning of specificWarnings(item))counts.set(warning,(counts.get(warning)||0)+1);warningCache=[...counts].filter(([,count])=>count>1&&count===state.job.items.length).map(([warning])=>warning);return warningCache;}
+  function sharedWarnings() {if(warningItems===state.job?.items)return warningCache;warningItems=state.job?.items;const counts=new Map();for(const item of state.job?.items||[])for(const warning of specificWarnings(item))if(warning!==item.refine_error)counts.set(warning,(counts.get(warning)||0)+1);warningCache=[...counts].filter(([,count])=>count>1&&count===state.job.items.length).map(([warning])=>warning);return warningCache;}
   function itemActions(item) {
     const skipped=item.status==="skipped",unknown=item.refine_submission_unknown===true,busyRefine=refiningId()===item.id;
     if(skipped)return `<button class="button button-secondary" type="button" data-material-action="restore" data-item-id="${esc(item.id)}">恢复素材</button>`;

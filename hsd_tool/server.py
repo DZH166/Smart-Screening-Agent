@@ -348,6 +348,9 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
             identifier = upload_id(request.headers.get("X-HSD-Upload-ID") or secrets.token_hex(16))
             state = active_claims.reserve(identifier, employee_id())
             if state["state"] == "completed":
+                if request.endpoint == "material_upload_job" and not material_manager.upload_job_available(
+                        state["job_id"], employee_id()):
+                    return jsonify(error="原素材任务已不可读取，请核对后再提交图片。"), 410
                 return jsonify(id=state["job_id"], reused=True)
             if state["state"] != "reserved":
                 raise Conflict("本次上传仍在处理或已停止，请查询上传状态。")
@@ -866,34 +869,37 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
     def material_upload_job():
         if request.mimetype != "multipart/form-data":
             raise ValueError("请使用图片上传表单。")
-        committed = False
         with manager.lock:
             if app.config["HSD_STOPPING"]:
                 raise Conflict("服务正在退出，请稍后重新打开员工入口。")
             app.config["HSD_ACTIVE_UPLOADS"] += 1
         try:
-            def commit(job):
-                material_claims.ensure_active(*g.hsd_upload_claim)
-                material_claims.commit(*g.hsd_upload_claim, job["id"])
+            def commit(job, persist):
+                # Cancellation can win before this lock or stop the accepted
+                # job after it. Persist the recoverable receipt while it is held.
+                with material_claims.lock:
+                    material_claims.ensure_active(*g.hsd_upload_claim)
+                    persist(job)
+                    material_claims.commit(*g.hsd_upload_claim, job["id"])
             identifier = material_manager.receive(
                 request.files, request.form, owner=employee_id(),
-                directory=getattr(request, "_hsd_upload_directory", None), before_submit=commit,
+                directory=getattr(request, "_hsd_upload_directory", None), on_accept=commit,
                 upload_request_id=g.hsd_upload_claim[0],
                 ensure_active=lambda: material_claims.ensure_active(*g.hsd_upload_claim))
-            committed = True
-            request._hsd_upload_committed = True
             return jsonify(id=identifier)
         finally:
+            # Request teardown retries staging cleanup without overriding a
+            # committed receipt, including when multipart parsing failed.
             with manager.lock:
                 app.config["HSD_ACTIVE_UPLOADS"] -= 1
-            # receive owns cleanup after parsing; malformed multipart is cleaned
-            # by the request teardown using this endpoint's private namespace.
-            if committed:
-                request.release_upload()
 
     @app.get("/api/material/upload-status/<request_id>")
     def material_upload_status(request_id):
-        return jsonify(material_claims.lookup(request_id, employee_id()))
+        owner = employee_id()
+        state = material_claims.lookup(request_id, owner)
+        if state["state"] == "completed" and not material_manager.upload_job_available(state["job_id"], owner):
+            return jsonify(state="unavailable")
+        return jsonify(state)
 
     @app.post("/api/material/upload-status/<request_id>/cancel")
     def material_cancel_upload(request_id):
@@ -901,6 +907,8 @@ def create_app(data_dir: str | Path, token: str | None = None, *, lan=None, sett
         if state["state"] == "completed":
             identifier = state["job_id"]
             with material_manager.lock:
+                if not material_manager.upload_job_available(identifier, employee_id()):
+                    return jsonify(state="unavailable")
                 result = material_manager.snapshot(identifier, employee_id())
                 material_manager.cancel(identifier, employee_id(), result["revision"])
         return jsonify(state)

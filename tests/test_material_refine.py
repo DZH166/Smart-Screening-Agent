@@ -1,5 +1,7 @@
 """Downloadable unverified results and one-click refinement; no provider calls."""
+from concurrent.futures import Future
 import json
+from threading import Event
 import zipfile
 
 import pytest
@@ -37,6 +39,7 @@ def test_refine_replaces_one_current_result_preserving_immediate_before_and_usag
     refine(manager, state)
     current = complete(manager, state["id"])
     item = current["items"][0]
+    assert current["sources"] == state["sources"]
     assert len(current["items"]) == 1 and item["id"] != old["id"]
     assert item["status"] == "generated" and item["downloadable"] and item["refined"]
     assert "review" not in item and item["bounds"] == old["bounds"]
@@ -82,17 +85,26 @@ def test_refining_first_of_two_results_preserves_public_order_names_and_count(re
 @pytest.mark.parametrize("unknown", [False, True])
 def test_refine_failure_never_retries_or_replaces_downloadable_result(refinement, unknown):
     manager, provider, state = refinement
+    original = manager.asset(state["id"], "employee-a", "item", state["items"][0]["id"], download=True)[0].read_bytes()
     provider.failures = [ArkProviderError("submission_unknown" if unknown else "rate_limit", "secret provider text",
         settled=not unknown, safe_retry=True, usage={"images": 1})]
     refine(manager, state)
     failed = complete(manager, state["id"])
+    assert failed["status"] == state["status"] and failed["error"] == state["error"]
+    assert failed["sources"] == state["sources"] and failed["stats"]["failed"] == state["stats"]["failed"]
+    assert failed["warnings"] == state["warnings"] and failed["progress"]["stage_code"] == "refine_error"
     item = failed["items"][0]
     assert item["id"] == state["items"][0]["id"] and item["downloadable"]
     assert item["refine_error"] and item["refine_submission_unknown"] is unknown
     assert "secret provider text" not in json.dumps(failed)
     assert provider.calls == 2
     assert manager.jobs[state["id"]]["attempts"][-1]["usage"] == {"images": 1}
-    manager.asset(state["id"], "employee-a", "item", item["id"], download=True)
+    assert not manager._source_submission_unknown(manager.jobs[state["id"]], item["source_id"])
+    assert manager.asset(state["id"], "employee-a", "item", item["id"], download=True)[0].read_bytes() == original
+    with pytest.raises(ValueError, match="请先框出"):
+        manager.redo(state["id"], "employee-a", {"expected_revision": failed["revision"],
+            "source_id": state["sources"][0]["id"]})
+    assert provider.calls == 2
     if unknown:
         with pytest.raises(Conflict, match="可能重复计费"):
             refine(manager, failed)
@@ -110,6 +122,7 @@ def test_refine_busy_duplicate_revision_and_cancel_preserve_old_result(refinemen
         with pytest.raises(Conflict):
             refine(manager, state)
         busy = manager.snapshot(state["id"], "employee-a")
+        assert busy["sources"] == state["sources"]
         # The pre-refinement image is still on disk and untouched, so the design
         # stays downloadable while its new version is being produced.
         assert busy["items"][0]["downloadable"] is True and busy["download_url"]
@@ -120,7 +133,8 @@ def test_refine_busy_duplicate_revision_and_cancel_preserve_old_result(refinemen
     finally:
         provider.release.set()
     stopped = complete(manager, state["id"])
-    assert stopped["status"] == "cancelled"
+    assert stopped["status"] == state["status"] and stopped["sources"] == state["sources"]
+    assert stopped["progress"]["stage_code"] == "refine_cancelled"
     assert stopped["items"][0]["id"] == state["items"][0]["id"]
     assert stopped["items"][0]["downloadable"] and stopped["items"][0]["refine_error"]
     assert provider.calls == 2
@@ -182,6 +196,74 @@ def test_refine_manifest_commit_failure_keeps_old_current(refinement, monkeypatc
     assert len(manager.jobs[state["id"]]["items"]) == 1
 
 
+def test_local_checkpoint_failure_cannot_turn_a_returned_refinement_unknown(refinement, monkeypatch):
+    manager, provider, state = refinement
+    save = manager._save
+    failed = []
+
+    def unavailable(job, **kwargs):
+        attempt = job["attempts"][-1]
+        if not failed and attempt["operation"] == "refine" and attempt["state"] == "returned":
+            failed.append(True)
+            raise OSError("synthetic returned checkpoint failure")
+        return save(job, **kwargs)
+
+    monkeypatch.setattr(manager, "_save", unavailable)
+    refine(manager, state)
+    result = complete(manager, state["id"])
+    assert failed and provider.calls == 2 and result["sources"] == state["sources"]
+    item = result["items"][0]
+    assert item["id"] == state["items"][0]["id"] and item["downloadable"]
+    assert item["refine_error"] and not item["refine_submission_unknown"]
+    receipt = manager._read(manager._directory(state["id"]))["attempts"][-1]
+    assert receipt["state"] == "returned" and receipt["usage"] == {"images": 1}
+    assert receipt["request_id"] == "synthetic-request"
+
+
+@pytest.mark.parametrize("checkpoint", ["progress", "submitted", "returned", "failed", "unknown"])
+def test_local_callback_failure_preserves_the_actual_refine_dispatch_state(refinement, monkeypatch, checkpoint):
+    manager, provider, state = refinement
+    save = manager._save
+    failed = []
+
+    def unavailable(job, **kwargs):
+        attempt = job["attempts"][-1]
+        child = next(iter(attempt.get("pipeline_attempts", ())), {})
+        if (not failed and attempt["operation"] == "refine"
+                and (child.get("state") == checkpoint or
+                     (checkpoint == "progress" and job["progress"]["stage_code"] == "preparing"))):
+            failed.append(True)
+            raise OSError("synthetic callback checkpoint failure")
+        return save(job, **kwargs)
+
+    def staged(raw, *, on_progress, on_attempt, check_cancel):
+        on_progress("preparing")
+        child = dict(id="child", provider="seedream", operation="refine", state="submitted",
+                     usage={}, request_id="", settled=False)
+        on_attempt(child)
+        provider.calls += 1
+        on_attempt({**child, "state": checkpoint, "usage": {"images": 1},
+                    "request_id": "synthetic-child", "settled": checkpoint != "unknown"})
+        pytest.fail("callback should have failed before returning")
+
+    monkeypatch.setattr(manager, "_save", unavailable)
+    monkeypatch.setattr(provider, "supports_progress", True, raising=False)
+    monkeypatch.setattr(provider, "refine", staged)
+    refine(manager, state)
+    result = complete(manager, state["id"])
+    item = result["items"][0]
+    assert failed and result["sources"] == state["sources"]
+    assert item["id"] == state["items"][0]["id"] and item["downloadable"] and item["refine_error"]
+    assert item["refine_submission_unknown"] is (checkpoint == "unknown")
+    attempts = manager._read(manager._directory(state["id"]))["attempts"]
+    if checkpoint in {"progress", "submitted"}:
+        assert provider.calls == len(attempts) == 1
+    else:
+        assert provider.calls == len(attempts) == 2
+        assert attempts[-1]["state"] == attempts[-1]["pipeline_attempts"][0]["state"] == checkpoint
+        assert attempts[-1]["usage"] == {"images": 1} and attempts[-1]["request_id"] == "synthetic-child"
+
+
 @pytest.mark.parametrize("stage", ["queued", "processing"])
 def test_local_refine_start_save_failure_never_blocks_old_download_or_calls_model(refinement, monkeypatch, stage):
     manager, provider, state = refinement
@@ -207,13 +289,18 @@ def test_local_refine_start_save_failure_never_blocks_old_download_or_calls_mode
 def test_executor_rejection_persists_terminal_revision_keeps_old_download_and_never_spends(refinement, monkeypatch):
     manager, provider, state = refinement
     assert manager.futures[state["id"]].done()
-    def reject(*args, **kwargs):
+    rejected = []
+    submit = manager.executor.submit
+    def reject(function, *args):
+        rejected.append((function, args))
         raise RuntimeError("private executor failure")
-    monkeypatch.setattr(manager.executor, "submit", reject)
-    with pytest.raises(Conflict, match="未能排队"):
-        refine(manager, state)
+    with monkeypatch.context() as patch:
+        patch.setattr(manager.executor, "submit", reject)
+        with pytest.raises(Conflict, match="未能排队"):
+            refine(manager, state)
     result = manager.snapshot(state["id"], "employee-a")
-    assert result["status"] == "error" and result["revision"] == state["revision"] + 2
+    assert result["status"] == state["status"] and result["revision"] == state["revision"] + 2
+    assert result["sources"] == state["sources"] and result["progress"]["stage_code"] == "refine_error"
     assert len(result["items"]) == 1 and result["items"][0]["id"] == state["items"][0]["id"]
     assert result["items"][0]["downloadable"] and not result["items"][0]["refined"]
     assert result["items"][0]["refine_error"] and result["items"][0]["refine_submission_unknown"] is False
@@ -224,6 +311,47 @@ def test_executor_rejection_persists_terminal_revision_keeps_old_download_and_ne
     assert "private executor failure" not in json.dumps(result)
     manager.asset(state["id"], "employee-a", "item", result["items"][0]["id"], download=True)
     manager.download(state["id"], "employee-a")
+    stale_function, stale_args = rejected[0]
+    release = Event()
+    blocker = submit(lambda: release.wait(20))
+    try:
+        retry = refine(manager, result)
+        stale_function(*stale_args)
+        assert manager.snapshot(state["id"], "employee-a")["progress"]["run_id"] == retry["progress"]["run_id"]
+        assert manager.snapshot(state["id"], "employee-a")["status"] == "queued" and provider.calls == 1
+    finally:
+        release.set()
+        blocker.result(5)
+    completed = complete(manager, state["id"])
+    assert completed["items"][0]["refined"] and provider.calls == 2
+
+
+@pytest.mark.parametrize("operation", ["queued", "retry-not-sent"])
+def test_restarting_an_interrupted_refinement_recovers_only_its_item(refinement, monkeypatch, operation):
+    manager, provider, state = refinement
+    identifier, item = state["id"], state["items"][0]
+    job = manager.jobs[identifier]
+    # A genuine issue during initial extraction must still be visible.
+    job["sources"][0].update(submission_unknown=True, error="原图的另一设计结果待核对。")
+    if operation == "retry-not-sent":
+        job["items"][0].update(refine_submission_unknown=True, refine_error="上次精修结果待核对。")
+    manager._save(job)
+    before = manager.snapshot(identifier, "employee-a")
+    monkeypatch.setattr(manager.executor, "submit", lambda *_args: Future())
+    refine(manager, before, **({"acknowledge_unknown": True} if operation == "retry-not-sent" else {}))
+    manager.close()
+    reopened = MaterialManager(manager.data_dir, Settings(), cloud=True, provider_factory=lambda _: provider)
+    try:
+        recovered = reopened.snapshot(identifier, "employee-a")
+        assert recovered["status"] == before["status"] and recovered["sources"] == before["sources"]
+        assert recovered["progress"]["stage_code"] == "refine_error"
+        assert recovered["items"][0]["id"] == item["id"] and recovered["items"][0]["downloadable"]
+        assert recovered["items"][0]["refine_submission_unknown"] is (operation != "queued")
+        assert "原素材已保留" in recovered["items"][0]["refine_error"]
+        assert not reopened.futures and provider.calls == 1
+        reopened.asset(identifier, "employee-a", "item", item["id"], download=True)
+    finally:
+        reopened.close()
 
 
 def test_discard_restore_and_legacy_statuses_have_honest_download_qualification(refinement):
@@ -256,23 +384,28 @@ def test_batch_failures_stay_source_scoped_not_repeated_on_every_item(refinement
     assert "本项需要核对文字" in " ".join(result["items"][0]["warnings"])
 
 
-def test_restarted_refinement_keeps_unknown_charge_acknowledgement_and_old_download(refinement):
+def test_restarted_refinement_keeps_unknown_charge_acknowledgement_and_old_download(refinement, monkeypatch):
     manager, provider, state = refinement
     job = manager.jobs[state["id"]]
     item = job["items"][0]
-    job.update(status="processing", expires_at=None)
-    job["sources"][0]["status"] = "processing"
+    monkeypatch.setattr(manager.executor, "submit", lambda *_args: Future())
+    refine(manager, state)
+    job["status"] = "processing"
     job["attempts"].append({"operation": "refine", "item_id": item["id"],
-        "source_id": item["source_id"], "state": "submitted", "usage": {}, "number": 1})
+        "source_id": item["source_id"], "run_id": job["run_id"], "state": "submitted", "usage": {}, "number": 1})
     manager._save(job)
     manager.close()
     reopened = MaterialManager(manager.data_dir, Settings(), cloud=True, provider_factory=lambda config: provider)
     try:
         recovered = reopened.snapshot(state["id"], "employee-a")
+        assert recovered["sources"] == state["sources"] and recovered["status"] == state["status"]
         assert recovered["items"][0]["refine_submission_unknown"] is True
         assert recovered["items"][0]["downloadable"] and provider.calls == 1
         with pytest.raises(Conflict, match="可能重复计费"):
             refine(reopened, recovered)
+        with pytest.raises(ValueError, match="请先框出"):
+            reopened.redo(state["id"], "employee-a", {"expected_revision": recovered["revision"],
+                "source_id": recovered["sources"][0]["id"]})
     finally:
         reopened.close()
 
