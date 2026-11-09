@@ -25,7 +25,7 @@ from pathlib import Path
 
 from PIL import Image, ImageOps
 
-from hsd_tool.provider_diagnostics import call_view, diagnostic
+from hsd_tool.provider_diagnostics import MESSAGES, call_view, diagnostic
 
 from .config import Settings
 from .db import Database
@@ -765,15 +765,61 @@ class Service:
                 'preview_url': f"{prefix}/versions/{row['id']}/preview", 'view_url': f"{prefix}/versions/{row['id']}/view", 'download_url': f"{prefix}/versions/{row['id']}/download"}
 
     @staticmethod
-    def job_public(row):
-        return {**{k: row[k] for k in ('id', 'design_id', 'kind', 'status', 'phase', 'attempt', 'provider', 'error', 'result_version_id', 'result_asset_id', 'created_at', 'updated_at')}, 'needs_clarification': bool(row['needs_clarification'])}
+    def _draft_output_review_status(db, job):
+        if job is None or job['kind'] != 'generate' or job['status'] != 'FAILED' or job['result_version_id']:
+            return None
+        call = db.execute(
+            "SELECT status,error FROM provider_calls WHERE job_id=? AND attempt=? AND operation='design_background' "
+            "ORDER BY rowid DESC LIMIT 1", (job['id'], job['attempt']),
+        ).fetchone()
+        if call and call_view(call)['diagnostic']['category'] == 'output_policy':
+            return call['status']
+        return None
+
+    @staticmethod
+    def _latest_blank_draft_job(db, design):
+        if not design or design['deleted_at'] is not None or design['active_job_id'] or design['current_version_id']:
+            return None
+        design_id = design['id']
+        if (db.execute('SELECT 1 FROM versions WHERE design_id=? LIMIT 1', (design_id,)).fetchone()
+                or db.execute("SELECT 1 FROM jobs WHERE design_id=? AND status NOT IN ('SUCCEEDED','FAILED') LIMIT 1",
+                              (design_id,)).fetchone()):
+            return None
+        return db.execute(
+            "SELECT * FROM jobs WHERE owner_id=? AND design_id=? AND kind='generate' ORDER BY rowid DESC LIMIT 1",
+            (design['owner_id'], design_id),
+        ).fetchone()
+
+    @classmethod
+    def job_public(cls, row, *, db=None):
+        result = {**{k: row[k] for k in ('id', 'design_id', 'kind', 'status', 'phase', 'attempt', 'provider', 'error', 'result_version_id', 'result_asset_id', 'created_at', 'updated_at')},
+                  'needs_clarification': bool(row['needs_clarification'])}
+        if db is None:
+            return result
+        review = cls._draft_output_review_status(db, row)
+        if review == 'UNKNOWN':
+            result['error'] = MESSAGES['unknown_result']
+        elif review == 'FAILED':
+            # Reword retained failures using their settled, classified call.
+            # The draft's latest generation owns the recovery action.
+            result['error'] = MESSAGES['output_policy']
+            design = db.execute('SELECT * FROM designs WHERE id=? AND owner_id=?',
+                                (row['design_id'], row['owner_id'])).fetchone()
+            latest = cls._latest_blank_draft_job(db, design)
+            if latest and latest['id'] == row['id']:
+                result['recovery_action'] = 'compose_locally'
+        return result
 
     @leased_operation
     def design(self, owner, design_id, *, include_deleted=False):
         with self.db.connect() as db:
+            db.execute('BEGIN')
             result = self.owned_design(db, owner, design_id, include_deleted=include_deleted)
             versions = db.execute('SELECT * FROM versions WHERE design_id=? ORDER BY sequence', (design_id,)).fetchall()
             active = db.execute('SELECT * FROM jobs WHERE id=?', (result['active_job_id'],)).fetchone()
+            latest = self._latest_blank_draft_job(db, result)
+            if self._draft_output_review_status(db, latest) == 'FAILED':
+                result['recovery_action'] = 'compose_locally'
         result.pop('owner_id')
         result['versions'] = [self.version_public(v) for v in versions]
         result['active_job'] = self.job_public(active) if active else None
@@ -803,10 +849,11 @@ class Service:
     @leased_operation
     def job(self, owner, job_id):
         with self.db.connect() as db:
+            db.execute('BEGIN')
             row = db.execute('SELECT * FROM jobs WHERE id=? AND owner_id=?', (job_id, owner)).fetchone()
-        if not row:
-            raise ServiceError(404, '任务不存在或无权访问')
-        return self.job_public(row)
+            if not row:
+                raise ServiceError(404, '任务不存在或无权访问')
+            return self.job_public(row, db=db)
 
     @leased_operation
     def job_by_request(self, owner, key):
@@ -814,12 +861,13 @@ class Service:
         if not isinstance(key, str) or not 8 <= len(key) <= 160:
             raise ServiceError(404, '没有找到已受理记录，未重新提交')
         with self.db.connect() as db:
+            db.execute('BEGIN')
             if db.execute('SELECT 1 FROM expired_requests WHERE owner_id=? AND idempotency_key=?', (owner, key)).fetchone():
                 raise ServiceError(410, '这次提交已过保存期限，未再次调用模型')
             row = db.execute('SELECT * FROM jobs WHERE owner_id=? AND idempotency_key=?', (owner, key)).fetchone()
-        if not row:
-            raise ServiceError(404, '没有找到已受理记录，未重新提交')
-        return self.job_public(row)
+            if not row:
+                raise ServiceError(404, '没有找到已受理记录，未重新提交')
+            return self.job_public(row, db=db)
 
     def selection_snapshot(self, db, owner, selection, profile=None, base=None):
         ids = selection.get('asset_ids')
@@ -1070,7 +1118,7 @@ class Service:
             if previous:
                 if previous['request_hash'] != request_hash:
                     raise ServiceError(409, '相同提交标识对应了不同内容，请重新提交')
-                return self.job_public(previous)
+                return self.job_public(previous, db=db)
             # Only replay a genuinely accepted request. New refinement work is
             # retired regardless of provider, UI version, or remaining quota.
             if kind == 'refine':

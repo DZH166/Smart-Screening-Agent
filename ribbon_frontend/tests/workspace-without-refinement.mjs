@@ -174,6 +174,119 @@ async function assertNoRefinement(page){
  assert.equal(/精修|NEVER DISPLAY THIS OLD EDIT REQUEST/.test(text),false);
  assert.equal(writes.some(w=>w.path.endsWith('/refinements')),false);
 }
+async function checkLocalPolicyRecovery(){
+ const generatePath=id=>'/api/ribbon/designs/'+id+'/generate';
+ const chosen={asset_ids:['pattern','demo-flower'],background_id:'background',template_id:'grid',
+  design_style:'hierarchy',background_tone:'soft',design_density:'balanced'};
+ const policyText='AI 搭配结果未通过审核';
+ const failures=[
+  {id:'output-policy',error:'合成审核失败',recovery_action:'compose_locally'},
+  {id:'provider-failure',error:'合成服务暂时不可用'},
+  {id:'unknown-outcome',error:'合成调用结果未确认'},
+ ];
+ for(const failure of failures){
+  const {id,error,recovery_action}=failure;
+  const draft=work(id,[]), jobId='ai-'+id, submitted=[];
+  works.push(draft);
+  const beforeWorks=works.length, beforeCreates=writes.filter(write=>write.path==='/api/ribbon/designs').length;
+  const page=await browser.newPage({viewport:{width:1366,height:768}});
+  page.setDefaultTimeout(8000);
+  page.on('pageerror',e=>errors.push(String(e)));
+  try{
+   await page.addInitScript(({id,chosen})=>{
+    const prefix='ribbon:synthetic-no-refine:';
+    if(!localStorage.getItem(prefix+'design'))localStorage.setItem(prefix+'design',JSON.stringify(id));
+    if(!localStorage.getItem(prefix+'selection'))
+     localStorage.setItem(prefix+'selection',JSON.stringify({design_id:id,base_version_id:null,value:chosen}));
+   },{id,chosen});
+   const referenceImage='/api/ribbon/layout-examples/synthetic/image';
+   await page.route('**'+referenceImage,route=>route.fulfill({contentType:'image/svg+xml',body:svg}));
+   await page.route('**/api/ribbon/layout-examples',route=>route.fulfill({json:{
+    modes:[{mode:'grid',name:'整齐平铺',summary:'合成排版',note:'合成说明',example_ids:['synthetic']}],
+    examples:[{id:'synthetic',title:'合成案例',code:'QA-SYNTHETIC',description:'合成测试',
+     look_for:'等距',mode_tags:['grid'],reference_only:false,width:1200,height:520,image_url:referenceImage,
+     available:true,mode_notes:{grid:{look_for:'等距',difference:'合成对照',fit:'direct'}}}],
+    source_name:'合成素材',note:'仅用于测试',
+   }}));
+   let loseLocalResponse=true;
+   await page.route('**'+generatePath(id),async route=>{
+    const body=route.request().postDataJSON();
+    submitted.push(body);
+    if(body.ai_assisted){
+     const queued={id:jobId,design_id:id,kind:'generate',status:'QUEUED',phase:'queued'};
+     jobs.set(jobId,queued);
+     draft.active_job_id=jobId;
+     draft.active_job=queued;
+     return route.fulfill({json:queued});
+    }
+    if(loseLocalResponse){
+     loseLocalResponse=false;
+     await route.fetch();
+     return route.abort('connectionreset');
+    }
+    return route.continue();
+   });
+   await page.goto(url);
+   await page.getByRole('heading',{name:draft.name,exact:true}).waitFor();
+   const aiOption=page.getByRole('checkbox',{name:'AI搭配底纹与装饰',exact:true});
+   const selectReference=async()=>{
+    await page.getByRole('button',{name:'选择案例参考',exact:true}).click();
+    await page.getByRole('button',{name:'用于AI首稿参考',exact:true}).click();
+    await page.getByRole('button',{name:'取消案例参考',exact:true}).waitFor();
+   };
+   if(recovery_action)await selectReference();
+   const local=page.getByRole('button',{name:'改用本地合成',exact:true});
+   const generate=page.getByRole('button',{name:'生成首稿',exact:true});
+   await generate.click();
+   await page.getByRole('button',{name:'正在生成…',exact:true}).waitFor();
+   assert.equal(submitted.length,1);
+   assert.equal(submitted[0].ai_assisted,true);
+   if(recovery_action)assert.equal(submitted[0].reference_code,'QA-SYNTHETIC');
+   assert.equal(await local.count(),0,'a queued AI attempt never offers local recovery');
+   jobs.set(jobId,{id:jobId,design_id:id,kind:'generate',status:'FAILED',phase:'failed',error,recovery_action});
+   Object.assign(draft,{active_job_id:null,active_job:null,recovery_action});
+   if(recovery_action){
+    await page.getByText(policyText,{exact:true}).waitFor();
+    await local.waitFor();
+    assert.equal(await aiOption.isChecked(),true,'the failed AI job never changes the chosen mode');
+    await page.reload();
+    await page.getByRole('heading',{name:draft.name,exact:true}).waitFor();
+    await local.waitFor();
+    await selectReference();
+    assert.equal(submitted.length,1,'failed/reopened draft recovery waits for an explicit click');
+    await local.click();
+    const recover=page.getByRole('button',{name:'恢复提交',exact:true});
+    await recover.waitFor();
+    assert.equal(await local.count(),0,'uncertain local receipt is recovered using its existing key');
+    assert.equal(submitted.length,2);
+    const [ai,firstLocal]=submitted;
+    assert.notEqual(firstLocal.idempotency_key,ai.idempotency_key);
+    assert.deepEqual(firstLocal,{...ai,idempotency_key:firstLocal.idempotency_key,ai_assisted:false,reference_code:null},
+     'local recovery only changes the request key, AI mode and case reference');
+    for(const [field,value] of Object.entries(chosen))assert.deepEqual(firstLocal[field],value);
+    await recover.click();
+    await page.getByRole('link',{name:'下载循环单元',exact:true}).waitFor();
+    assert.equal(submitted.length,3);
+    assert.deepEqual(submitted[2],firstLocal,'a lost local receipt reuses the identical request');
+    assert.equal(draft.versions.length,1);
+    assert.equal(await local.count(),0);
+   }else{
+    await page.getByText(error,{exact:true}).waitFor();
+    assert.equal(await local.count(),0,'unrelated or uncertain provider failure cannot offer local recovery');
+    assert.equal(await page.getByText(policyText,{exact:true}).count(),0);
+    assert.equal(submitted.length,1);
+   }
+   assert.equal(works.length,beforeWorks);
+   assert.equal(writes.filter(write=>write.path==='/api/ribbon/designs').length,beforeCreates,
+    'never create a different work for local recovery');
+  }finally{
+   await page.close();
+  }
+ }
+ assert.deepEqual(errors,[]);
+ console.log(JSON.stringify({source:'synthetic_local_policy_recovery',checks:['terminal-and-reopened-draft',
+  'explicit-local-same-draft-and-selection','lost-local-receipt-same-key','ordinary-and-unknown-no-offer'],real_model_calls:0}));
+}
 async function choose(page,id){await page.getByRole('button',{name:'我的作品',exact:false}).click();await page.locator('.design-list-item').filter({has:page.getByText('合成作品 '+id,{exact:true})}).click();await page.getByRole('heading',{name:'合成作品 '+id,exact:true}).waitFor();}
 try{
  const page=await browser.newPage({viewport:{width:1366,height:768}});page.on('pageerror',e=>errors.push(String(e)));
@@ -182,6 +295,9 @@ try{
  if(process.argv.includes('--asset-recovery-only')){
   await page.close();
   await checkAssetRecovery();
+ }else if(process.argv.includes('--local-policy-recovery-only')){
+  await page.close();
+  await checkLocalPolicyRecovery();
  }else if(process.argv.includes('--creation-fence-only')){
   await page.close();
   for(const trigger of ['generate','newDesign']){

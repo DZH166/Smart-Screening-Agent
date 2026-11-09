@@ -424,7 +424,8 @@ def test_output_policy_block_after_retry_returns_the_guidance(monkeypatch):
     with pytest.raises(ProviderError) as error:
         provider._image({"x": 1}, "out.png")
     assert len(attempts) == 2
-    assert "自动重试一次" in str(error.value)
+    assert str(error.value) == MESSAGES['output_policy']
+    assert error.value.diagnostic['category'] == 'output_policy'
 
 
 @pytest.mark.parametrize("category", ["input_policy", "service", "rate_limit"])

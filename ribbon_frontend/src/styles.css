@@ -257,10 +257,12 @@ small {
   border-color: #eddbc9;
 }
 .asset-selection-notice,
+.draft-recovery-notice,
 .asset-selection-actions {
   flex-wrap: wrap;
 }
-.asset-selection-notice strong {
+.asset-selection-notice strong,
+.draft-recovery-notice strong {
   display: block;
   margin-bottom: 3px;
 }

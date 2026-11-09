@@ -527,6 +527,8 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
   const processing = !!design?.active_job_id || running(job),
     backgroundProcessing = running(backgroundJob),
     locked = busy || processing || !!pending || uploading || !!designTarget;
+  const offerLocalRecovery = design?.recovery_action === "compose_locally" &&
+    !design.current_version_id && !design.versions?.length && !processing && !pending && !designTarget;
   const isHistory = !!selected && selected.id !== design?.current_version_id;
   const shownProfile = selected?.snapshot?.output_profile;
   const selectedLoop = ["seamless-unit-v1","seamless-unit-v2","seamless-unit-v3"].includes(selected?.snapshot.loop?.engine || "");
@@ -573,6 +575,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
     !selectionUnavailable &&
     !assetRefreshRequired &&
     !layoutIssue;
+  const generationBlocked = creationUncertain || !ready || locked || backgroundProcessing;
   const changed =
     !!current &&
     (JSON.stringify(current.snapshot.asset_refs) !==
@@ -904,13 +907,14 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
             const updated = await api<Job>(`/jobs/${id}`, { signal: controller.signal });
             if (stale()) return;
             setJob(updated);
-            if (updated.status === "FAILED" && job?.status !== "FAILED")
-              setNotice({
+            if (updated.status === "FAILED" && job?.status !== "FAILED") {
+              setNotice(updated.recovery_action === "compose_locally" ? null : {
                 text:
                   updated.error ||
                   "此次处理未完成，已保存的版本仍可下载。",
                 type: "error",
               });
+            }
           }
         }
         if (backgroundJob && running(backgroundJob)) {
@@ -1132,14 +1136,20 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
       throw e;
     }
   }
-  async function generate() {
-    if (creationGate.current || locked || !ready) return;
+  async function generate(localOnly = false) {
+    if (creationGate.current || generationBlocked) return;
+    if (localOnly && (!offerLocalRecovery || designRef.current?.id !== design?.id)) return;
     // Capture choices before selecting the newly created, initially empty work.
     // Never write a new first draft into a saved work or a historical version.
     const chosen = structuredClone({...selection, pattern_roles: roleChoices ? roles : undefined});
+    const useAi = !localOnly && aiDraftEnabled;
     const request: GenerateRequest = {idempotency_key: crypto.randomUUID(), ...chosen,
-      ai_assisted: aiDraftEnabled, reference_code: draftReference?.code || null};
+      ai_assisted: useAi, reference_code: useAi ? draftReference?.code || null : null};
     await action(async () => {
+      if (localOnly) {
+        setAiDraftChoice(false);
+        setAiDraftReference(null);
+      }
       let d = design;
       if (!d || d.current_version_id || d.versions?.length) {
         d = await createWork(`丝带设计 ${new Date().toLocaleDateString("zh-CN")}`);
@@ -1481,6 +1491,16 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
             >
               <Icon name="close" size={15} />
             </button>
+          </div>
+        )}
+        {!loading && !initError && offerLocalRecovery && (
+          <div className="notice error draft-recovery-notice" role="alert">
+            <div>
+              <strong>AI 搭配结果未通过审核</strong>
+              <div>可以用当前图案、底图和排版直接生成。</div>
+            </div>
+            <button type="button" className="secondary small" disabled={generationBlocked}
+              onClick={() => void generate(true)}>改用本地合成</button>
           </div>
         )}
         {!loading && !initError && (selectionUnavailable || assetRefreshRequired) && (
@@ -1836,7 +1856,7 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                   <div className="workspace-actions">
                     <button
                       className="primary generation-button"
-                      disabled={creationUncertain || !ready || locked || backgroundProcessing}
+                      disabled={generationBlocked}
                       aria-describedby={selectionUnavailable || assetRefreshRequired ? "ribbon-asset-issue" : layoutIssue ? "ribbon-layout-issue" : undefined}
                       onClick={() => void generate()}
                     >
@@ -1845,7 +1865,8 @@ function Workspace({ user, onLogout, active, view }: WorkspaceProps & { user: Us
                       ) : (
                         <Icon name="spark" />
                       )}
-                      {busy ? "正在提交…" : processing ? "正在生成…" : current || design?.versions?.length ? "生成新作品" : "生成首稿"}
+                      {busy ? "正在提交…" : processing ? "正在生成…" : current || design?.versions?.length ? "生成新作品" :
+                        offerLocalRecovery && aiDraftEnabled ? "重新用 AI 生成" : "生成首稿"}
                       <Icon name="arrow" size={16} />
                     </button>
                     {selected && (<div className="result-actions">

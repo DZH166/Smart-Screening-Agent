@@ -10,6 +10,7 @@ new public admission is tested through generate and the explicit410 contract.
 from legacy_jobs import recover_legacy_refinement, seed_accepted_refinement
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
+from dataclasses import replace
 from io import BytesIO
 import hashlib
 import json
@@ -27,6 +28,7 @@ from ribbon_backend import loop_background, loop_pipeline
 from ribbon_backend.loop_layout import ENGINE
 from ribbon_backend.providers import ProviderError, TestProvider as SyntheticProvider
 from ribbon_backend.service import Service, ServiceError
+from hsd_tool.provider_diagnostics import MESSAGES, diagnostic
 
 
 def png(size, color, *, pattern=True, marker=0):
@@ -332,7 +334,9 @@ def test_ai_draft_calls_once_under_concurrent_replay_and_keeps_all_original_inpu
 
 @pytest.mark.parametrize('uncertain', (False, True))
 def test_failed_ai_draft_never_becomes_library_fallback_or_repeats_unknown_call(env, uncertain):
-    env.provider.draft_failure = ProviderError('Explicit synthetic image failure', uncertain_result=uncertain)
+    category = 'output_policy' if uncertain else 'input_policy'
+    env.provider.draft_failure = ProviderError('Explicit synthetic image failure', uncertain_result=uncertain,
+                                               details=diagnostic(category, 'provider'))
     design = env.create()
     body = dict(env.selection, idempotency_key=str(uuid4()), ai_assisted=True)
     job = ok(env.client.post(f'/api/designs/{design["id"]}/generate', json=body))
@@ -341,10 +345,90 @@ def test_failed_ai_draft_never_becomes_library_fallback_or_repeats_unknown_call(
     latest = env.get(design)
     assert latest['versions'] == [] and latest['successful_refinement_count'] == 0
     assert latest['current_version_id'] is None and latest['active_job_id'] is None
+    assert 'recovery_action' not in result and 'recovery_action' not in latest
     replay = ok(env.client.post(f'/api/designs/{design["id"]}/generate', json=body))
     assert replay['id'] == job['id'] and replay['status'] == 'FAILED'
     assert env.service.run_once() is False
     assert len(env.provider.draft_calls) == 1
+
+
+def test_settled_draft_output_review_can_be_recovered_locally_on_the_same_draft(workflow, monkeypatch):
+    from hsd_tool.material_ark import ENDPOINT, HttpReply
+    from ribbon_backend.providers import get_provider
+
+    settings = replace(workflow.service.settings, provider='deepseek_seedream',
+                       ark_key='private-test-key', image_model='doubao-seedream-5-0-flash-test')
+    provider = get_provider(settings)
+    monkeypatch.setattr(workflow.service, 'runtime_settings_supplier', lambda: settings)
+    monkeypatch.setattr(workflow.service, 'provider_factory', lambda *args: provider)
+    dispatches = []
+
+    def reject_output(*args, **kwargs):
+        dispatches.append(f'synthetic-output-rejection-{len(dispatches) + 1}')
+        body = json.dumps({'error': {'code': 'OutputImageSensitiveContentDetected',
+                                     'message': 'private upstream response'}}).encode()
+        return HttpReply(400, body, {'x-request-id': dispatches[-1]}, ENDPOINT)
+
+    monkeypatch.setattr(provider.ark, '_transport', reject_output)
+    draft = workflow.create()
+    path = f'/api/designs/{draft["id"]}/generate'
+    ai_request = dict(workflow.selection, idempotency_key=str(uuid4()), ai_assisted=True)
+    ai_job = ok(workflow.client.post(path, json=ai_request))
+    failed = workflow.work(ai_job)
+    assert failed['status'] == 'FAILED' and failed['recovery_action'] == 'compose_locally'
+    assert failed['error'] == MESSAGES['output_policy']
+    blank = workflow.get(draft)
+    assert blank['versions'] == [] and blank['active_job_id'] is None
+    assert blank['recovery_action'] == 'compose_locally'
+
+    # A retained job can contain pre-upgrade wording. Its classified ledger
+    # provides the recovery action and safe public copy after reopening.
+    with workflow.service.db.transaction() as db:
+        db.execute('UPDATE jobs SET error=? WHERE id=?', ('obsolete speculative error', ai_job['id']))
+        calls = list(db.execute('SELECT * FROM provider_calls ORDER BY rowid'))
+    assert len(calls) == len(dispatches) == 2
+    assert [r['request_id'] for r in calls] == dispatches
+    assert all(r['operation'] == 'design_background' and r['status'] == 'FAILED' for r in calls)
+    assert all(json.loads(r['error'])['category'] == 'output_policy' for r in calls)
+    accepted = ok(workflow.client.get(f'/api/jobs/by-request/{ai_request["idempotency_key"]}'))
+    assert accepted['recovery_action'] == 'compose_locally' and accepted['error'] == MESSAGES['output_policy']
+    with TestClient(workflow.client.app) as other:
+        ok(other.post('/api/auth/login', json=dict(username='client', password='client12345')))
+        assert other.get(f'/api/jobs/{ai_job["id"]}').status_code == 404
+        assert other.get(f'/api/designs/{draft["id"]}').status_code == 404
+
+    local_request = dict(workflow.selection, idempotency_key=str(uuid4()), ai_assisted=False)
+    local_job = ok(workflow.client.post(path, json=local_request))
+    assert 'recovery_action' not in workflow.get(draft)
+    assert 'recovery_action' not in ok(workflow.client.get(f'/api/jobs/{ai_job["id"]}'))
+    assert workflow.work(local_job)['status'] == 'SUCCEEDED'
+    completed = workflow.get(draft)
+    assert completed['id'] == draft['id'] and len(completed['versions']) == 1
+    assert 'recovery_action' not in completed
+    version = current(completed)
+    assert version['snapshot']['background_ref'] == workflow.selection['background_id']
+    assert workflow.download(version).startswith(b'\x89PNG')
+    assert len(dispatches) == 2
+    with workflow.service.db.connect() as db:
+        assert db.execute('SELECT COUNT(*) FROM provider_calls').fetchone()[0] == 2
+
+
+def test_latest_non_policy_failure_supersedes_old_output_review_entry(workflow):
+    draft = workflow.create()
+    path = f'/api/designs/{draft["id"]}/generate'
+    selection = dict(workflow.selection, ai_assisted=True)
+    for category in ('output_policy', 'input_policy'):
+        workflow.provider.draft_failure = ProviderError(MESSAGES[category], details=diagnostic(category))
+        job = ok(workflow.client.post(path, json={**selection, 'idempotency_key': str(uuid4())}))
+        failed = workflow.work(job)
+        assert failed['status'] == 'FAILED'
+        if category == 'output_policy':
+            first_job = job
+            assert failed['recovery_action'] == 'compose_locally'
+        else:
+            assert 'recovery_action' not in failed
+    assert 'recovery_action' not in workflow.get(draft)
+    assert 'recovery_action' not in ok(workflow.client.get(f'/api/jobs/{first_job["id"]}'))
 
 
 @pytest.mark.parametrize('legacy_engine', ('design-rhythm-v1', 'design-rhythm-v2'))

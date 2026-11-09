@@ -154,6 +154,7 @@ export type Job = {
   attempt: number;
   provider: string;
   error: string | null;
+  recovery_action?: "compose_locally";
   result_version_id: string | null;
   result_asset_id: string | null;
   created_at: string;
@@ -168,6 +169,7 @@ export type Design = {
   revision: number;
   versions: Version[];
   active_job: Job | null;
+  recovery_action?: "compose_locally";
   deleted_at?: number | null;
 };
 export type ProviderCall = {
